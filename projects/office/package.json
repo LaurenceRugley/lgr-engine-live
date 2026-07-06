@@ -1,0 +1,19 @@
+{
+  "name": "@lgr/office",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "John's office app — the warm executive office interior (the dive destination). Standalone page deploys to /office/; also consumed by the city showcase (which imports createOffice).",
+  "main": "office.js",
+  "exports": {
+    ".": "./office.js"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lgr/engine-core": "*"
+  }
+}

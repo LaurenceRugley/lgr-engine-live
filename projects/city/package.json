@@ -1,0 +1,17 @@
+{
+  "name": "@lgr/city",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The CITY showcase — the engine playground (the public /live/ demo). Renders the procedural city + all styles/weather/day-night, with the office-dive (?office=1) + The Hoard (?hoard=1) reachable.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lgr/engine-core": "*",
+    "@lgr/office": "*",
+    "@lgr/hoard": "*"
+  }
+}

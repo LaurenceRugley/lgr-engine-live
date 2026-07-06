@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- L41: inline SVG favicon (zero extra request). -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e0b07'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='18' font-weight='700' fill='%23b89968' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E" />
+  <title>LGR — The Hoard</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0e0b07; overflow: hidden; }
+    canvas { display: block; }       /* three.js appends the canvas here */
+    /* L110 (audit B13): ported the city's L106 footer treatment — off-white on a dark backplate reads over a bright
+       scene; the old faint-gold (rgba(184,153,104,.75), no plate) was unreadable. Wiring drift of the city fix. */
+    .hint {
+      position: fixed; left: 16px; bottom: 14px; z-index: 1;
+      font: 11px/1.6 ui-monospace, monospace; letter-spacing: 0.05em;
+      color: rgba(245, 238, 224, 0.94); text-transform: uppercase;
+      background: rgba(13, 17, 25, 0.62); padding: 6px 12px; border-radius: 8px;
+      border: 0.5px solid rgba(232, 192, 105, 0.28); backdrop-filter: blur(3px);
+      max-width: min(92vw, 720px); pointer-events: none;
+    }
+    /* L41 BRANDED LOADER — painted from the shell before the JS bundle loads; createEngine fades it on frame 1. */
+    #lgr-loader { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px; background: #0e0b07;
+      color: rgba(184,153,104,0.85); font: 600 12px/1 ui-monospace, monospace; letter-spacing: 0.22em;
+      transition: opacity .5s ease; }
+    #lgr-loader.gone { opacity: 0; pointer-events: none; }
+    #lgr-loader .mark { font: 700 36px/1 Georgia, serif; letter-spacing: 0.08em; color: #b89968; }
+    #lgr-loader .spin { width: 26px; height: 26px; border: 2px solid rgba(184,153,104,0.22);
+      border-top-color: #b89968; border-radius: 50%; animation: lgrspin .9s linear infinite; }
+    @keyframes lgrspin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { #lgr-loader .spin { animation: none; border-top-color: rgba(184,153,104,0.22); } }
+    /* L106 a11y: high-contrast keyboard focus ring (engine-wide — every project shell gets it, no wiring-drift). */
+    :focus-visible { outline: 2px solid #f3c97a; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <div id="lgr-loader"><div class="mark">LGR</div><div class="spin"></div><div>LOADING…</div></div>
+  <!-- Standalone HOARD page (deploys to /hoard/) — its own lean app on @lgr/engine-core. -->
+  <script type="module" src="./main.js"></script>
+  <div class="hint">THE HOARD · WASD / drag to move · click / hold to fire · survive the waves · I bag &amp; crafting</div>
+</body>
+</html>

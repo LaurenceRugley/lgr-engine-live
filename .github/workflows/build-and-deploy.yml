@@ -1,0 +1,74 @@
+name: build-and-deploy
+# Self-building public engine demo (LGR WebGL engine — the city demo at /live/).
+# Source is synced from the private lab; this repo builds and deploys ITSELF via the
+# GitHub Actions Pages source — the managed "pages build and deployment" job is never
+# provisioned for this repo. NOTE: the github-pages ENVIRONMENT LOCK still exists — a
+# stuck deploy is cleared from THIS repo's Deployments view (first-party), not by
+# re-running the workflow. Spec: lgr-webgl-lab/docs/deploy-permanent-fix-2026-07-05.md.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # manual re-run — for build/artifact failures; NOT a lock-clear
+
+permissions:
+  contents: read          # workflow-level floor; deploy job elevates below
+
+concurrency:
+  group: pages
+  cancel-in-progress: false   # never abort a mid-flight publish
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read            # build needs nothing more — minimality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'   # exact Node pin — CI build must match the studio machine
+          cache: npm
+
+      # npm-workspaces monorepo: ci links all 4 workspaces (engine-core + city/office/hoard);
+      # city's build bundles @lgr/office + @lgr/hoard as deps (the in-app dive/game modes).
+      # We PUBLISH /live/ (city) only — office/hoard standalone pages are retired (2026-07-05).
+      # NOTE: a green build is NOT proof shaders compile — the GPU compiles at runtime; the
+      # lab's smoke gate covers that pre-push. This workflow only packages + deploys.
+      - name: Install + build the city demo
+        run: |
+          npm ci
+          npm run build:city
+
+      - name: Assemble site (/live/ = the city demo)
+        run: |
+          rm -rf _site
+          mkdir -p _site/live
+          cp -R projects/city/dist/* _site/live/
+          touch _site/.nojekyll            # keep _-prefixed Vite asset dirs
+          cat > _site/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8">
+          <meta http-equiv="refresh" content="0; url=live/">
+          <title>LGR Engine — live demo</title>
+          <a href="live/">LGR engine live demo →</a>
+          EOF
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write              # deploy authority scoped to THIS job only
+      id-token: write           # OIDC for deploy-pages, scoped to THIS job only
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

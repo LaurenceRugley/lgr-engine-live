@@ -1,0 +1,29 @@
+{
+  "name": "lgr-webgl-lab",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "LGR WebGL Lab — an npm-workspaces monorepo: a reusable @lgr/engine-core + per-project apps (city showcase, John's office, The Hoard). Built end-to-end for learning Three.js + GLSL.",
+  "workspaces": [
+    "packages/*",
+    "projects/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard",
+    "build:city": "npm run build -w projects/city",
+    "build:office": "npm run build -w projects/office",
+    "build:hoard": "npm run build -w projects/hoard",
+    "dev": "npm run dev -w projects/city",
+    "preview": "npm run preview -w projects/city",
+    "tier-guard": "node tools/tier-guard.mjs --serve projects/city/dist",
+    "tier-guard:update": "node tools/tier-guard.mjs --update --serve projects/city/dist",
+    "smoke": "node tools/smoke.mjs",
+    "dive-probe": "node tools/dive-probe.mjs",
+    "asset-factory": "node asset-factory/process.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0",
+    "vite": "^8.0.14",
+    "vite-plugin-glsl": "^1.6.0"
+  }
+}

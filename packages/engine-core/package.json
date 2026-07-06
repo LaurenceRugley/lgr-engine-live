@@ -1,0 +1,14 @@
+{
+  "name": "@lgr/engine-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LGR WebGL engine core — createEngine() + the city/water/post stack, the day-night SunRig, weather, the pixel/toon style chain, and the viewer control-bar. The shared library every project links.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "three": "^0.184.0"
+  }
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- L41: inline SVG favicon (zero extra request; also kills the intermittent /live/ favicon 404). -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e0b07'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='18' font-weight='700' fill='%23b89968' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E" />
+  <title>LGR WebGL Lab — fly a hand-built procedural city</title>
+  <!-- L106 (audit trend NEED) — the prospect link's first impression: description · theme-colour · Open Graph + Twitter
+       card (a real image for Slack/iMessage/Twitter/LinkedIn previews) · noscript floor. og:image is ABSOLUTE (crawlers
+       need a full URL); it resolves at the /live/ deploy path (og.jpg ships from projects/city/public/ → dist root). -->
+  <meta name="description" content="A hand-built WebGL engine: a procedural city you fly a helicopter over, with an art style that morphs from cinematic-realistic to pixel-art. Tap or press F to seize the flight." />
+  <meta name="theme-color" content="#0e0b07" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Fly a hand-built procedural city — LGR WebGL Lab" />
+  <meta property="og:description" content="Land on the page, seize a helicopter mid-flight, and pilot it over a procedural city whose art style morphs from realistic to pixel-art. Built end to end in WebGL." />
+  <meta property="og:url" content="https://laurencerugley.github.io/lgr-city-engine-demo/live/" />
+  <meta property="og:image" content="https://laurencerugley.github.io/lgr-city-engine-demo/live/og.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="A helicopter flying over a procedural city at golden hour, rendered by the hand-built LGR WebGL engine." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Fly a hand-built procedural city — LGR WebGL Lab" />
+  <meta name="twitter:description" content="Seize a helicopter mid-flight and pilot it over a procedural city whose art style morphs from realistic to pixel-art. Built end to end in WebGL." />
+  <meta name="twitter:image" content="https://laurencerugley.github.io/lgr-city-engine-demo/live/og.jpg" />
+  <meta name="twitter:image:alt" content="A helicopter flying over a procedural city at golden hour, rendered by the hand-built LGR WebGL engine." />
+  <style>
+    html, body { margin: 0; height: 100%; background: #0e0b07; overflow: hidden; }
+    canvas { display: block; }       /* three.js appends the canvas here */
+    .hint {
+      position: fixed; left: 16px; bottom: 14px; z-index: 1;
+      font: 11px/1.6 ui-monospace, monospace; letter-spacing: 0.05em;
+      color: rgba(245, 238, 224, 0.94); text-transform: uppercase;     /* L106: off-white, not faint gold — was unreadable over a bright scene */
+      background: rgba(13, 17, 25, 0.62); padding: 6px 12px; border-radius: 8px;   /* L106: a dark backplate so it pops over any sky */
+      border: 0.5px solid rgba(232, 192, 105, 0.28); backdrop-filter: blur(3px);
+      max-width: min(92vw, 720px); pointer-events: none;
+    }
+    /* L41 BRANDED LOADER — painted from the page shell IMMEDIATELY (before the ~500 kB JS bundle even
+       loads), so slow/mobile visitors see an on-brand mark instead of a blank dark canvas. createEngine
+       adds .gone on the first rendered frame. prefers-reduced-motion → no spin (static mark). */
+    #lgr-loader { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px; background: #0e0b07;
+      color: rgba(184,153,104,0.85); font: 600 12px/1 ui-monospace, monospace; letter-spacing: 0.22em;
+      transition: opacity .5s ease; }
+    #lgr-loader.gone { opacity: 0; pointer-events: none; }
+    #lgr-loader .mark { font: 700 36px/1 Georgia, serif; letter-spacing: 0.08em; color: #b89968; }
+    #lgr-loader .spin { width: 26px; height: 26px; border: 2px solid rgba(184,153,104,0.22);
+      border-top-color: #b89968; border-radius: 50%; animation: lgrspin .9s linear infinite; }
+    @keyframes lgrspin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { #lgr-loader .spin { animation: none; border-top-color: rgba(184,153,104,0.22); } }
+    /* L106 a11y (WCAG 2.4.7/2.4.13): a high-contrast keyboard focus ring for ALL controls (pilot d-pad, coach, dev panel, the canvas) — was the browser default over dark glass, ~invisible. */
+    :focus-visible { outline: 2px solid #f3c97a; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <!-- L41: branded loading screen, shown before the JS bundle resolves; createEngine fades it on frame 1. -->
+  <div id="lgr-loader"><div class="mark">LGR</div><div class="spin"></div><div>LOADING…</div></div>
+  <!-- L106: no-JS floor — the whole engine is WebGL/JS, so a JS-off visitor gets a clear on-brand message, not a blank canvas. -->
+  <noscript><div style="position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0e0b07;color:#e8c069;font:600 14px/1.6 ui-monospace,monospace;text-align:center;padding:24px;"><div style="font:700 36px/1 Georgia,serif;color:#b89968;">LGR</div><div style="color:#f4ece0;max-width:32ch;">This is a live WebGL engine — a procedural city you fly a helicopter over. It needs JavaScript enabled in an up-to-date browser.</div></div></noscript>
+  <!-- This is the ONLY hand-written HTML. Everything visual is built in JS/WebGL.
+       The `type="module"` script is the entry point Vite compiles + bundles. -->
+  <script type="module" src="./main.js"></script>
+  <div class="hint">LGR WebGL Lab · <b style="color:#f3c97a">press F to fly</b> · WASD / drag to move &amp; look · click a building to dive in · Esc exits · T time · G reroll · C city · 7/8 style · 0 vector · M hides this</div>
+</body>
+</html>

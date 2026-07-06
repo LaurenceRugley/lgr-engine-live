@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LGR PixelKit — image pixelator</title>
+  <style>
+    :root { --ink:#0e0b07; --gold:#b89968; --panel:#16120c; }
+    html,body { margin:0; height:100%; background:var(--ink); overflow:hidden;
+      font:13px/1.5 ui-monospace, monospace; color:var(--gold); }
+    /* Stage holds the WebGL canvas, centred; canvas is sized to the image aspect. */
+    #stage { position:fixed; inset:0; display:grid; place-items:center; }
+    #stage canvas { image-rendering:pixelated; max-width:96vw; max-height:96vh;
+      box-shadow:0 10px 60px rgba(0,0,0,.6); }
+    /* Drop hint shown until an image is loaded. */
+    #drop { position:fixed; inset:0; display:grid; place-items:center; z-index:2;
+      pointer-events:none; text-align:center; letter-spacing:.08em; text-transform:uppercase;
+      color:rgba(184,153,104,.6); }
+    #drop.hide { display:none; }
+    #drop.over { background:rgba(184,153,104,.06); color:var(--gold); }
+    /* Controls panel. */
+    #panel { position:fixed; top:14px; left:14px; z-index:3; width:236px;
+      background:rgba(22,18,12,.92); border:1px solid rgba(184,153,104,.25);
+      border-radius:8px; padding:14px; backdrop-filter:blur(6px); }
+    #panel h1 { font-size:12px; margin:0 0 10px; letter-spacing:.12em; text-transform:uppercase; }
+    .row { display:flex; justify-content:space-between; align-items:center; margin:8px 0; gap:8px; }
+    .row label { opacity:.8; }
+    select, input[type=range], button, input[type=file] { font:inherit; color:var(--gold); }
+    select, button { background:#241c12; border:1px solid rgba(184,153,104,.3);
+      border-radius:5px; padding:4px 6px; cursor:pointer; }
+    button { width:100%; margin-top:6px; }
+    input[type=range] { width:120px; accent-color:var(--gold); }
+    #swatches { display:flex; flex-wrap:wrap; gap:2px; margin-top:8px; }
+    #swatches i { width:14px; height:14px; border-radius:2px; display:block; }
+    .note { opacity:.55; font-size:11px; margin-top:10px; }
+    #file { display:none; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="drop">drop an image here<br>(or click to pick) — then export pixel art</div>
+
+  <div id="panel">
+    <h1>LGR PixelKit</h1>
+    <div class="row"><label>Era</label>
+      <select id="era">
+        <option value="1-bit">1-bit</option>
+        <option value="8-bit" selected>8-bit</option>
+        <option value="16-bit">16-bit</option>
+        <option value="modern">modern</option>
+      </select>
+    </div>
+    <div class="row"><label>Grid</label><input id="grid" type="range" min="32" max="512" value="160"></div>
+    <div class="row"><label>Dither</label><input id="dither" type="range" min="0" max="100" value="55"></div>
+    <div class="row"><label>Palette</label>
+      <!-- 'era' + 'extract' are static; the named LGR_PALETTES are appended by pixelate.js (L47). -->
+      <select id="palette">
+        <option value="era" selected>era default</option>
+        <option value="extract">extract from image</option>
+      </select>
+    </div>
+    <div id="swatches"></div>
+    <button id="export">Export PNG (grid resolution)</button>
+    <button id="pick">Load image…</button>
+    <input id="file" type="file" accept="image/*">
+    <div class="note">3D scene in, game-ready pixel art out. Eras emulate bit-depth limits;
+      "extract" runs median-cut on your image.</div>
+  </div>
+
+  <script type="module" src="./pixelate.js"></script>
+</body>
+</html>

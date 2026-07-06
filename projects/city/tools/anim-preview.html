@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LGR Sprite-Anim Preview — drop a sheet, see it move</title>
+  <style>
+    /* L56 dev tool (sibling of tools/pixelate.html): load a sprite SHEET + frame params and preview the
+       SAME engine-core animator the gulls use. Dev-only — proves the "generate → drop → poke" loop. */
+    :root { --ink:#0e0b07; --gold:#b89968; --panel:#16120c; }
+    html,body { margin:0; height:100%; background:var(--ink); overflow:hidden;
+      font:13px/1.5 ui-monospace, monospace; color:var(--gold); }
+    #stage { position:fixed; inset:0; display:grid; place-items:center; }
+    #stage canvas { box-shadow:0 10px 60px rgba(0,0,0,.6); }
+    #drop { position:fixed; inset:0; display:grid; place-items:center; z-index:2;
+      pointer-events:none; text-align:center; letter-spacing:.08em; text-transform:uppercase;
+      color:rgba(184,153,104,.6); }
+    #drop.over { background:rgba(184,153,104,.06); color:var(--gold); }
+    #panel { position:fixed; top:14px; left:14px; z-index:3; width:248px;
+      background:rgba(22,18,12,.92); border:1px solid rgba(184,153,104,.25);
+      border-radius:8px; padding:14px; backdrop-filter:blur(6px); }
+    #panel h1 { font-size:12px; margin:0 0 10px; letter-spacing:.12em; text-transform:uppercase; }
+    .row { display:flex; justify-content:space-between; align-items:center; margin:8px 0; gap:8px; }
+    .row label { opacity:.8; }
+    select, input, button { font:inherit; color:var(--gold); }
+    input[type=number] { width:64px; background:#241c12; border:1px solid rgba(184,153,104,.3); border-radius:5px; padding:3px 5px; }
+    button { background:#241c12; border:1px solid rgba(184,153,104,.3); border-radius:5px; padding:5px 8px; cursor:pointer; width:100%; margin-top:6px; }
+    input[type=range] { width:120px; accent-color:var(--gold); }
+    .note { opacity:.55; font-size:11px; margin-top:10px; }
+    #err { color:#e0654a; font-size:11px; margin-top:8px; min-height:14px; }
+    #file { display:none; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="drop">drop a sprite-sheet PNG here<br/>(or use a test sheet)</div>
+  <div id="panel">
+    <h1>Sprite-Anim Preview</h1>
+    <div class="row"><label>cols</label><input id="cols" type="number" min="1" value="4" /></div>
+    <div class="row"><label>rows</label><input id="rows" type="number" min="1" value="1" /></div>
+    <div class="row"><label>fps</label><input id="fps" type="number" min="1" value="7" /></div>
+    <div class="row"><label>frame</label><input id="scrub" type="range" min="0" max="3" step="1" value="0" /></div>
+    <div class="row"><label>now</label><span id="frameLbl">0</span></div>
+    <button id="play">⏸ pause</button>
+    <button id="test">▦ generate test sheet</button>
+    <button id="load">📂 load PNG sheet…</button>
+    <input id="file" type="file" accept="image/png,image/*" />
+    <div id="err"></div>
+    <div class="note">Same <code>createSpriteAnim</code> the gulls use. Loads a horizontal strip
+      (rows=1) or a 2D grid. Nearest-filtered (no inter-frame bleed).</div>
+  </div>
+  <script type="module" src="./anim-preview.js"></script>
+</body>
+</html>
