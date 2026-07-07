@@ -263,7 +263,7 @@ export function createCelestials({ R = 88, sunSize = 6.0, moonSize = 5.5 } = {})
     // the whole frame → a plain-white sprite reads DIM there (lum ~164) vs the stylized tiers' un-tone-mapped sprite (~238).
     // So on realistic we push the core to HDR (>1) so ACES rolls it back UP to a hot sun → consistent brightness across the
     // tier morph (no jump). The stylized tiers keep the LDR core (no ACES there).
-    if (realisticTier) sun.material.color.multiplyScalar(3.0);
+    if (realisticTier) sun.material.color.multiplyScalar(3.0 * (1 - 0.55 * lowSunWashK(arc.y)));   // L-dusk-washout-r2: damp HDR at low sun (3.0→1.35× at peak t≈0.72; noon lowSunWashK=0 → 3.0× unchanged)
     sunGlow.material.color.copy(GLOW_WARM).lerp(GLOW_LOW, horizonK);    // the hue lives in the glow
     sun.material.opacity = sVis;                                        // sprite sun ON for every tier (occlusion-fixed)
     // L108 (Deliverable B 4c): RESTORE the realistic sprite-glow toward full (was ×0.5 on the "Preetham double-glow"
