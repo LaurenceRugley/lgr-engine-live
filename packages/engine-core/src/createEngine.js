@@ -1031,6 +1031,12 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
   const beautyRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     depthBuffer: true, stencilBuffer: false, samples: 4,
+    // L-dusk-washout-r4 — TRUE HDR beauty buffer. The ACES filmic pass is explicitly built to map "unbounded HDR →
+    // filmic [0,1]" (post-filmic.frag) and god-rays are "added in HDR before tonemap" — but this RT defaulted to 8-bit
+    // UnsignedByte, so every over-1.0 value (bright dusk sky, sun-lit ground) CLAMPED FLAT to [0,1] BEFORE ACES ever ran
+    // → the flat cream washout at low sun. HalfFloat lets the real HDR reach the tonemap = the pipeline works as designed.
+    // Beauty-ONLY (pixel/toon/vector render to the separate `sceneRT`) → the byte-identical tier-guard is untouched.
+    type: THREE.HalfFloatType,
   });
   /* Style-LOD crossfade buffers: in the transition band we render BOTH styles to
      their own targets, then post-mix.frag lerps them. Outside the band only one
@@ -1647,7 +1653,7 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
       sp.mieG      = Math.max(0.50, sp.mieG - 0.25 * _lw);       // L-dusk-washout-r2: narrow the forward-scatter peak → less flat peachy haze at the into-sun view
     }
     skyAtmo.setSun(sunRig.sunArc); skyAtmo.setParams(sunRig.skyParams);   // L66: drive the Preetham sky (one clock)
-    skyAtmo.setLowSunKnee(lowSunWashK(sunRig.sunArc.y));   // L-dusk-washout-r3: low-sun highlight knee (0 at noon → byte-identical)
+    skyAtmo.setLowSunKnee(0);   // L-dusk-washout-r4: the R3 knee is SUPERSEDED by the HalfFloat HDR buffer (ACES now tone-maps the real HDR) — disabled; knee code kept as a no-op, removed once HDR is confirmed live
     filmicMaterial.uniforms.uGradeSat.value = sunRig.grade.sat;           // L67: grade saturation (tint/lift are by-ref)
     filmicMaterial.uniforms.uGradeContrast.value = sunRig.grade.contrast; // L69: grade contrast (crisp noon)
     // L68 item 0: ease the sky-IBL DOWN at high sun (noon) — when the direct key light dominates + the sky is

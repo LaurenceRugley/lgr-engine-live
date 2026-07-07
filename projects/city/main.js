@@ -1291,7 +1291,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'o' || e.key === 'O') { if (sceneMode === 'city') enterOffice(); else exitOffice(); }
   if (e.key === 'x' || e.key === 'X') { if (sceneMode === 'hoard') exitHoard(); else if (sceneMode === 'city') enterHoard(); }  // L32: toggle the Hoard
   // L23: F swaps the office FITOUT (corner ⇄ basement) — only meaningful while inside the office.
-  if ((e.key === 'f' || e.key === 'F') && sceneMode !== 'city') toggleFitout();
+  if ((e.key === 'f' || e.key === 'F') && sceneMode !== 'city' && sceneMode !== 'hoard') toggleFitout();   // B13: guard hoard mode (was: !==city only, so Hoard-F triggered a confusing fitout toast)
   if (e.key === 'j' || e.key === 'J') cycleOfficeSkin();        // L29: cycle the office skin (3d→smooth→charm)
   if (e.key === 'u' || e.key === 'U') toggleOfficeProps();      // L30: painted ↔ live-3D props (under a skin)
   // L20: M minimizes / restores the viewer bar (so you can watch the scene unobstructed).
