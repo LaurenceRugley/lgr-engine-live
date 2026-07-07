@@ -66,9 +66,11 @@ import { createPlanarReflection } from './planar-reflection.js';   // L108: the 
 const lowSunWashK = (y) => THREE.MathUtils.smoothstep(y, 0.02, 0.20) * (1 - THREE.MathUtils.smoothstep(y, 0.45, 0.70));
 
 // L112 — the NIGHT factor (beauty-only): 0 in full day INCLUDING noon (the byte-identical anchor), ramping to 1
-// as the sun drops below the horizon across the dusk window (t≈0.72→0.78, sunArc.y +0.22→−0.02). Mirrors the
-// lowSunWashK/midK family. Drives the dusk/night city lights (windows bloom + warm street fill).
-const sunDownK = (y) => 1.0 - THREE.MathUtils.smoothstep(y, -0.02, 0.22);
+// as the sun drops below the horizon across the dusk window (t≈0.65→0.78, sunArc.y +0.45→−0.02). Upper bound
+// widened from 0.22→0.45 (L-night-fill fix): sunDownK now ramps in DURING dusk (re-syncing with windowGlow which
+// already emits from t≈0.62), so building facades gain fill + bloom-halo before full dark. Noon (y≈0.765 > 0.45)
+// stays sunDownK=0 → byte-identical tier-guard still passes. Mirrors the lowSunWashK/midK family.
+const sunDownK = (y) => 1.0 - THREE.MathUtils.smoothstep(y, -0.02, 0.45);
 const NIGHT_STREET_WARM = new THREE.Color('#3a2c22');   // L112 A-ii: warm ambient the night hemi-fill leans toward (lights building faces → the city gets FORM)
 // L114 fix D: WRAP the water clock here. uTime feeds foam `sin(uTime*0.9)` (SMOOTH) + glint `hash21(floor(uTime*10))` +
 // foam-churn `hash21(vUv*512+uTime)` (both NOISE). Unbounded `elapsed` pushed the hash inputs into float32 ulp → the
