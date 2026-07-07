@@ -209,6 +209,7 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
     state.z += c * state.speed * dt;
 
     const terrainY = world.heightAt(state.x, state.z);
+    const waterY = world.waterHeightAt ? world.waterHeightAt(state.x, state.z) : NO_WATER;
     if (medium === 'ground' && axes.lift <= 0) {
       // GROUND: settle onto the terrain + orient to the slope (reuse the ATV's terrain-follow). Throttle-up
       // (lift>0) is handled by the airborne branch → lifts back off into AIR.
@@ -227,6 +228,8 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
       state.vy = clamp(state.vy, -profile.maxV, profile.maxV);
       state.y += state.vy * dt;
       if (state.y < terrainY) { state.y = terrainY; if (state.vy < 0) state.vy = 0; }   // can't sink through the ground
+      // WATER SURFACE FLOOR: only block DOWNWARD motion — positive lift always escapes, no sticky latch.
+      if (waterY > NO_WATER && state.y < waterY) { state.y = waterY; if (state.vy < 0) state.vy = 0; }
       // ORIENT: a saucer — yaw + a partial BANK into turns + a little PITCH from climb/dive. Small cosmetic angles,
       // so an Euler→quaternion build is safe (gimbal lock only bites near ±90° pitch, which we never reach).
       // L110 (HOTFIX): the cosmetic BANK sign flips WITH the yaw flip above, so the craft still leans INTO the (now

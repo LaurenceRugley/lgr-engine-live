@@ -9,16 +9,20 @@
     "projects/*"
   ],
   "scripts": {
-    "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard",
+    "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard && npm run build -w projects/showcase-lab",
     "build:city": "npm run build -w projects/city",
     "build:office": "npm run build -w projects/office",
     "build:hoard": "npm run build -w projects/hoard",
+    "build:showcase-lab": "npm run build -w projects/showcase-lab",
     "dev": "npm run dev -w projects/city",
     "preview": "npm run preview -w projects/city",
     "tier-guard": "node tools/tier-guard.mjs --serve projects/city/dist",
     "tier-guard:update": "node tools/tier-guard.mjs --update --serve projects/city/dist",
     "smoke": "node tools/smoke.mjs",
     "dive-probe": "node tools/dive-probe.mjs",
+    "cwv-probe": "node tools/cwv-probe.mjs",
+    "scroll-probe": "node tools/scroll-probe.mjs",
+    "test": "node --test packages/engine-core/src/*.test.mjs",
     "asset-factory": "node asset-factory/process.mjs"
   },
   "devDependencies": {

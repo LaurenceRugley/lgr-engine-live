@@ -330,6 +330,7 @@ export function vectorize(material, { color = null, glow = null, glowDay = 0.0, 
    attach to any standard material. C++: bake the expensive ambient-occlusion integral into a const vertex
    attribute the shader reads for free (the same "bake, don't compute" thesis as the sky-IBL). */
 export const aoStrength = { value: 0.0 };   // shared tier gate: 1 on the beauty scene render, 0 on pixel/vector/toon
+export const reflStrength = { value: 0.0 };   // L108 planar-mirror gate: beauty?1:0 AND governor-shed to 0 — 0 → the water shader's reflection mix is a mathematical no-op (byte-identical stylized) AND the mirror render pass is skipped
 
 /* ============================================================
    L94 AMBIENT VERTEX SWAY — the cheap "alive" win (scatter foliage breathes in the wind).

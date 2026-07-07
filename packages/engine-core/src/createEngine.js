@@ -53,8 +53,10 @@ import { LAYOUT } from './citygen.js';                 // L108: PITCH (the city 
 import {
   vectorOn, vectorTint, fogCharm, vectorShadow, weatherSnow, weatherCloud, weatherCloudOff, weatherSeason, windowRecess,
   aoStrength,   // L80: shared beauty-tier AO gate (1 on the beauty scene render, 0 on pixel/vector/toon)
+  reflStrength, // L108: shared planar-mirror gate (1 on high-quality beauty, 0 stylized / governor-shed)
   swayTime, swayWind,   // L94: shared ambient-sway clock + amplitude (foliage breathes; terrain opts out)
 } from './vector-style.js';
+import { createPlanarReflection } from './planar-reflection.js';   // L108: the mirror-camera ability (reflect y=0 + oblique clip + half-res RT)
 
 // L108 A2 — the LOW-MID-SUN WASHOUT band (money-path GATE). A BUMP on the sun ELEVATION (sunArc.y): ~0 below
 // the horizon (deep dawn t≈0.20 = the great dark frame → PROTECTED) and at noon (sunArc.y≈0.765 → midK owns it),
@@ -90,6 +92,7 @@ import postBlurFrag      from './shaders/post-blur.frag';     // L66 bloom separ
 import postGodraysFrag   from './shaders/post-godrays.frag';  // L107 crepuscular rays (beauty-gated)
 import postPixelkitFrag  from './shaders/post-pixelkit.frag';
 import { ERA_PRESETS, SCENE_ERA_ORDER, makePaletteTexture } from './pixelkit/pixelkit.js';
+import { createAircraftLights } from './aircraft-lights.js';   // C: aviation-correct heli nav lights
 
 /* ---- PARAMS — Lesson 06 tunables ------------------------------------------
    The two pixel palettes live HERE (they're uniforms, swappable live with P).
@@ -162,6 +165,7 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
   // L40: dPR capped at 2 on desktop, but 1.5 on COARSE pointers (touch/mobile) — a big fill-rate win on
   // retina phones (dPR is a supersampling factor: 2 = 4× the pixels) for negligible visible loss at phone DPI.
   const _coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  const _rmQuery = (typeof window !== 'undefined' && window.matchMedia) ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   const BOOT_DPR_CAP = _coarse ? 1.5 : 2;           // L78: the governor's level-0 dpr ceiling (so level 0 == boot == byte-identical)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, BOOT_DPR_CAP));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -368,6 +372,9 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
       uGold:           { value: new THREE.Color('#B89968') },
       uSkyRefl:        { value: 0.0 },                            // L108: sky-reflection amount (0 = off; decideStyle raises it to 0.55 on beauty tiers)
       uSkyReflCol:     { value: sunRig.sky },                     // L108: the sky colour the sea mirrors — BY-REF so it tracks day/night with the SunRig
+      uReflect:        { value: null },                           // L108 planar mirror: the reflRT texture (set once planarRefl exists, below)
+      uReflStrength:   { value: 0.0 },                            // L108: mirror gate (beauty?1:0, governor-shed) — 0 → the shipped sky-tint fallback runs → byte-identical stylized
+      uReflDistortMul: { value: 0.6 },                            // L108: reflection ripple wobble (× the refraction `off`) — a touch less than refraction so the skyline stays readable
       // L112 FOAM + soft shoreline (THE gate: 0 on stylized → the whole term is a no-op → byte-identical):
       uFoamStrength:   { value: 0.0 },                            // beauty ? 1 : 0 (set in both render paths)
       uTime:           { value: 0 },                              // churn/lapping animation (set per-frame in updateWorld)
@@ -541,10 +548,13 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
      The flat city ground is free: `worldHeightAt`→0 + `worldWaterAt`→NO_WATER when no world is built. */
   const seizeGroup = new THREE.Group(); seizeGroup.raycast = () => {}; scene.add(seizeGroup);
   let seizeEnt = null;
+  let _aircraftLights = null;   // C: nav lights for the active seize heli; null when kind!=='heli'
   function spawnSeizeCraft(kind, sx = 0, sz = 0, opts = {}) {
     if (seizeEnt) { seizeGroup.remove(seizeEnt.obj); placedLife.despawn(seizeEnt); seizeEnt = null; }
+    _aircraftLights = null;
     seizeEnt = placedLife.spawn(kind, sx, sz, { ...opts, ephemeral: true });   // L110 (audit B12): mark it ephemeral so world save/undo/?world= never serialize or clear this engine-owned craft
     if (seizeEnt) { placedLife.group.remove(seizeEnt.obj); seizeGroup.add(seizeEnt.obj); }
+    if (seizeEnt && kind === 'heli') { _aircraftLights = createAircraftLights(); seizeEnt.obj.add(_aircraftLights.group); }
     return seizeEnt ? seizeEnt.followable : null;     // hand back the pilotable followable (what pilot.possess wants)
   }
 
@@ -1037,6 +1047,10 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
   let bloomW = Math.max(1, Math.floor(drawBuffer.x / 2)), bloomH = Math.max(1, Math.floor(drawBuffer.y / 2));
   const bloomA = new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
   const bloomB = new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
+  // L108 PLANAR MIRROR — the half-res reflection RT + mirror camera (reflect the active cam across y=0 + oblique clip).
+  // Beauty-only + governor-shed; the pass is skipped entirely when reflStrength=0 (stylized / low quality).
+  const planarRefl = createPlanarReflection({ drawBuffer, planeY: 0 });
+  waterMaterial.uniforms.uReflect.value = planarRefl.reflRT.texture;   // wire the mirror texture now that the RT exists
   // L107 GOD-RAY buffers — also half-res (radial shafts are wide + soft). raysBright = the high-threshold bright pass
   // (sun + sky only); raysRT = the radial-march output the filmic composite adds in. Beauty-only; unused on stylized frames.
   const raysBright = new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
@@ -1253,6 +1267,7 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
     bloomW = Math.max(1, db.x >> 1); bloomH = Math.max(1, db.y >> 1);   // L66: half-res bloom buffers track resize
     bloomA.setSize(bloomW, bloomH); bloomB.setSize(bloomW, bloomH);
     raysBright.setSize(bloomW, bloomH); raysRT.setSize(bloomW, bloomH);   // L107: god-ray half-res buffers track resize
+    planarRefl.setSize(db);                                               // L108: the half-res mirror RT tracks resize (its own >>1)
     waterMaterial.uniforms.uResolution.value.set(db.x, db.y);
     filmicMaterial.uniforms.uResolution.value.set(db.x, db.y);
     pixelMaterial.uniforms.uResolution.value.set(db.x, db.y);
@@ -1266,6 +1281,7 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
      ------------------------------------------------------------ */
   const profiler = createEngineProfiler({ renderer });
   let _qualityShadows = true;                        // the governor's shadow knob (ANDed with the caller's shadowsOn)
+  let _qualityRefl = true;                            // L108: the governor's planar-mirror knob — reflections drop BEFORE rays (they're the priciest add); level ≥ REFL_SHED_LEVEL → false → the mirror pass is skipped + the cheap sky-tint fallback runs
   // apply(level, rung): the governor owns the POLICY (when); the engine owns the KNOBS (what). Level 0's rung
   // (dpr:null, shadows:true) restores the boot state exactly → byte-identical at full headroom. A dpr change
   // re-dispatches 'resize' so the project's resize handler resizes ALL render targets through the one path.
@@ -1279,6 +1295,7 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
     }
     _qualityShadows = rung.shadows !== false;
     if (!_qualityShadows) renderer.shadowMap.needsUpdate = false;   // stop re-rendering the shadow map at deep levels
+    _qualityRefl = rung.refl !== false;                             // L108: shed the mirror render at deep rungs (data-driven; rung.refl===false → skip the pass)
   }
   const governor = createQualityGovernor({ profiler, apply: applyQuality });
 
@@ -1405,6 +1422,25 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
   // (measured: city Realistic noon blue-dominance 1.52 vs golden 0.71). Only used in the beauty branch, midK-scaled.
   const NOON_NEUTRAL = new THREE.Color('#cdaa80');
 
+  /* L108 — render the mirrored skyline into planarRefl.reflRT. ONE visibility dance (leave nothing hidden): hide the
+     things that must NOT reflect — the water itself (a mirror reflecting itself = feedback) + ground agents / placed-
+     life / water-flow / dust (clutter at the reflected horizon) — keep towers + sky + clouds + celestials. The skydome
+     is camera-relative, so place() it for the MIRROR camera (else the sun disc sits wrong in the reflection) and
+     restore to the source camera for the grab + main render that follow. Beauty-only; the caller gates the call. */
+  function renderReflection(srcCam) {
+    const _wv = water.visible, _cl = cityLife.group.visible, _pl = placedLife.group.visible,
+          _wf = waterFlow.group.visible, _du = dust.group.visible;
+    water.visible = false; cityLife.group.visible = false; placedLife.group.visible = false;
+    waterFlow.group.visible = false; dust.group.visible = false;
+    const mCam = planarRefl.updateCamera(srcCam);
+    celestials.place(mCam);
+    renderer.setRenderTarget(planarRefl.reflRT);
+    renderer.render(scene, mCam);
+    celestials.place(srcCam);                          // restore the skydome to the MAIN camera
+    water.visible = _wv; cityLife.group.visible = _cl; placedLife.group.visible = _pl;
+    waterFlow.group.visible = _wf; dust.group.visible = _du;
+  }
+
   /* The full CITY pipeline (grab → beauty → post/style chain) into a PARAMETERIZED final target
      (screen `null` for city mode, or cityScreenRT during the dive). The exact L06–L08 chain. */
   function renderCityPipeline(style, finalDest) {
@@ -1457,6 +1493,13 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
     }
     filmicMaterial.uniforms.uBloomStrength.value = 0.0;   // L66: default no glow; bloomPass() raises it on beauty tiers
     filmicMaterial.uniforms.uRays.value = 0.0;            // L107: default no god rays; godraysPass() raises it on beauty tiers (0 → byte-identical stylized composite)
+    // L108 PLANAR MIRROR — beauty-only (governor-shed via _qualityRefl). Render the mirrored skyline into
+    // planarRefl.reflRT NOW (before the grab + main render) so the water shader can sample it this frame. On stylized
+    // reflStrength=0 → the pass is SKIPPED + the shader's if(uReflStrength>0) is false → the sky-tint fallback runs →
+    // byte-identical. Runs with the BEAUTY scene state already set up above (sky tier + fill + environment).
+    reflStrength.value = (beauty && _qualityRefl) ? 1.0 : 0.0;
+    waterMaterial.uniforms.uReflStrength.value = reflStrength.value;
+    if (reflStrength.value > 0.0) renderReflection(rig.camera);
     water.visible = false;
     renderer.setRenderTarget(grabRT);
     renderer.render(scene, rig.camera);
@@ -1666,6 +1709,11 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
     if (worldActive) placedLife.update(dt, elapsed, sunRig);   // L73: placed life animates only in world mode (its group is shown there)
     seizeGroup.visible = !worldActive;                         // L104: the seize heli is a CITY craft → hidden in the terrain world (the world has its own craft)
     if (seizeEnt && !worldActive) seizeEnt.update(dt, elapsed, sunRig);   // L104: tick it in the CITY (placedLife.update covers it in world mode → no double-tick)
+    if (_aircraftLights && !worldActive) {                                 // C: update nav lights (nightK mirrors celestials.js:311, without overcast so lights stay on in cloud)
+      const _arcY = sunRig.sunArc.y;
+      const _t = Math.max(0, Math.min(1, (-_arcY - (-0.05)) / (0.18 - (-0.05))));
+      _aircraftLights.update(_t * _t * (3 - 2 * _t), elapsed, !!(_rmQuery && _rmQuery.matches));
+    }
     if (worldActive) waterFlow.step(dt);                        // L81: advance the live water-flow sim (coupled to the live terrain)
     if (worldActive) dust.update(dt, elapsed, sunRig, { wind: 0.6 * weatherRig.cloud, qualityLevel: (window.__quality && window.__quality.level) || 0 });   // L94: drifting motes (faded by daytime, throttled by the governor)
     // L53 — the sun/moon look follows the scene's fidelity TIER (same style signal the LOD uses): pixel
@@ -1758,7 +1806,7 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
     // water sim
     SIM, targets, simScene, simCamera, simMaterial,
     // refraction + water surface
-    grabRT, card, backdrop, WATER_SIZE, water, waterMaterial,
+    grabRT, card, backdrop, WATER_SIZE, water, waterMaterial, planarRefl,
     // city + life + weather
     windowGlow, landmarkFactory, city, cityLife, waterLife, weatherRig, clouds,
     inspector,                                  // L63: the inspection lens (follow/registry over the world)

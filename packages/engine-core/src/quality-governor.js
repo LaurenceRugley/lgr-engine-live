@@ -28,11 +28,11 @@
 /* The ladder. Each level is a target the engine's `apply(level, rung)` realizes. Level 0 = untouched.
    `dpr` is a CAP (min'd with the device dpr by the engine); `shadows:false` suppresses the shadow pass. */
 const LADDER = [
-  { dpr: null, shadows: true },     // 0 — full (no-op; byte-identical)
-  { dpr: 1.5,  shadows: true },     // 1
-  { dpr: 1.0,  shadows: true },     // 2
-  { dpr: 1.0,  shadows: false },    // 3 — drop the shadow re-render too
-  { dpr: 0.75, shadows: false },    // 4 — last resort for very weak GPUs
+  { dpr: null, shadows: true,  refl: true  },   // 0 — full (no-op; byte-identical)
+  { dpr: 1.5,  shadows: true,  refl: false },   // 1 — drop the L108 planar mirror FIRST (the priciest add; rays are cheaper so they survive one rung longer)
+  { dpr: 1.0,  shadows: true,  refl: false },   // 2
+  { dpr: 1.0,  shadows: false, refl: false },   // 3 — drop the shadow re-render too
+  { dpr: 0.75, shadows: false, refl: false },   // 4 — last resort for very weak GPUs
 ];
 
 export function createQualityGovernor({ profiler, apply, targetFps = 30, strongFps = 58 } = {}) {

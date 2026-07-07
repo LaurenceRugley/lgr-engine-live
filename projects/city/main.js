@@ -30,7 +30,7 @@
 // One three for the whole app — imported from the engine package (see @lgr/engine-core/index.js).
 import {
   THREE, createEngine, CAM, PROFILES, PROFILE_KEYS, createCapture, createViewerUI,
-  createAppShell, readAppFlags, createSceneTransition, createDevMode,
+  createAppShell, readAppFlags, fromURLParams, createSceneTransition, createDevMode,
 } from '@lgr/engine-core';
 // L114: the loop Timer is now owned by createAppShell (was `const { Timer } = THREE` here); createHints is wrapped by shell.hints.
 
@@ -1820,15 +1820,20 @@ viewerUI = createViewerUI({ controls: viewerControls, state: viewerState, show: 
 /* Apply the boot URL params (the shareable-link half). `?profile`/`?city` were applied in
    createCity; here we set camera / style / time of day. We drive them through the SAME command
    bus, so a link and a tap take identical code paths. */
-const camParam = _q.get('cam'); if (camParam && ['iso', 'dimetric', 'persp'].includes(camParam)) viewerControls.cam(camParam);
-// L55: post-mode + independent vector via URL. ?style=auto|pixel|toon|none sets the post radio; ?style=vector
-// (legacy) or ?vector=1 turns the vector chip on (it now composes — post stays whatever it was, default auto).
-const styleParam = _q.get('style');
-if (['auto', 'pixel', 'toon', 'none'].includes(styleParam)) viewerControls.post(styleParam);
-if (styleParam === 'vector' || _q.get('vector') === '1') { if (!engine.vector) viewerControls.vector(); }
-const tParam = _q.get('t'); if (tParam !== null && tParam !== '') { const tv = parseFloat(tParam); if (Number.isFinite(tv)) sunRig.goTo(tv); }   // L110 (audit P0-8): Number.isFinite, not just !isNaN — parseFloat('Infinity') is Infinity, which fed goalT=Infinity → wrap()=NaN → KF[NaN] throws inside the render loop, killing it on frame 1. (sun-rig.goTo now also guards defensively.)
-const timeParam = _q.get('time'); if (timeParam) sunRig.goTo({ dawn: 0.25, noon: 0.5, dusk: 0.75, night: 0.0 }[timeParam] ?? 0.5);
-const weatherParam = _q.get('weather'); if (['clear', 'rain', 'snow', 'fog'].includes(weatherParam)) { weatherRig.setKind(weatherParam); window.__weather = weatherRig.kind; }
+// L109 SceneSpec: the SCENE-LOOK URL subset is now parsed + validated ONCE by fromURLParams (one vocabulary,
+// isFinite kills ?t=Infinity centrally, ?time overrides ?t, ?style=vector/?vector=1 → the orthogonal vector axis),
+// then APPLIED through city's existing viewerControls/sunRig/weatherRig bus so a link and a tap take identical code
+// paths AND the viewer UI stays in sync (why city feeds fromURLParams into its bus rather than applySceneSpec, which
+// applies straight to the engine). BYTE-IDENTICAL for valid inputs; the one INTENTIONAL delta (Rule 6): an INVALID
+// ?time=<garbage> now DROPS (validate-and-drop, consistent with ?style/?cam/?weather) instead of jumping to noon
+// (the old `?? 0.5`). Seed/profile stay boot-parsed above (?city/?profile) — the engine-owns-scene refactor is L109's
+// deferred follow-up, not smuggled here. The ?world/?office/?edit/… app-flag handling below is untouched (out-of-spec).
+const sceneSpec = fromURLParams(_q);
+if (sceneSpec.camera) viewerControls.cam(sceneSpec.camera);
+if (sceneSpec.post) viewerControls.post(sceneSpec.post);
+if (sceneSpec.vector && !engine.vector) viewerControls.vector();
+if (sceneSpec.time != null) sunRig.goTo(sceneSpec.time);
+if (sceneSpec.weather) { weatherRig.setKind(sceneSpec.weather); window.__weather = weatherRig.kind; }
 const skinParam = _q.get('officeskin'); if (['3d', 'smooth', 'charm'].includes(skinParam)) setOfficeSkin(skinParam);  // L29
 const propsParam = _q.get('officeprops'); if (['painted', '3d'].includes(propsParam)) setOfficeProps(propsParam);   // L30
 // L19/L23: ?office=1|corner|basement boots straight into the office (snap, no dive — demos/captures).

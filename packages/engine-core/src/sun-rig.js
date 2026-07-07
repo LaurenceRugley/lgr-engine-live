@@ -206,6 +206,7 @@ export function createSunRig({ t = 0.5 } = {}) {              // boot at noon
     nudge(hours)  { if (Number.isFinite(hours)) goalT += hours / 24; },  // scrub ± time
     goTo(t)       { if (Number.isFinite(t)) goalT = t; },                // L15: ease to an absolute time (director verb)
     toggleAuto()  { auto = !auto; },
+    setAuto(v)    { auto = !!v; },
     setReducedMotion(v) { reducedMotion = v; },
 
     update(dt) {

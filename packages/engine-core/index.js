@@ -44,6 +44,17 @@ export { createHints } from './src/hints.js';
 // readiness flag, footer policy, hints/resize/capture wiring) so the three project pages can't drift it.
 export { createAppShell, readAppFlags } from './src/app-shell.js';
 
+// L109 — SceneSpec v1: one versioned scene document (validate/from-URL/to-URL/apply). The contract the embed SDK,
+// poster generator, site-gen + prompt layer target; the seed of the site-builder cockpit (versioned, tolerant of
+// unknown top-level sections).
+export { validateSceneSpec, fromURLParams, toURLParams, applySceneSpec, SCENE_SPEC_VERSION } from './src/scene-spec.js';
+
+// L-stress-2 — createProductStage: a self-contained studio-lit GLB inspector (own scene/camera/IBL/loader/orbit +
+// variant swap), sharing the engine renderer with save/restore state isolation. Engine-first: the capability lives
+// here (parameterized, never product-specific); office/hoard/showcase could all wire it. (This is the ONLY existing-
+// engine-file edit the whole product-stage capability needed — the extensibility measure: a new file + this one line.)
+export { createProductStage } from './src/product-stage.js';
+
 // L104 P3 — owner-only Developer Mode sandbox (8 toggleable dev toys; client tiers untouched, gizmos off-by-default).
 export { createDevMode } from './src/dev-mode.js';
 
@@ -67,6 +78,9 @@ export { createPilotController, createGroundModel, createSpacecraftModel, ATV_PR
 
 // L76 — shared scalar maths (the dt-correct `damp` ease, lifted out of camera-rig so rig + models share one).
 export { damp, clamp, angleDelta } from './src/math.js';
+
+// F02 lift — native-scroll → damped [0,1] progress, PUMPED from the host loop (NOT self-driven → cannot repro F07).
+export { createScrollDirector } from './src/scroll-director.js';
 
 // L78 — ENGINE HARDENING: honest profiling (p95/p99 + GPU-ms + leak gate) + adaptive quality (lock a smooth fps).
 export { createEngineProfiler } from './src/profiler.js';

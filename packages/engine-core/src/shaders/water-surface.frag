@@ -35,6 +35,9 @@ uniform vec3  uInk;              // Deep Ink  #2A2218 — water tint
 uniform vec3  uGold;             // Atelier Gold #B89968 — sheen / glints
 uniform float uSkyRefl;          // L108: beauty-only sky-reflection amount (0 on pixel/toon → the mix is a no-op)
 uniform vec3  uSkyReflCol;       // L108: the SunRig sky colour the sea reflects (by-ref → tracks day/night)
+uniform sampler2D uReflect;      // L108 planar mirror: the mirrored skyline rendered to a half-res RT
+uniform float uReflStrength;     // L108: THE mirror gate — beauty?1:0 AND governor-shed → 0 = no-op (byte-identical) + the shipped sky-tint fallback below runs instead
+uniform float uReflDistortMul;   // L108: how much the sim-normal tilt wobbles the reflection sample (reuses the refraction `off`, so they ripple coherently)
 uniform float uFoamStrength;     // L112: THE foam/shoreline gate — 0 on pixel/toon → the whole term is a no-op → byte-identical
 uniform float uTime;             // L112: churn + lapping animation clock
 uniform sampler2D uGrabDepth;    // L112: the grab pass's depth (what's behind the water) → shoreline thinness + depth tint
@@ -136,12 +139,21 @@ void main() {
     col += uSunCol * (spec * 0.6 + spark * 2.2) * uGlintK;
   }
 
-  // L108 (Lever 5) SKY REFLECTION — the sea was PURE BLACK looking down: it only refracted the near-black seabed +
-  // uInk, with no sky term at all. Lift it toward the sky colour, weighted by grazing fresnel OR up-facing flatness
-  // (top-down noon water has N.y≈1, so it catches sky even without fresnel — the exact case that was black). Beauty-
-  // gated: uSkyRefl=0 on pixel/toon (the mix is then a no-op) + vector already early-returned above → byte-identical.
-  float sky = mix(0.10, 1.0, fres) * clamp(N.y, 0.0, 1.0);
-  col = mix(col, uSkyReflCol, sky * uSkyRefl);
+  // L108 REFLECTION — reconciled so the two terms NEVER double-apply:
+  //   • PLANAR MIRROR (uReflStrength>0, high-quality beauty): sample the mirrored skyline at the SAME screen-space
+  //     coordinate the refraction uses (screenUV + off) so ripples wobble reflection + refraction COHERENTLY, and
+  //     blend by the EXISTING fresnel (:95) — strong toward the horizon, weak looking straight down. This is the
+  //     rich reflection; it already contains the sky, so the flat sky-tint below is skipped.
+  //   • FALLBACK SKY-TINT (Lever 5, shipped): the cheap flat sky-COLOUR lift for when the mirror is OFF — stylized
+  //     tiers (uReflStrength=0 AND uSkyRefl=0 → both branches no-op → byte-identical) and beauty frames where the
+  //     governor SHED the mirror pass (uReflStrength=0 but uSkyRefl>0 → the sea still isn't pure-black looking down).
+  if (uReflStrength > 0.0) {
+    vec3 refl = texture2D(uReflect, screenUV + off * uReflDistortMul).rgb;
+    col = mix(col, refl, uReflStrength * mix(0.04, 1.0, fres));
+  } else {
+    float sky = mix(0.10, 1.0, fres) * clamp(N.y, 0.0, 1.0);
+    col = mix(col, uSkyReflCol, sky * uSkyRefl);
+  }
 
   // L112 FOAM — crests (negative laplacian of the height field = the sim's OWN restoring stencil → peaks) + wake
   // shoulders (slope → the L26 V-wakes get their missing white) + a soft depth-faded SHORELINE band that laps.
