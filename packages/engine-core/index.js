@@ -126,6 +126,10 @@ export {
   ERA_PRESETS, ERA_ORDER, SCENE_ERA_ORDER, LGR_PALETTES, makePaletteTexture, medianCut,
 } from './src/pixelkit/pixelkit.js';
 
+// L-audio-sketch — the engine's one AudioContext owner + ambient-bed presets (no external assets).
+export { createAudioBus } from './src/audio-bus.js';
+export { createAmbientBed } from './src/ambient-bed.js';
+
 // Raw shader strings a few app-level materials compose directly (the dive crossfade; the
 // pixelate tool). Exporting them keeps projects from reaching into the package's src/shaders.
 export { default as fullscreenVert } from './src/shaders/fullscreen.vert';

@@ -31,6 +31,7 @@
 import {
   THREE, createEngine, CAM, PROFILES, PROFILE_KEYS, createCapture, createViewerUI,
   createAppShell, readAppFlags, fromURLParams, createSceneTransition, createDevMode,
+  createAudioBus, createAmbientBed,
 } from '@lgr/engine-core';
 // L114: the loop Timer is now owned by createAppShell (was `const { Timer } = THREE` here); createHints is wrapped by shell.hints.
 
@@ -56,6 +57,10 @@ window.__preview = { mode: PREVIEW ? _q.get('preview') : null, gated: _q.has('pr
 // `?capture=<seq>` (L15) implies demo mode too: a hands-off recording should carry no branding. Preview is demo-like.
 const DEMO = _q.get('demo') === '1' || _q.has('capture') || PREVIEW;
 window.__demo = DEMO;               // exposed so a capture harness can confirm the mode
+
+/* L-audio-sketch — `?audio=1|2|3` selects an ambient-bed preset for the listening sketch.
+   NEVER in ?preview (audience gate). No ?audio = SILENT (off by default). */
+const AUDIO_PRESET = !PREVIEW && ['1', '2', '3'].includes(_q.get('audio')) ? Number(_q.get('audio')) : 0;
 
 /* `?city=<seed>` + `?profile=<name>` pick the starting city. main owns citySeed/profileIndex
    as MUTABLE state (`G` rerolls the seed, `C` cycles the profile) and re-drives city.generate()
@@ -102,6 +107,58 @@ const {
 renderer.domElement.tabIndex = 0;
 renderer.domElement.setAttribute('aria-label', 'Interactive 3D city — press F or Enter to fly the craft, W A S D or drag to move and look, click a building to go inside.');
 // Style state (engine.mode / engine.vector / engine.sceneEra) is read live via getters where needed.
+
+/* L-audio-sketch — AMBIENT BED (?audio=1|2|3, city bare URL only, NOT ?preview).
+   The bus owns the ONE AudioContext. The bed is unlocked + started on the first user gesture
+   (canvas pointerdown OR the mute chip click) so the autoplay law is never violated.
+   `?preview` stays silent (AUDIO_PRESET = 0 when PREVIEW is true). */
+if (AUDIO_PRESET) {
+  const _audioBus = createAudioBus();
+  if (_audioBus) {
+    let _audioUnlocked = false;
+    let _audioBed = null;
+
+    function _unlockAudio() {
+      if (_audioUnlocked) return;
+      _audioUnlocked = true;
+      _audioBus.unlock();
+      _audioBed = createAmbientBed(_audioBus, { preset: AUDIO_PRESET });
+      _audioBed.start();
+      if (_muteChip) _updateMuteChip();
+    }
+
+    /* Mute chip — simple fixed-position button. Top-right so it doesn't overlap the bottom chips. */
+    let _muteChip = null;
+    function _updateMuteChip() {
+      if (!_muteChip) return;
+      const muted = _audioBus.muted;
+      _muteChip.textContent = muted ? '🔇' : '🔊';
+      _muteChip.setAttribute('aria-label', muted ? 'Unmute ambient sound' : 'Mute ambient sound');
+      _muteChip.setAttribute('aria-pressed', String(!muted));
+    }
+
+    const _style = document.createElement('style');
+    _style.textContent = '.lgr-mute{position:fixed;top:14px;right:14px;z-index:10;width:40px;height:40px;'
+      + 'border-radius:50%;background:rgba(27,29,36,.72);border:1.5px solid rgba(232,180,106,.35);'
+      + 'color:#e8c069;font-size:18px;cursor:pointer;display:grid;place-items:center;backdrop-filter:blur(6px);}'
+      + '.lgr-mute:hover{border-color:rgba(232,180,106,.65);}'
+      + '.lgr-mute:focus-visible{outline:2px solid #e8c069;outline-offset:3px;}';
+    document.head.appendChild(_style);
+    _muteChip = document.createElement('button');
+    _muteChip.className = 'lgr-mute'; _muteChip.type = 'button';
+    _muteChip.textContent = '🔊'; _muteChip.setAttribute('aria-label', 'Mute ambient sound');
+    _muteChip.setAttribute('aria-pressed', 'false');
+    _muteChip.addEventListener('click', () => {
+      _unlockAudio();                   // gesture: create ctx + start bed (idempotent)
+      _audioBus.setMuted(!_audioBus.muted);
+      _updateMuteChip();
+    });
+    document.body.appendChild(_muteChip);
+
+    /* First canvas interaction also unlocks (pointerdown fires for both mouse + touch). */
+    renderer.domElement.addEventListener('pointerdown', _unlockAudio, { once: true });
+  }
+}
 
 // Re-generate the city (G reroll / C profile) → rebuild + retint the flat-cyan water + refit the
 // shadow frustum + refresh the hint. The landmark factory fills heroes in once its GLBs are loaded.
