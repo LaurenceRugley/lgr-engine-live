@@ -45,6 +45,12 @@ const TILT   = 0.70;   // ~40° tilt of the arc PLANE from vertical → the sun 
 const CYCLE_SECONDS = 90;  // a full auto day (WCAG-safe: tens of seconds, never a strobe)
 const EASE_K = 6;          // preset/scrub easing rate (~0.8 s to settle)
 
+/* L-dusk-washout: LOW-SUN WASH tamer — bump on sun ELEVATION, ~1 through golden hour + afternoon dusk,
+   0 at noon AND ~0 at/below the horizon. Low edge extended to y=−0.06 (vs the old 0.02) so the corona
+   damper + bloom floor engage right into the horizon crossing. lw(noon y=0.765)=0 → byte-identical.
+   Exported from sun-rig.js (single source of truth) so celestials.js can import it without a circular dep. */
+export const lowSunWashK = (y) => THREE.MathUtils.smoothstep(y, -0.06, 0.12) * (1 - THREE.MathUtils.smoothstep(y, 0.45, 0.70));
+
 /* The four KEYFRAMES, at t = 0 / .25 / .5 / .75. Each: the sun/moon colour + intensity,
    the hemisphere sky/ground ambient, the backdrop's horizon+sky tints, post-exposure,
    the toon outline colour (black by day → deep navy at night), windowGlow (emissive

@@ -20,6 +20,7 @@
    ============================================================ */
 import * as THREE from 'three';
 import { createNightSky } from './night-sky.js';   // L57: stars + constellations + nebula, composed below
+import { lowSunWashK } from './sun-rig.js';         // L-dusk-washout: corona damper (sun-rig owns the single source of truth)
 
 const TAU = Math.PI * 2;
 
@@ -275,7 +276,10 @@ export function createCelestials({ R = 88, sunSize = 6.0, moonSize = 5.5 } = {})
     sunCorona.visible = realisticTier;   // fully EXCLUDE it from the stylized draw list (not just opacity 0) → provably byte-identical: same transparent draw order as before B on pixel/toon/vector
     sunCorona.scale.setScalar(ss * bScale * 3.0);
     sunCorona.material.color.copy(GLOW_WARM).lerp(GLOW_LOW, horizonK);
-    sunCorona.material.opacity = sVis * 0.20 * (0.6 + 0.7 * horizonK);
+    // L-dusk-washout Lever 2: damp the corona at its source — the dominant "red blob" culprit. lowSunWashK peaks
+    // at the exact washout window (t=0.70 opacity 0.200→0.080; t=0.72 0.237→0.095), self-zeroes by t≈0.76.
+    // Realistic-only (sunCorona.visible=realisticTier above) → stylized byte-identical. lw(noon)=0 → anchor safe.
+    sunCorona.material.opacity = sVis * 0.20 * (0.6 + 0.7 * horizonK) * (1 - 0.6 * lowSunWashK(arc.y));
     // L55 daytime contrast halo: track the disc, sit ~1.7× its size, ramp with HEIGHT (full high, gone at horizon).
     sunHalo.scale.setScalar(ss * bScale * 1.7);
     sunHalo.material.opacity = realisticTier ? 0 : sVis * (1 - horizonK) * cfg.sunHaloOp;   // L98c: no sprite halo on realistic (the corona replaces it)

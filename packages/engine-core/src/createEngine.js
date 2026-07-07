@@ -27,7 +27,7 @@ import * as THREE from 'three';
 
 import { createCameraRig } from './camera-rig.js';
 import { createCity } from './citygen.js';
-import { createSunRig } from './sun-rig.js';
+import { createSunRig, lowSunWashK } from './sun-rig.js';
 import { createCityLife } from './agents.js';
 import { createWaterLife } from './water-life.js';
 import { createLandmarkFactory } from './landmarks.js';
@@ -60,10 +60,9 @@ import { createPlanarReflection } from './planar-reflection.js';   // L108: the 
 
 // L108 A2 — the LOW-MID-SUN WASHOUT band (money-path GATE). A BUMP on the sun ELEVATION (sunArc.y): ~0 below
 // the horizon (deep dawn t≈0.20 = the great dark frame → PROTECTED) and at noon (sunArc.y≈0.765 → midK owns it),
-// ramping to ~1 through golden (sunArc.y≈0.14–0.41, t≈0.28–0.34 — the ATTRACT OPEN) + afternoon (t≈0.65–0.72,
-// same elevations, covered symmetrically for free). Complements midK; the A2 levers add a *lowSunWashK* term
-// ALONGSIDE the midK term (never replacing it). Live-tuned in the browser against building≠sky ≥20 + a rich sky.
-const lowSunWashK = (y) => THREE.MathUtils.smoothstep(y, 0.02, 0.20) * (1 - THREE.MathUtils.smoothstep(y, 0.45, 0.70));
+// ramping to ~1 through golden + afternoon dusk. Complements midK; the A2 levers add a *lowSunWashK* term
+// ALONGSIDE the midK term (never replacing it). Imported from sun-rig.js (single source of truth — celestials.js
+// also imports it without circularity). Low edge widened −0.06 (L-dusk-washout fix): extends coverage to the horizon.
 
 // L112 — the NIGHT factor (beauty-only): 0 in full day INCLUDING noon (the byte-identical anchor), ramping to 1
 // as the sun drops below the horizon across the dusk window (t≈0.65→0.78, sunArc.y +0.45→−0.02). Upper bound
@@ -1114,7 +1113,12 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
     // L112 A-i: DROP the threshold at night so lit WINDOW panes (~1.2–1.6) clear it and HALO — the dusk/night city
     // gets a glowing lit skyline instead of window-dots-on-black. sunDownK=0 in day incl. noon → the L106 day tuning
     // (and the noon byte-identical anchor) is untouched; beauty-only (bloom is a beauty pass). ~0.60 at full night.
-    brightMaterial.uniforms.uThreshold.value = (0.92 + 0.30 * lowSun) - 0.62 * sunDownK(sunRig.sunArc.y);
+    // L-dusk-washout Lever 3: DUSK-BAND-GATED bloom floor. Caps the city-wide smear during the washout window while
+    // lit windows (~1.2–1.6) still halo. Floor = 0.60 + 0.08*_duskGate (≈0.68 at peak dusk, 0.60 at deep night &
+    // noon). Deep night (t≥0.85, _duskGate→0): floor collapses to 0.60 = the L112 midnight halo value — UNTOUCHED.
+    // Noon: Math.max(0.60+0, 0.92) = 0.92 → byte-identical. _duskGate = lowSunWashK → 0 at noon AND at deep night.
+    const _duskGate = lowSunWashK(sunRig.sunArc.y);
+    brightMaterial.uniforms.uThreshold.value = Math.max(0.60 + 0.08 * _duskGate, (0.92 + 0.30 * lowSun) - 0.62 * sunDownK(sunRig.sunArc.y));
     brightMaterial.uniforms.uScene.value = srcRT.texture;
     runPass(brightMaterial, bloomA);                                   // bright-pass → bloomA (half-res)
     blurMaterial.uniforms.uScene.value = bloomA.texture;               // H blur: A → B
