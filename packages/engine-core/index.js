@@ -49,6 +49,12 @@ export { createHints } from './src/hints.js';
 // readiness flag, footer policy, hints/resize/capture wiring) so the three project pages can't drift it.
 export { createAppShell, readAppFlags } from './src/app-shell.js';
 
+// VIZ SLICE 0+1 — diagram-theme (dusk-harbor OKLCH tokens), morph-timeline (one-scalar t engine),
+// matrix-grid factory (index-stable 2×2 transform lattice + colored basis arrows).
+export { THEME, applyThemeToRoot } from './src/diagram-theme.js';
+export { createMorphTimeline, easeInOutCubic } from './src/math/morph-timeline.js';
+export { createMatrixGrid } from './src/math/matrix-grid.js';
+
 // L109 — SceneSpec v1: one versioned scene document (validate/from-URL/to-URL/apply). The contract the embed SDK,
 // poster generator, site-gen + prompt layer target; the seed of the site-builder cockpit (versioned, tolerant of
 // unknown top-level sections).
@@ -80,6 +86,20 @@ export { createEditor } from './src/editor.js';
 
 // L76 — POSSESSION: the PilotController + ground MovementModel (drive a placed craft, e.g. the all-terrain vehicle).
 export { createPilotController, createGroundModel, createSpacecraftModel, ATV_PROFILE, CRAFT_PROFILE } from './src/pilot.js';
+
+// L-cockpit: bare canopy-frame ring (A-pillars + roof arc + dash bar). Parented to the craft at profile.eye;
+// placed-life.js wires it; pilot.js toggles visibility on cockpit/chase transitions.
+export { createCockpit } from './src/cockpit.js';
+
+// VIZ SLICE 2 — step-through code/algorithm TRACER seams:
+// createTracer: element-addressed op recording (compare/swap/mark/edgeVisit — structural faithfulness).
+// createTracePlayer: discrete stepIndex + morph-timeline tween for within-step visual blending.
+// createCellField: InstancedMesh N cells + DOM overlay labels (N≤16). Engine-first, no dependencies.
+// createCodePanel: DOM <pre> code panel with per-line highlight (lit at tween-START).
+export { createTracer }                  from './src/tracer.js';
+export { createTracePlayer }             from './src/trace-player.js';
+export { createCellField, CELL_COLORS }  from './src/cell-field.js';
+export { createCodePanel }               from './src/code-panel.js';
 
 // L76 — shared scalar maths (the dt-correct `damp` ease, lifted out of camera-rig so rig + models share one).
 export { damp, clamp, angleDelta } from './src/math.js';

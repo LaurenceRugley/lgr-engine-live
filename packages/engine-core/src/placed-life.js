@@ -30,6 +30,7 @@ import * as THREE from 'three';
 import { createSpriteAnim } from './sprite-anim.js';
 import { vectorize } from './vector-style.js';
 import { ATV_PROFILE, CRAFT_PROFILE } from './pilot.js';   // L76/L77: craft profiles (the pilot reads them; the entity exposes them)
+import { createCockpit } from './cockpit.js';              // L-cockpit: bare canopy-frame ring (hide-own-hull fix)
 
 // L76 — reusable scratch for the slope-orient maths (a parked ATV sits flush on the terrain). Module-level
 // so seating an ATV allocates nothing per frame (same no-per-frame-`new` discipline as the sprite pools).
@@ -266,6 +267,9 @@ export function createPlacedLife({ heightAt, seaSurfaceY = 0, waterY = 0.06 } = 
       };
       const seatParked = () => { state.y = H(state.x, state.z); orientToSlope(); g.position.set(state.x, state.y, state.z); g.quaternion.copy(state.quat); };
       seatParked();                                   // place it on the terrain the instant it's dropped
+      // L-cockpit: attach the bare canopy-frame ring to the craft group (hides when body is visible; shows in cockpit view).
+      const _atvCockpit = createCockpit(ATV_PROFILE);
+      g.add(_atvCockpit); g.userData.cockpitFrame = _atvCockpit;
       return { kind, obj: g, x, z, get piloted() { return piloted; },
         update() { if (!piloted) seatParked(); },     // parked → stay seated on the (possibly edited) terrain
         info: () => (piloted ? 'ATV · piloted' : 'ATV · parked'),
@@ -279,6 +283,12 @@ export function createPlacedLife({ heightAt, seaSurfaceY = 0, waterY = 0.06 } = 
           setTransform: (s) => { g.position.set(s.x, s.y, s.z); g.quaternion.copy(s.quat); },
           suspendAutonomy: () => { piloted = true; },
           resumeAutonomy: () => { piloted = false; state.speed = 0; },   // hand back parked, at rest
+          // L-cockpit seam: hide own hull in cockpit view, restore on exit.
+          setBodyVisible: (v) => {
+            const cf = g.userData.cockpitFrame;
+            g.children.forEach(c => { if (c !== cf) c.visible = v; });
+          },
+          setCockpitVisible: (v) => { if (g.userData.cockpitFrame) g.userData.cockpitFrame.visible = v; },
         },
       };
     }
@@ -290,6 +300,9 @@ export function createPlacedLife({ heightAt, seaSurfaceY = 0, waterY = 0.06 } = 
       const ph = Math.random() * Math.PI * 2;
       const state = { x, y: H(x, z) + HOVER, z, yaw: opts.yaw ?? Math.random() * Math.PI * 2, speed: 0, vy: 0, quat: new THREE.Quaternion(), medium: 'air', crossing: null, crossingT: 0 };
       let piloted = false;
+      // L-cockpit: attach the bare canopy-frame ring.
+      const _craftCockpit = createCockpit(CRAFT_PROFILE);
+      g.add(_craftCockpit); g.userData.cockpitFrame = _craftCockpit;
       return { kind, obj: g, x, z, get piloted() { return piloted; },
         update(dt, elapsed) {
           if (piloted) return;                            // PilotController owns it while driven
@@ -308,6 +321,12 @@ export function createPlacedLife({ heightAt, seaSurfaceY = 0, waterY = 0.06 } = 
           setTransform: (s) => { g.position.set(s.x, s.y, s.z); g.quaternion.copy(s.quat); },
           suspendAutonomy: () => { piloted = true; },
           resumeAutonomy: () => { piloted = false; state.speed = 0; state.vy = 0; },
+          // L-cockpit seam.
+          setBodyVisible: (v) => {
+            const cf = g.userData.cockpitFrame;
+            g.children.forEach(c => { if (c !== cf) c.visible = v; });
+          },
+          setCockpitVisible: (v) => { if (g.userData.cockpitFrame) g.userData.cockpitFrame.visible = v; },
         },
       };
     }
@@ -325,6 +344,9 @@ export function createPlacedLife({ heightAt, seaSurfaceY = 0, waterY = 0.06 } = 
       // orbit centre placed so the heli STARTS at its spawn (x,z) then circles — no first-frame jump.
       const state = { x, y: H(x, z) + HOVER, z, yaw: opts.yaw ?? 0, speed: 0, vy: 0, quat: new THREE.Quaternion(), medium: 'air', crossing: null, crossingT: 0, _cx: x - ORBIT_R, _cz: z, _at: 0 };
       let piloted = false;
+      // L-cockpit: attach the bare canopy-frame ring. Heli gets mainRotor kept visible as a spinning cue.
+      const _heliCockpit = createCockpit(CRAFT_PROFILE);
+      g.add(_heliCockpit); g.userData.cockpitFrame = _heliCockpit;
       return { kind, obj: g, x, z, get piloted() { return piloted; },
         update(dt, elapsed) {
           mainRotor.rotation.y += SPIN * dt;             // rotors spin whether idle OR piloted
@@ -353,6 +375,13 @@ export function createPlacedLife({ heightAt, seaSurfaceY = 0, waterY = 0.06 } = 
           setTransform: (s) => { g.position.set(s.x, s.y, s.z); g.quaternion.copy(s.quat); },
           suspendAutonomy: () => { piloted = true; },
           resumeAutonomy: () => { piloted = false; state.speed = 0; state.vy = 0; },
+          // L-cockpit seam: hide hull but keep mainRotor visible (spinning rotor is the heli read in cockpit view).
+          setBodyVisible: (v) => {
+            const cf = g.userData.cockpitFrame;
+            const mr = g.userData.mainRotor;
+            g.children.forEach(c => { if (c !== cf && c !== mr) c.visible = v; });
+          },
+          setCockpitVisible: (v) => { if (g.userData.cockpitFrame) g.userData.cockpitFrame.visible = v; },
         },
       };
     }

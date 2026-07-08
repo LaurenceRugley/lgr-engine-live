@@ -69,6 +69,12 @@ export function showWebGLUnsupported(msg) {
 }
 
 export function createEngineCore(opts = {}) {
+  /* Container seam — boot `createEngineCore({ container: el })` to mount the canvas inside `el`
+     instead of document.body. Falls back to document.body when omitted (city/office/hoard unchanged). */
+  const _container = opts.container instanceof Element ? opts.container : document.body;
+  const _cW = () => _container.clientWidth  || window.innerWidth;
+  const _cH = () => _container.clientHeight || window.innerHeight;
+
   /* 1) RENDERER. */
   let renderer;
   try {
@@ -85,9 +91,9 @@ export function createEngineCore(opts = {}) {
   const _rmQuery = (typeof window !== 'undefined' && window.matchMedia) ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   const BOOT_DPR_CAP = _coarse ? 1.5 : 2;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, BOOT_DPR_CAP));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(_cW(), _cH());
   renderer.setClearColor(0x0e0b07, 1);
-  document.body.appendChild(renderer.domElement);
+  _container.appendChild(renderer.domElement);
   const drawBuffer = renderer.getDrawingBufferSize(new THREE.Vector2());
 
   /* L78 CONTEXT-LOSS RECOVERY + PAUSE.
@@ -112,7 +118,7 @@ export function createEngineCore(opts = {}) {
   const AERIAL_BASE = 0.016;
   const FOG_NIGHT_TINT = new THREE.Color('#74508f');
   const _fogColor = new THREE.Color();
-  const rig = createCameraRig({ aspect: window.innerWidth / window.innerHeight });
+  const rig = createCameraRig({ aspect: _cW() / _cH() });
 
   /* 2b) SUN RIG (MOVED to core — post materials bind sunRig.* BY REFERENCE at construction). */
   const sunRig = createSunRig({ t: 0.5 });
@@ -320,8 +326,8 @@ export function createEngineCore(opts = {}) {
   const _contentResizers = [];
   function registerContentResizer(fn) { _contentResizers.push(fn); }
   function resize() {
-    rig.setViewport(window.innerWidth, window.innerHeight);
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    rig.setViewport(_cW(), _cH());
+    renderer.setSize(_cW(), _cH());
     const db = renderer.getDrawingBufferSize(new THREE.Vector2());
     sceneRT.setSize(db.x, db.y);
     filmicRT.setSize(db.x, db.y);
@@ -360,7 +366,7 @@ export function createEngineCore(opts = {}) {
   const governor = createQualityGovernor({ profiler, apply: applyQuality });
 
   function frameStart() { if (!_paused && !_contextLost) profiler.frameStart(); }
-  function frameEnd() { if (_paused || _contextLost) return; profiler.frameEnd(); governor.update(); }
+  function frameEnd() { if (_paused || _contextLost) return; profiler.frameEnd(); governor.update(); if (typeof window !== 'undefined') window.__frames++; }
   function setActive(visible) { _paused = !visible; if (typeof window !== 'undefined') window.__paused = _paused; }
 
   /* ============================================================

@@ -302,6 +302,9 @@ export function createPilotController({ rig, world } = {}) {
      Resume the craft's autonomy (it parks itself again) and hand the camera back to free control. */
   function release() {
     if (!craft) return false;
+    // L-cockpit: restore hull + hide canopy frame BEFORE nulling craft (we need craft.pilot).
+    if (craft.pilot.setBodyVisible) craft.pilot.setBodyVisible(true);
+    if (craft.pilot.setCockpitVisible) craft.pilot.setCockpitVisible(false);
     craft.pilot.resumeAutonomy();
     rig.clearFollow();
     if (rig.setSpringArm) rig.setSpringArm(null);   // L108: disarm the spring-arm → the free/attract camera is byte-identical again
@@ -390,9 +393,15 @@ export function createPilotController({ rig, world } = {}) {
       if (rig.clearEye) rig.clearEye();
       if (rig.setSpringArm) rig.setSpringArm({ segmentQuery: world.segmentHit, getGroundY: world.heightAt, radius: 0.25, enabled: true });
       if (craft) rig.setAzimuth(craft.pilot.getTransform().yaw + Math.PI, true);
+      // L-cockpit: restore the hull, hide the canopy frame.
+      if (craft.pilot.setBodyVisible) craft.pilot.setBodyVisible(true);
+      if (craft.pilot.setCockpitVisible) craft.pilot.setCockpitVisible(false);
     } else {
       // ENTERING cockpit — disarm the spring-arm (it would clip the eye through the hull)
       if (rig.setSpringArm) rig.setSpringArm({ enabled: false });
+      // L-cockpit: hide the hull so the eye doesn't see its own cabin shell; show the canopy frame.
+      if (craft.pilot.setBodyVisible) craft.pilot.setBodyVisible(false);
+      if (craft.pilot.setCockpitVisible) craft.pilot.setCockpitVisible(true);
     }
   }
 

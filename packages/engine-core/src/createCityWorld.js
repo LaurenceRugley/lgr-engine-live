@@ -838,7 +838,8 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
 
   /* The UNIVERSAL per-frame step. */
   function updateWorld(dt, elapsed, { shadowsOn = true, seasonTarget = 0 } = {}) {
-    if (typeof window !== 'undefined') window.__frames++;
+    // __frames is now incremented in createEngineCore.frameEnd() (lifted from here to fix the
+    // city-free page gap: lesson pages call frameEnd() but never updateWorld())
     shadowsOn = shadowsOn && core._qualityShadows;
     backdrop.material.uniforms.uTime.value = elapsed;
     filmicMaterial.uniforms.uTime.value    = elapsed;
