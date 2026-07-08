@@ -3,8 +3,7 @@
    ------------------------------------------------------------
    A focused single-purpose tool: drop an image in, dial an era / grid / dither / palette,
    and export game-ready pixel art. Same PixelKit shader the 3D scene uses — here pointed
-   at an uploaded image instead of the rendered frame. This is the John art-makeover
-   workflow: arbitrary art in (e.g. an AI concept), consistent pixel asset out.
+   at an uploaded image instead of the rendered frame. Arbitrary art in (e.g. an AI concept), consistent pixel asset out.
 
    TEACHING NOTES inline: reading user files safely (ImageBitmap, no eval/innerHTML),
    the median-cut palette extraction (in pixelkit.js), and exporting at the NATIVE pixel

@@ -39,7 +39,7 @@ import { createHoard } from '@lgr/hoard';
 import { createOffice } from '@lgr/office';
 
 /* PRESENTATION MODE — `?demo=1` strips all lab branding so the engine can be screen-
-   captured for a public/marketing context (the John demo goes out without "LGR" on it):
+   captured for a public/marketing context (captures go out without "LGR" on them):
    the hint bar is hidden and the refraction floor card loses its lettering (a neutral
    seabed). Everything else is identical — every key still works, so captures drive the
    same controls. URLSearchParams reads the query string (?demo=1) the page was opened with. */
@@ -60,7 +60,7 @@ window.__demo = DEMO;               // exposed so a capture harness can confirm 
 
 /* L-audio-sketch — `?audio=1|2|3` selects an ambient-bed preset for the listening sketch.
    NEVER in ?preview (audience gate). No ?audio = SILENT (off by default). */
-const AUDIO_PRESET = !PREVIEW && ['1', '2', '3'].includes(_q.get('audio')) ? Number(_q.get('audio')) : 0;
+const AUDIO_PRESET = !PREVIEW && _q.has('audio') ? (['1','2','3'].includes(_q.get('audio')) ? Number(_q.get('audio')) : 2) : 0;
 
 /* `?city=<seed>` + `?profile=<name>` pick the starting city. main owns citySeed/profileIndex
    as MUTABLE state (`G` rerolls the seed, `C` cycles the profile) and re-drives city.generate()
@@ -169,7 +169,7 @@ if (AUDIO_PRESET) {
         refDistance: 5,
         maxDistance: 35,
         loop:        true,
-        gain:        0.18,   // quiet enough not to overwhelm the bed, loud enough to prove attenuation
+        gain:        0.04,   // whisper-level: proves spatial attenuation without adding hiss
       });
 
       // Rotor init AFTER positionalField.init() so getListener() is non-null.
@@ -196,7 +196,8 @@ if (AUDIO_PRESET) {
       + 'border-radius:50%;background:rgba(27,29,36,.72);border:1.5px solid rgba(232,180,106,.35);'
       + 'color:#e8c069;font-size:18px;cursor:pointer;display:grid;place-items:center;backdrop-filter:blur(6px);}'
       + '.lgr-mute:hover{border-color:rgba(232,180,106,.65);}'
-      + '.lgr-mute:focus-visible{outline:2px solid #e8c069;outline-offset:3px;}';
+      + '.lgr-mute:focus-visible{outline:2px solid #e8c069;outline-offset:3px;}'
+      + '.lgr-vol{position:fixed;top:26px;right:58px;z-index:10;width:72px;accent-color:#e8c069;cursor:pointer;}';
     document.head.appendChild(_style);
     _muteChip = document.createElement('button');
     _muteChip.className = 'lgr-mute'; _muteChip.type = 'button';
@@ -208,6 +209,12 @@ if (AUDIO_PRESET) {
       _updateMuteChip();
     });
     document.body.appendChild(_muteChip);
+    const _volSlider = document.createElement('input');
+    _volSlider.type = 'range'; _volSlider.className = 'lgr-vol';
+    _volSlider.min = '0'; _volSlider.max = '1'; _volSlider.step = '0.01'; _volSlider.value = '1';
+    _volSlider.setAttribute('aria-label', 'Volume');
+    _volSlider.addEventListener('input', () => { _unlockAudio(); _audioBus.setMasterGain(Number(_volSlider.value)); });
+    document.body.appendChild(_volSlider);
 
     /* First canvas interaction also unlocks (pointerdown fires for both mouse + touch). */
     renderer.domElement.addEventListener('pointerdown', _unlockAudio, { once: true });
@@ -249,7 +256,7 @@ window.__shadows = shadowsOn;
 
 /* ============================================================
    13b) THE OFFICE-DIVE (Lesson 19, Phase A) — click a building → fly into its window →
-   resolve inside a warm office, the LIVING city behind the glass. This is John's centerpiece.
+   resolve inside a warm office, the LIVING city behind the glass.
    It's mostly ASSEMBLY of what the engine already owns:
      • render-to-texture (the FBO lineage: water → post → capture → now the window-city)
      • the L08 fullscreen-quad compositor (for the dive crossfade)
@@ -842,6 +849,7 @@ function refreshPilotHUD() {
   // L110 (audit P0-5): hide the ⌘K FAB while the pilot HUD is up — on touch the always-on FAB (bottom-right, z6) sits
   // exactly over the pilot CLIMB/DESCEND lift cluster (same corner, same z), and it paints on top (appended later).
   if (viewerUI && viewerUI.setFabVisible) viewerUI.setFabVisible(mode !== 'pilot');
+  document.body.classList.toggle('piloting', mode === 'pilot');
 }
 if (typeof window !== 'undefined') {
   // headless probe (state + callable possess/release/drive) — the same convention as __editor / __inspector.
@@ -899,6 +907,9 @@ const previewUI = (() => {
   /* preview hides ALL lab/editor chrome; preview-cinematic additionally hides the pilot HUD during the hero+tour */
   body.preview .vui, body.preview .hint, body.preview .lgr-hints, body.preview-cinematic .pilot-hud,
   body.preview-cinematic .pilot-drive { display: none !important; }
+  /* piloting hides all dev/editor chrome — only the clean flight HUD + chips + mute/vol remain */
+  body.piloting .vui, body.piloting .hint, body.piloting .lgr-hints,
+  body.piloting .pv-explore { display: none !important; }
   .pv-cap { position: fixed; left: 50%; bottom: 13%; transform: translateX(-50%); z-index: 7; max-width: 80vw; text-align: center;
     font: 600 clamp(18px,3.2vw,30px)/1.3 Georgia, serif; color: #f4ece0; text-shadow: 0 2px 18px rgba(0,0,0,.7);
     opacity: 0; transition: opacity .6s; pointer-events: none; letter-spacing: .01em; }
@@ -1039,7 +1050,7 @@ function toggleInspect() {
 }
 function enterOffice(focusUv) {
   if (sceneMode !== 'city') return;
-  if (!audienceModes().includes('office')) return;      // L110 (audit P0-6): prospect links (?preview=steel) must not dive into John's office — gate the VERB (O key, building-click, goToMode), not just the switcher chrome
+  if (!audienceModes().includes('office')) return;      // L110 (audit P0-6): prospect links (?preview=steel) must not dive into the office — gate the VERB (O key, building-click, goToMode), not just the switcher chrome
   endAttract();                                         // L110 (audit P0-2): end the boot attract-loop before diving — heli-follow/coach/seize-intercept must not survive the mode change
   if (piloting) releasePilot();                         // L76: stop driving before a dive
   if (worldMode) toggleWorld();                         // L64: leave the terrain world before diving
@@ -1117,37 +1128,22 @@ function _applyMode() {
 }
 
 /* L97 AUDIENCE → MODES — which scene modes the switcher shows, gated by audience (spec §2). Owner/no-preview sees
-   ALL; a generic ?preview=1 hides the personal projects (Office=John's, Hoard=personal); named slugs map to a
+   ALL; a generic ?preview=1 hides the personal projects (Office, Hoard); named slugs map to a
    curated set (Laurence tunes per client). One config object; the shell reads `audienceModes()` via state. */
 const ALL_MODES = ['city', 'world', 'office', 'hoard'];
-const AUDIENCE_MODES = { john: ['city', 'world', 'office'], steel: ['city', 'world'] };
+const AUDIENCE_MODES = { steel: ['city', 'world'] };
 function audienceModes() {
   const slug = (typeof window !== 'undefined' && window.__preview && window.__preview.mode) || null;
   if (!slug) return ALL_MODES;                                  // owner / dev — all projects
   return AUDIENCE_MODES[slug] || ['city', 'world'];             // named slug → curated; generic preview → city/world
 }
 
-/* L22 OFFICE INTERACTIONS — the laptop GAME PANEL (an HTML overlay), the phone "TRAVEL" (hot-swap the
-   window-city profile in place), and a shared flash/toast. The panel is a DOM sibling of the canvas,
-   composited by the browser via z-index — NOT a 3D object. That's the cheap way to host real UI, and
-   it's exactly the seam where John mounts his actual game. */
-let laptopOpen = false;
+/* L22 OFFICE INTERACTIONS — the phone "TRAVEL" (hot-swap the window-city profile in place),
+   and a shared flash/toast. Both are DOM siblings of the canvas, composited via z-index. */
 const officeUI = (() => {
-  if (typeof document === 'undefined') return { showLap() {}, toast() {}, flash() {} };
+  if (typeof document === 'undefined') return { toast() {}, flash() {} };
   const css = document.createElement('style');
   css.textContent = `
-  .lap { position: fixed; inset: 0; z-index: 5; display:flex; align-items:center; justify-content:center;
-    background: rgba(6,8,12,0.55); opacity:0; pointer-events:none; transition: opacity .25s; }
-  .lap.on { opacity:1; pointer-events:auto; }
-  .lap-win { width:min(560px,90vw); border-radius:14px; overflow:hidden; background:#0e1016;
-    border:1px solid #2a2f3a; box-shadow:0 20px 60px rgba(0,0,0,.6); font:13px/1.5 ui-monospace,monospace; color:#cdd3dc; }
-  .lap-bar { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#161a22; border-bottom:1px solid #2a2f3a; }
-  .lap-bar b { letter-spacing:.08em; color:#7fd0ff; }
-  .lap-x { cursor:pointer; border:0; background:#222833; color:#cdd3dc; min-width:44px;height:44px;border-radius:8px; font:inherit; }
-  .lap-body { padding:18px; }
-  .lap-body .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-  .lap-body button.stub { padding:9px 13px; border-radius:8px; border:1px solid #2a2f3a; background:#1a1f29; color:#cdd3dc; cursor:pointer; }
-  .lap-note { opacity:.55; margin-top:16px; font-size:11px; }
   .otoast { position:fixed; left:50%; top:18px; transform:translateX(-50%); z-index:5; padding:9px 18px; border-radius:999px;
     background:rgba(16,18,24,.85); color:#e8edf4; font:600 13px/1 ui-monospace,monospace; letter-spacing:.04em;
     opacity:0; transition:opacity .3s; pointer-events:none; }
@@ -1155,36 +1151,16 @@ const officeUI = (() => {
   .oflash { position:fixed; inset:0; z-index:4; background:#dfe8ff; opacity:0; pointer-events:none; }
   `;
   document.head.appendChild(css);
-  const lap = document.createElement('div'); lap.className = 'lap';
-  lap.innerHTML = `<div class="lap-win" role="dialog" aria-modal="true" aria-label="Portfolio OS — John's game"><div class="lap-bar"><b>PORTFOLIO OS — John's Game</b>
-    <button class="lap-x" title="Close (Esc)" aria-label="Close the laptop panel (Escape)">✕</button></div>
-    <div class="lap-body">Welcome back, Exec. <span style="opacity:.55">(placeholder — the real game UI mounts here)</span>
-    <div class="row"><button class="stub">▶ Resume</button><button class="stub">📈 Portfolio</button>
-    <button class="stub">🏢 Properties</button><button class="stub">⚙ Settings</button></div>
-    <div class="lap-note">This panel is an HTML overlay over the WebGL canvas — the seam where John drops his game in.</div>
-    </div></div>`;
   const toast = document.createElement('div'); toast.className = 'otoast';
   const flash = document.createElement('div'); flash.className = 'oflash';
-  document.body.append(lap, toast, flash);
-  lap.querySelector('.lap-x').addEventListener('click', () => closeLaptop());
-  lap.addEventListener('click', (e) => { if (e.target === lap) closeLaptop(); });   // click the backdrop to close
-  let toastT = 0, _lapPrev = null;
+  document.body.append(toast, flash);
+  let toastT = 0;
   return {
-    // L110 (audit B13): the laptop is a full-screen modal — manage focus like command-palette.js does. On open, move
-    // focus INTO the dialog (the ✕) so a keyboard user isn't stranded on the canvas behind it; on close, restore focus
-    // to whatever had it before. role=dialog + aria-modal=true (set on .lap-win) tell AT the background is inert.
-    showLap(v) {
-      lap.classList.toggle('on', v);
-      if (v) { _lapPrev = document.activeElement; const x = lap.querySelector('.lap-x'); if (x) x.focus(); }
-      else if (_lapPrev && _lapPrev.focus) { try { _lapPrev.focus(); } catch (e) { /* gone */ } _lapPrev = null; }
-    },
     toast(msg) { toast.textContent = msg; toast.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('on'), 1400); },
     flash() { flash.style.transition = 'none'; flash.style.opacity = '0.85';
       requestAnimationFrame(() => { flash.style.transition = 'opacity .55s'; flash.style.opacity = '0'; }); },
   };
 })();
-function openLaptop() { laptopOpen = true; officeUI.showLap(true); }
-function closeLaptop() { laptopOpen = false; officeUI.showLap(false); }
 function travelCity() {
   profileIndex = (profileIndex + 1) % PROFILES.length;   // cycle to the next city
   officeUI.flash();                                       // a quick whoosh masks the rebuild (no re-dive)
@@ -1347,8 +1323,8 @@ window.addEventListener('keydown', (e) => {
   // L90 H12: Esc exits the ✎ sculpt/editor brush — it's a `city` sub-mode, so without this it fell through
   // to exitOffice() (a no-op), breaking the universal-escape convention every other mode honours.
   if (e.key === 'Escape' && sculpting) { toggleSculpt(); e.preventDefault(); return; }
-  // L19/L22 OFFICE-DIVE: Esc closes the laptop panel first if open, exits the Hoard, else exits the office.
-  if (e.key === 'Escape') { if (laptopOpen) closeLaptop(); else if (sceneMode === 'hoard') exitHoard(); else exitOffice(); }
+  // L19 OFFICE-DIVE: Esc exits the Hoard, else exits the office.
+  if (e.key === 'Escape') { if (sceneMode === 'hoard') exitHoard(); else exitOffice(); }
   if (e.key === 'o' || e.key === 'O') { if (sceneMode === 'city') enterOffice(); else exitOffice(); }
   if (e.key === 'x' || e.key === 'X') { if (sceneMode === 'hoard') exitHoard(); else if (sceneMode === 'city') enterHoard(); }  // L32: toggle the Hoard
   // L23: F swaps the office FITOUT (corner ⇄ basement) — only meaningful while inside the office.
@@ -1554,12 +1530,11 @@ window.addEventListener('mouseup', (e) => {
     setPointer(e.clientX, e.clientY);
     const focus = pickBuilding();
     if (focus) enterOffice(focus);
-  } else if (sceneMode === 'office' && isClick && !laptopOpen) {
-    // L22: click an office prop → run its interaction (laptop game panel / phone travel / pet cat).
+  } else if (sceneMode === 'office' && isClick) {
+    // L22: click an office prop → run its interaction (phone travel / pet cat / feed fish).
     setPointer(e.clientX, e.clientY);
     const role = pickOfficeRole();
-    if (role === 'laptop') openLaptop();
-    else if (role === 'phone') travelCity();
+    if (role === 'phone') travelCity();
     else if (role === 'cat') office.petCat();
     else if (role === 'tank') office.feedFish();
   }
@@ -1637,9 +1612,9 @@ window.addEventListener('touchend', (e) => {
       if (!f) engine.inspector.release();
       window.__followKind = f ? f.kind : null; window.__followLabel = f ? f.label : null;
     } else if (sceneMode === 'city' && !sculpting && !worldMode) { const f = pickBuilding(); if (f) enterOffice(f); }   // L69: no building-dive while sculpting/in a world
-    else if (sceneMode === 'office' && !laptopOpen) {
+    else if (sceneMode === 'office') {
       const role = pickOfficeRole();
-      if (role === 'laptop') openLaptop(); else if (role === 'phone') travelCity(); else if (role === 'cat') office.petCat(); else if (role === 'tank') office.feedFish();
+      if (role === 'phone') travelCity(); else if (role === 'cat') office.petCat(); else if (role === 'tank') office.feedFish();
     }
   }
   poking = false; orbiting = false; pinchDist = 0; looking = false; lookDragging = false; sculptStroke = 0;   // L55/L69: end head-turn / sculpt stroke
@@ -1812,14 +1787,10 @@ function captureState() {
   return { lesson: 23, clock: sunRig.clock, style: (engine.vector ? 'vec-' : '') + style, profile: city.state.profile.key, weather: weatherRig.kind, scene: sceneMode };
 }
 /* L23: the office verbs the director needs that have NO keyboard binding (the dive/exit/weather DO
-   have keys — 'o'/Esc/'W' — and the director dispatches those directly). The HTML laptop panel is a
-   DOM overlay and is NOT in the canvas captureStream by design (L15) — the recorded beat shows the
-   3D life (cat, fish, the travelled city + weather through the glass); the panel is for live view. */
+   have keys — 'o'/Esc/'W' — and the director dispatches those directly). */
 const officeVerbs = {
   pet: () => office.petCat(),
   feed: () => office.feedFish(),
-  laptop: () => openLaptop(),
-  closeLaptop: () => closeLaptop(),
   travel: () => travelCity(),
   fitout: () => toggleFitout(),
 };
@@ -1903,7 +1874,7 @@ const viewerState = () => ({
   season: seasonStep,
   // L97: the precise scene mode + world flag → the shell shows mode-contextual controls (office tools only in the
   // office, inspect only in the open city, world tools only in the world). `preview` = a client/preview audience
-  // (?preview=…) → the mode-switch hides the personal projects (the Hoard game, John's Office) per the spec §2.
+  // (?preview=…) → the mode-switch hides the personal projects (the Hoard, Office) per the spec §2.
   sceneMode,                                  // 'city' | 'office' | 'hoard' | diving states
   worldMode,                                  // the procedural terrain world is up (a sub-mode of 'city')
   preview: !!(typeof window !== 'undefined' && window.__preview && window.__preview.mode),
@@ -2005,7 +1976,7 @@ if (sceneMode === 'city' && !PREVIEW) {
 // L110 (audit P0-1, THE funnel-breaker): register the attract seize-intercept for BOTH the bare-URL AND the ?preview
 // boot. It used to live inside the `!PREVIEW` block above, so on the exact link built to sell the engine, a prospect on
 // a phone tapped the framed helicopter and NOTHING seized — the tap fell through to the city click path (touchend →
-// pickBuilding → enterOffice), diving them into John's office with no chrome to escape. startPreview() spawns the same
+// pickBuilding → enterOffice), diving them into the office with no chrome to escape. startPreview() spawns the same
 // seize craft + attract in city mode, so this listener belongs to whichever city boot set them up. Guarded on
 // attractActive at event time (registration order vs startPreview/startAttract doesn't matter). pointerdown fires on
 // touch too (pointerType 'touch'), and it runs BEFORE touchend — so the seize sets piloting=true and the touchend

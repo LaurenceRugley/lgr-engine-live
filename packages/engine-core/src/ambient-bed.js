@@ -64,8 +64,8 @@ export function createAmbientBed(bus, { preset = 1 } = {}) {
     const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
     const d = buf.getChannelData(0); for (let i = 0; i < bufLen; i++) d[i] = Math.random() * 2 - 1;
     const noise = ctx.createBufferSource(); noise.buffer = buf; noise.loop = true;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 360; lp.Q.value = 0.4;
-    const windGain = ctx.createGain(); windGain.gain.value = 0.65;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220; lp.Q.value = 0.4;
+    const windGain = ctx.createGain(); windGain.gain.value = 0.25;
     noise.connect(lp); lp.connect(windGain); windGain.connect(mix);
     noise.start();
 

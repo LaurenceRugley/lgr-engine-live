@@ -101,7 +101,7 @@ export function createRotor(bus, positionalField, { getThrottle, getAltitude, ge
     _dummy.updateMatrixWorld();   // cascades to _pa → PannerNode position update
 
     const throttle    = Math.max(0, Math.min(1, getThrottle()));
-    const targetGain  = throttle > 0.005 ? 0.35 + throttle * 0.55 : 0;
+    const targetGain  = throttle > 0.005 ? 0.18 + throttle * 0.28 : 0;   // max ~0.46
     const targetFreq  = 14 + throttle * 8;   // 14 Hz idle → 22 Hz at full throttle
 
     const ctx = bus.context;
