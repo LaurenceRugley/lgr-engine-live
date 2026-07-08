@@ -1653,7 +1653,6 @@ export function createEngine({ demo = false, citySeed = 0, profileIndex = 0 } = 
       sp.mieG      = Math.max(0.50, sp.mieG - 0.25 * _lw);       // L-dusk-washout-r2: narrow the forward-scatter peak → less flat peachy haze at the into-sun view
     }
     skyAtmo.setSun(sunRig.sunArc); skyAtmo.setParams(sunRig.skyParams);   // L66: drive the Preetham sky (one clock)
-    skyAtmo.setLowSunKnee(0);   // L-dusk-washout-r4: the R3 knee is SUPERSEDED by the HalfFloat HDR buffer (ACES now tone-maps the real HDR) — disabled; knee code kept as a no-op, removed once HDR is confirmed live
     filmicMaterial.uniforms.uGradeSat.value = sunRig.grade.sat;           // L67: grade saturation (tint/lift are by-ref)
     filmicMaterial.uniforms.uGradeContrast.value = sunRig.grade.contrast; // L69: grade contrast (crisp noon)
     // L68 item 0: ease the sky-IBL DOWN at high sun (noon) — when the direct key light dominates + the sky is

@@ -18,6 +18,7 @@ export function createAudioBus() {
   if (!AC) return null;
 
   let ctx = null, master = null, _muted = false, _unlocked = false;
+  const _cache = new Map();   // url → Promise<AudioBuffer> — decode once, cache forever
 
   function _init() {
     if (ctx) return;
@@ -45,6 +46,31 @@ export function createAudioBus() {
     setMasterGain(v) {
       if (!master) return;
       master.gain.setTargetAtTime(Math.max(0, v), ctx.currentTime, 0.05);
+    },
+
+    /* Load + decode an audio file by URL; cached by URL (fetch once, decode once).
+       MUST be called after unlock() — ctx must exist.
+       C++ anchor: think of this as async disk-read → format-decode into a PCM buffer. */
+    loadSample(url) {
+      if (!ctx) throw new Error('audio-bus: loadSample requires unlock() first');
+      if (!_cache.has(url)) {
+        _cache.set(url, fetch(url).then(r => r.arrayBuffer()).then(ab => ctx.decodeAudioData(ab)));
+      }
+      return _cache.get(url);
+    },
+
+    /* Play a decoded AudioBuffer one-shot or looped. Returns a {stop()} handle.
+       `dest` overrides the routing target (default: master bus).
+       C++ anchor: BufferSourceNode ≈ a one-shot sampler voice — connect, trigger, fire. */
+    playBuffer(buf, { loop = false, gain = 1, when = 0, dest = null } = {}) {
+      if (!ctx || !buf) return { stop() {} };
+      const g = ctx.createGain(); g.gain.value = gain;
+      g.connect(dest || master);
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.loop = loop;
+      src.connect(g);
+      src.start(when || ctx.currentTime);
+      return { stop() { try { src.stop(); } catch (_) {} } };
     },
 
     /* Synthesis nodes route here (the master GainNode that feeds ctx.destination). */

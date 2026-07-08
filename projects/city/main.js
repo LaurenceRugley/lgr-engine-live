@@ -31,7 +31,7 @@
 import {
   THREE, createEngine, CAM, PROFILES, PROFILE_KEYS, createCapture, createViewerUI,
   createAppShell, readAppFlags, fromURLParams, createSceneTransition, createDevMode,
-  createAudioBus, createAmbientBed,
+  createAudioBus, createAmbientBed, createPositionalField, createRotor,
 } from '@lgr/engine-core';
 // L114: the loop Timer is now owned by createAppShell (was `const { Timer } = THREE` here); createHints is wrapped by shell.hints.
 
@@ -112,16 +112,70 @@ renderer.domElement.setAttribute('aria-label', 'Interactive 3D city — press F 
    The bus owns the ONE AudioContext. The bed is unlocked + started on the first user gesture
    (canvas pointerdown OR the mute chip click) so the autoplay law is never violated.
    `?preview` stays silent (AUDIO_PRESET = 0 when PREVIEW is true). */
+
+/* L-audio-full-layer-slice1 — per-frame audio tick (positionalField.update + rotor.update).
+   Declared at module scope so `frame` (defined below) can call it.
+   Assigned inside the if (AUDIO_PRESET) block only when the bus is available. */
+let _audioTick = null;
+
 if (AUDIO_PRESET) {
   const _audioBus = createAudioBus();
   if (_audioBus) {
     let _audioUnlocked = false;
     let _audioBed = null;
 
+    /* L-audio-full-layer-slice1: positional field + rotor.
+       Both are CREATED here at boot (capturing bus + camera refs) but NOT initialised until
+       the user's first gesture — bus.context is null until unlock() is called. */
+    const _positionalField = createPositionalField(_audioBus, rig.camera);
+    const _rotor = createRotor(_audioBus, _positionalField, {
+      // Returns 0 when not piloting — the rotor fades to silence automatically.
+      getThrottle:  () => engine.pilot.piloting ? Math.min(1, Math.abs(engine.pilot.speed) / 8) : 0,
+      getAltitude:  () => (engine.pilot.telemetry ? engine.pilot.telemetry.altitude : 0),
+      getWorldPos:  (v) => { const c = engine.seizeCraft; if (c && c.getWorldPos) c.getWorldPos(v); else v.set(0, 5, 0); },
+    });
+
     function _unlockAudio() {
       if (_audioUnlocked) return;
       _audioUnlocked = true;
+
+      // CRITICAL INIT ORDER (per REFUTE CORRECTION 1):
+      // bus.unlock() creates the AudioContext (bus.context goes from null → live).
       _audioBus.unlock();
+
+      // positionalField.init() calls THREE.AudioContext.setContext(bus.context) FIRST,
+      // then creates the AudioListener and attaches it to camera.
+      // MUST come before new AudioListener() anywhere — including inside _rotor.init().
+      _positionalField.init();
+
+      // Proof positional source: looped white-noise at a fixed island-shore position.
+      // Demonstrates distance attenuation — loud near the shore, silent from far away.
+      // Replaced by a real CC0 ocean/gull clip in slice 2.
+      const _ctx = _audioBus.context;
+      const _noiseLen = _ctx.sampleRate * 3;   // 3-second loop
+      const _noiseBuf = _ctx.createBuffer(1, _noiseLen, _ctx.sampleRate);
+      const _nd = _noiseBuf.getChannelData(0);
+      for (let i = 0; i < _noiseLen; i++) _nd[i] = Math.random() * 2 - 1;
+      // Fade edges to zero so the loop point is click-free.
+      const _FADE = 256;
+      for (let i = 0; i < _FADE; i++) {
+        const f = i / _FADE;
+        _nd[i]               *= f;
+        _nd[_noiseLen - 1 - i] *= f;
+      }
+      _positionalField.add({
+        getPos:      (v) => v.set(8, 0.5, 8),  // island shore corner — fixed world position
+        buffer:      _noiseBuf,
+        refDistance: 5,
+        maxDistance: 35,
+        loop:        true,
+        gain:        0.18,   // quiet enough not to overwhelm the bed, loud enough to prove attenuation
+      });
+
+      // Rotor init AFTER positionalField.init() so getListener() is non-null.
+      _rotor.init();
+
+      // Ambient bed — unchanged from the L-audio-sketch, started last.
       _audioBed = createAmbientBed(_audioBus, { preset: AUDIO_PRESET });
       _audioBed.start();
       if (_muteChip) _updateMuteChip();
@@ -157,6 +211,13 @@ if (AUDIO_PRESET) {
 
     /* First canvas interaction also unlocks (pointerdown fires for both mouse + touch). */
     renderer.domElement.addEventListener('pointerdown', _unlockAudio, { once: true });
+
+    /* L-audio-full-layer-slice1 — per-frame tick: update spatial positions + rotor gain. */
+    _audioTick = (dt) => {
+      if (!_audioUnlocked) return;
+      _positionalField.update();
+      _rotor.update(dt);
+    };
   }
 }
 
@@ -1639,6 +1700,8 @@ const frame = (dt, t) => {
   if (piloting) { engine.pilot.step(dt, pilotAxes); if (!engine.pilot.active) { piloting = false; window.__piloting = false; refreshPilotHUD(); } }
   else if (heroActive) heroUpdate(dt);                  // L79: the scripted hero drives the possessed craft + chase cam
   rig.update(dt);
+  // L-audio-full-layer-slice1: update positional source positions + rotor gain (after rig + pilot, before render).
+  if (_audioTick) _audioTick(dt);
   if (sceneMode === 'hoard') updateOccluders(hoard.player);            // L33: fade towers between the camera + player
 
   // --- inject a drop where the pointer is poking (city mode only) — set uMouse BEFORE updateWorld's

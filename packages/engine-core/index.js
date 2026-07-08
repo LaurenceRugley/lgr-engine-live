@@ -129,6 +129,9 @@ export {
 // L-audio-sketch — the engine's one AudioContext owner + ambient-bed presets (no external assets).
 export { createAudioBus } from './src/audio-bus.js';
 export { createAmbientBed } from './src/ambient-bed.js';
+// L-audio-full-layer-slice1 — positional audio field + helicopter rotor synth.
+export { createPositionalField } from './src/positional-field.js';
+export { createRotor } from './src/rotor.js';
 
 // Raw shader strings a few app-level materials compose directly (the dive crossfade; the
 // pixelate tool). Exporting them keeps projects from reaching into the package's src/shaders.

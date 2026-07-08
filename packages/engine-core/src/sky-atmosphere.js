@@ -38,27 +38,6 @@ export function createSkyAtmosphere({ scale = 90 } = {}) {
   // second sun competing with it. The sky still GLOWS around the sun direction (the atmospheric scattering, untouched).
   u.showSunDisc.value = 0;
 
-  /* L-dusk-washout-r3 — LOW-SUN HIGHLIGHT KNEE. Facing the low sun, the Preetham `Sky` legitimately computes
-     LINEAR luminance 5–15× over 1.0 across a broad cone. The city beauty pass runs with NoToneMapping and writes to
-     an 8-bit `beautyRT`, so that over-1.0 sky CLAMPS to a uniform 1.0 plateau BEFORE the filmic ACES pass ever runs
-     → hue + horizon→zenith gradient die → the flat warm wash (workflow-diagnosed 2026-07-07; rounds 1-2 only retuned
-     the sky's turbidity/mie/mieG SHAPE, never this MAGNITUDE, so they couldn't fix it). Fix: a luma-preserving
-     highlight rolloff INSIDE the sky shader (upstream of the clamp) that pulls luma>0.85 asymptotically under 1.0 —
-     scaling RGB by ONE shared luma ratio so warm hue is preserved exactly and the gradient survives the 8-bit write.
-     Gated by `uLowSunKnee` (driven per-frame from lowSunWashK): 0 at noon/night → the branch is a pure no-op →
-     noon byte-identical; stylized tiers never render the sky (visible=false) → untouched. Applied to the VISIBLE
-     `mesh` ONLY — the separate `_envSky` (below) has no knee, so the sky-IBL that lights buildings is unchanged
-     (the night-fill win + building brightness are untouched). Anchored on three/addons Sky.js:312 output line. */
-  u.uLowSunKnee = { value: 0.0 };
-  mesh.material.onBeforeCompile = (shader) => {
-    shader.uniforms.uLowSunKnee = u.uLowSunKnee;
-    shader.fragmentShader = 'uniform float uLowSunKnee;\n' + shader.fragmentShader.replace(
-      'gl_FragColor = vec4( texColor, 1.0 );',
-      'if ( uLowSunKnee > 0.0 ) { float _lHi = dot( texColor, vec3( 0.2126, 0.7152, 0.0722 ) ); float _over = max( 0.0, _lHi - 0.45 ); if ( _over > 0.0 ) texColor *= ( 0.45 + ( 1.0 - exp( -_over * ( 1.2 * uLowSunKnee ) ) ) * 0.30 ) / max( _lHi, 1e-4 ); }\n\tgl_FragColor = vec4( texColor, 1.0 );'
-    );
-  };
-  function setLowSunKnee(k) { u.uLowSunKnee.value = k; }        // drive from lowSunWashK(sunRig.sunArc.y) — 0 at noon → no-op
-
   function setSun(vec) { u.sunPosition.value.copy(vec); }      // drive from sunRig.sunArc — one clock
   function setParams(p) {                                       // drive from sunRig.skyParams — keyframed
     if (!p) return;
@@ -90,5 +69,5 @@ export function createSkyAtmosphere({ scale = 90 } = {}) {
     _envRT = _pmrem.fromScene(_envScene);                      // render + prefilter the sky → an env map
     return _envRT.texture;
   }
-  return { mesh, setSun, setParams, setLowSunKnee, buildEnv, get material() { return mesh.material; } };
+  return { mesh, setSun, setParams, buildEnv, get material() { return mesh.material; } };
 }
