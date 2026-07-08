@@ -217,7 +217,7 @@ export function vectorizeTower(material, {
           vec2  f    = fract(vec2(colCoord, rowCoord));
           float pane = step(0.18, f.x) * step(f.x, 0.82) * step(0.22, f.y) * step(f.y, 0.80);
           float r    = winHash(cell);
-          float lit  = step(r, uWindowGlow * uWinLit); // cap lit fraction → staggered skyline
+          float lit  = step(r, uWinLit); // L114: decouple count from glow — full litFrac lit at any glow; emissive scales by uWindowGlow so noon=0 stays byte-identical
           float s = fract(r * 13.0);                    // pick among the (≤3) lit-pane colours
           wcol = s < 0.34 ? uWinA : (s < 0.67 ? uWinB : uWinC);
           return vec2(sideMask * pane, lit);
@@ -248,7 +248,7 @@ export function vectorizeTower(material, {
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           vec3 wcol; vec2 w = winTerms(wcol);
-          totalEmissiveRadiance += w.x * w.y * wcol * uWindowGlow * 2.6;   // L93: brighter lit windows → they GLOW + the existing bloom catches them (the "city ignites" beat)
+          totalEmissiveRadiance += w.x * w.y * wcol * uWindowGlow * 4.5;   // L114: HDR-tuned (was 2.6 pre-R4; HalfFloat beautyRT feeds ACES unclipped, higher ceiling before shoulder)
         }`)
       .replace('#include <opaque_fragment>', `#include <opaque_fragment>
         if (uVector > 0.5) {
@@ -257,7 +257,7 @@ export function vectorizeTower(material, {
           vec3 wcol; vec2 w = winTerms(wcol);
           vec3 glass = vec3(0.17, 0.23, 0.34);          // dark glass-blue panes (day)
           col = mix(col, glass, w.x * 0.85);
-          col += w.x * w.y * wcol * uWindowGlow * 2.2;  // …windows EMIT (unshadowed) at night — L93: brighter ignite
+          col += w.x * w.y * wcol * uWindowGlow * 3.8;  // L114: vector-tier boost (direct RGB, no ACES — was 2.2)
           gl_FragColor = vec4(col, diffuseColor.a);
         }`)));
   };
