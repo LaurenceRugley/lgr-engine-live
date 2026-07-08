@@ -184,6 +184,12 @@ export function createCameraRig({
   let armEnabled = false, armSegmentQuery = null, armGroundFn = null, armRadius = 0.25;
   let armDist = goal.distance, armGroundY = 0;
 
+  // L-cockpit FP EYE state — set by setEye() from the pilot controller, cleared by clearEye() on exit.
+  // When fpActive, update() early-branches: skips orbit + spring-arm, places cam directly at fpPos looking fpDir.
+  let fpActive = false;
+  const fpPos = new THREE.Vector3();
+  const fpDir = new THREE.Vector3(0, 0, 1);
+
   const activeCamera = () => (mode === CAM.PERSPECTIVE ? perspective : ortho);
 
   /* ----- MODE SWITCH: snap projection, damp the rest ------------------------
@@ -270,6 +276,23 @@ export function createCameraRig({
 
   /* ----- PER-FRAME UPDATE: damp, then place the active camera ---------------- */
   function update(dt) {
+    // L-cockpit FP EYE early-branch: when the pilot controller has set a first-person eye this frame,
+    // skip ALL orbit / follow / spring-arm math and place the camera directly. The orbit state (curr.*)
+    // freezes while in cockpit mode and resumes seamlessly on clearEye() + return to chase.
+    // CRITICAL (Opus-refuted): gating only the spring-arm branch is insufficient — the Spherical→Cartesian
+    // block at ~:290 UNCONDITIONALLY clobbers cam.position + cam.lookAt after any spring-arm branch. The
+    // early-return here is the only correct fix (both branches skip entirely, one `if`, zero per-frame alloc).
+    if (fpActive) {
+      const cam = activeCamera();
+      cam.position.copy(fpPos);
+      cam.lookAt(fpPos.x + fpDir.x, fpPos.y + fpDir.y, fpPos.z + fpDir.z);
+      if (cam.isOrthographicCamera) {
+        const halfH = curr.zoom, halfW = halfH * aspectRatio;
+        cam.left = -halfW; cam.right = halfW; cam.top = halfH; cam.bottom = -halfH;
+        cam.updateProjectionMatrix();
+      }
+      return;
+    }
     // L63: if we're FOLLOWING something, refresh the goal target from its live world
     // position BEFORE damping, so the camera eases toward where the object is NOW.
     if (followFn) { followFn(_followPos); goal.target.copy(_followPos); }
@@ -385,6 +408,13 @@ export function createCameraRig({
     if (armEnabled) { armDist = curr.distance; armGroundY = curr.target.y; }   // seed from the current framing so the first frame doesn't pop
   }
 
+  /* L-cockpit: setEye(pos, lookDir) — pilot controller calls this every COCKPIT frame to override
+     the orbit placement. lookDir is the pre-composed world-space look direction (heading + seated look
+     offsets); camera-rig calls cam.lookAt(fpPos + fpDir) — no quaternion composing needed here.
+     clearEye() exits fp mode so the orbit block resumes on the next update() call. */
+  function setEye(pos, lookDir) { fpPos.copy(pos); fpDir.copy(lookDir); fpActive = true; }
+  function clearEye() { fpActive = false; }
+
   return {
     get camera() { return activeCamera(); },
     get mode()   { return mode; },
@@ -393,6 +423,7 @@ export function createCameraRig({
     get azimuth() { return curr.azimuth; },        // L32: live heading, for camera-relative movement
     get following() { return !!followFn; },        // L63: is the inspection lens locked onto something?
     setTarget, setZoom, setFollow, clearFollow, setSpringArm,   // L108: the chase spring-arm (pilot arms on possess, disarms on release)
+    setEye, clearEye,                                          // L-cockpit: first-person eye override (pilot sets each cockpit frame, clears on exit)
     setAzimuth, setElevation,        // L76: the chase-cam angle seam (the pilot swings the cam behind the craft's heading)
     /* styleT — the rig's current zoom as a normalized 0..1 (0 = nearest, 1 =
        farthest), read off the DAMPED value so a style crossfade follows the eased

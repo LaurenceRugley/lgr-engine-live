@@ -483,6 +483,7 @@ if (typeof window !== 'undefined') {
    first, so the pilot and the inspector never both drive rig.setFollow (the brief's pause-point). */
 let piloting = false;                                  // does the pilot own input + the camera this frame?
 window.__piloting = false;
+let pilotLooking = false;                              // L-cockpit: right-drag look-around is active (bypasses the piloting early-return)
 const pilotAxes = { throttle: 0, steer: 0, lift: 0 };   // the axis bundle (a POD struct the model reads; L77 + lift)
 const heldPilot = new Set();                           // tokens currently held (keyboard ∪ touch d-pad) → axes
 let stickThrottle = 0, stickSteer = 0;                 // L104 P2: ANALOG axes from the floating thumbstick (touch) — compose with the keys/lift
@@ -697,6 +698,16 @@ function setDev(on) {
   try { localStorage.setItem('lgr_dev_on', on ? '1' : '0'); } catch (e) {}
   if (typeof window !== 'undefined') window.__devOn = !!devMode;
 }
+// L-cockpit: toggle between the external chase cam and the first-person cockpit eye.
+// Only callable while piloting; guards inside engine.pilot.setView (no-op with no craft).
+let _cockpitActive = false;
+function toggleCockpit() {
+  _cockpitActive = !_cockpitActive;
+  engine.pilot.setView(_cockpitActive ? 'cockpit' : 'chase');
+  if (_cockpitView) _cockpitView.textContent = _cockpitActive ? '👁 Chase' : '🎯 Cockpit';
+}
+let _cockpitView = null;   // the cockpit-toggle button in the pilot HUD (created in pilotHUD below)
+
 function releasePilot() {
   if (!piloting) return false;
   // L110 (audit B13): the pilot Exit button is about to inert (HUD hides) — if it (or the canvas) had keyboard focus,
@@ -704,6 +715,7 @@ function releasePilot() {
   const _exitEl = document.querySelector('.pilot-exit');
   const _returnFocus = document.activeElement === _exitEl || document.activeElement === renderer.domElement || document.activeElement === document.body;
   _morphTimers.forEach(clearTimeout); _morphTimers = [];   // L106 (audit fix): cancel any in-flight takeover-morph so its trailing setPostMode() can't stomp the tier you pick right after exiting
+  _cockpitActive = false; if (_cockpitView) _cockpitView.textContent = '🎯 Cockpit';   // L-cockpit: reset toggle on exit
   engine.pilot.release(); piloting = false; window.__piloting = false; heldPilot.clear(); recomputeAxes();
   refreshPilotHUD();
   if (_returnFocus && _flyChip && _flyChip.classList.contains('on')) _flyChip.focus();
@@ -729,6 +741,8 @@ const pilotHUD = (() => {
     background:rgba(16,18,24,.78); color:#e8edf4; letter-spacing:.04em; }
   .pilot-exit { position:absolute; right:16px; top:16px; min-width:44px; height:44px; border-radius:10px; border:1px solid #2a2f3a;
     background:rgba(16,18,24,.85); color:#ff9b8a; cursor:pointer; pointer-events:auto; font:inherit; }
+  .pilot-cockpit { position:absolute; right:72px; top:16px; padding:0 14px; height:44px; border-radius:10px; border:1px solid #2a2f3a;
+    background:rgba(16,18,24,.85); color:#e8edf4; cursor:pointer; pointer-events:auto; font:inherit; white-space:nowrap; }
   /* L107 (UI audit M1) — the DESKTOP movement d-pad sits bottom-LEFT (mirrors the mobile thumbstick zone + gamepad
      convention), leaving bottom-CENTRE for the chip row (🌅 Time while piloting) and bottom-RIGHT for CLIMB/DESCEND.
      Was bottom-centre, which collided with the chips. (On touch the pad is clipped away — .pilot-hud.touch below.) */
@@ -766,6 +780,7 @@ const pilotHUD = (() => {
   // L104 a11y (WCAG 4.1.2): every glyph button carries an aria-label (its text is a bare arrow/glyph), and the
   // d-pad + lift are labelled groups so a screen reader announces the cluster on entry.
   hud.innerHTML = `<div class="pilot-speed">—</div><button class="pilot-exit" title="Exit (Esc)" aria-label="Exit the craft (Escape)">✕</button>
+    <button class="pilot-cockpit" title="Cockpit view (C)" aria-label="Toggle cockpit view (C key)">🎯 Cockpit</button>
     <div class="pilot-pad" role="group" aria-label="Flight — thrust and steering (hold a control)">
       <span></span><button data-tok="up" aria-label="Thrust forward — hold">▲</button><span></span>
       <button data-tok="left" aria-label="Turn left — hold">◀</button><button data-tok="down" aria-label="Reverse — hold">▼</button><button data-tok="right" aria-label="Turn right — hold">▶</button>
@@ -775,6 +790,8 @@ const pilotHUD = (() => {
   drive.inert = true; hud.inert = true;   // L104 a11y: hidden at boot → out of the tab order until update() activates them
   drive.addEventListener('click', () => tryPossess());
   hud.querySelector('.pilot-exit').addEventListener('click', () => releasePilot());
+  _cockpitView = hud.querySelector('.pilot-cockpit');   // L-cockpit: store ref so toggleCockpit() can update its label
+  _cockpitView.addEventListener('click', () => toggleCockpit());
   // on-screen d-pad + climb/dive → the SAME held-set as the keyboard (press to engage, release/leave to disengage).
   hud.querySelectorAll('.pilot-pad button, .pilot-lift button').forEach((b) => {
     const tok = b.dataset.tok;
@@ -1230,6 +1247,7 @@ window.addEventListener('keydown', (e) => {
   // day/night + the beauty tier still read while you drive (success criterion 5).
   if (piloting) {
     if (e.key === 'Escape') { releasePilot(); e.preventDefault(); return; }
+    if (e.key === 'c' || e.key === 'C') { toggleCockpit(); e.preventDefault(); return; }   // L-cockpit: toggle cockpit POV (consumed so it never reaches cycleCityProfile)
     const tok = PILOT_KEY[e.key.length === 1 ? e.key.toLowerCase() : e.key];
     if (tok) { pilotHold(tok, true); e.preventDefault(); return; }
   }
@@ -1469,6 +1487,8 @@ function pickOfficeRole() {
 
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('mousedown', (e) => {
+  // L-cockpit: right-drag while piloting feeds cockpit head-turn — bypasses the piloting guard below.
+  if (piloting && e.button === 2) { pilotLooking = true; lastX = e.clientX; lastY = e.clientY; e.preventDefault(); return; }
   if (piloting) return;                                 // L76: the chase cam is locked while driving (drive via keys / the HUD d-pad)
   if (e.button === 0) {
     poking = sceneMode === 'city' && !inspecting && !sculpting;  // L63/L69: inspect orbits/follows, sculpt brushes — not poke
@@ -1485,6 +1505,8 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   if (e.button === 2) { orbiting = true; lastX = e.clientX; lastY = e.clientY; }  // right-drag orbits (also while sculpting)
 });
 window.addEventListener('mousemove', (e) => {
+  // L-cockpit: feed right-drag deltas to the pilot head-turn (bypasses the piloting guard below).
+  if (pilotLooking && piloting) { engine.pilot.addLookDrag(e.clientX - lastX, e.clientY - lastY); lastX = e.clientX; lastY = e.clientY; return; }
   if (piloting) return;                                 // L76: no orbit/hover while driving
   if (poking) setPointer(e.clientX, e.clientY);
   if (orbiting) {
@@ -1516,6 +1538,7 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 window.addEventListener('mouseup', (e) => {
+  if (pilotLooking) { pilotLooking = false; return; }   // L-cockpit: end right-drag head-turn
   if (piloting) return;                                 // L76: clicks don't follow/dive while driving
   if (sceneMode === 'hoard') hoard.setFiring(false);                   // L33: stop firing on release
   const isClick = Math.hypot(e.clientX - downX, e.clientY - downY) < 6 && performance.now() - downT < 350;

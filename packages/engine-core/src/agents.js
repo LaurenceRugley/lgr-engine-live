@@ -80,7 +80,7 @@ function rushHour(t) {
    intersections are every (X-line, Z-line) crossing → an (N+1)×(N+1) node grid; edges
    connect orthogonally-adjacent nodes. Same math citygen used to place the blocks, so the
    roads land exactly in the reserved gaps (that's why LAYOUT is shared, not re-guessed). */
-function buildGraph() {
+export function buildGraph() {
   const { PITCH, N, PLINTH_TOP } = LAYOUT;
   const G = N + 1;                                   // 7 grid lines per axis (→ 49 nodes)
   const y = PLINTH_TOP + 0.04;                       // a hair above the street slab (PLINTH_TOP+0.02)

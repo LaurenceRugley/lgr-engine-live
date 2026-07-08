@@ -23,10 +23,15 @@ export * as THREE from 'three';
 
 // The engine + its building blocks.
 export { createEngine } from './src/createEngine.js';
+// Generality fix (2026-07-08): the core/city split — future projects boot createEngineCore without the city.
+export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.js';
+export { createCityWorld } from './src/createCityWorld.js';
 export { createCameraRig, CAM } from './src/camera-rig.js';
 export { createCity, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32 } from './src/citygen.js';
 export { createSunRig } from './src/sun-rig.js';
-export { createCityLife } from './src/agents.js';
+export { createCityLife, buildGraph } from './src/agents.js';
+// L-streetlamps — warm glow sprites along the city street graph (night-only, byte-identical-safe).
+export { createStreetLights } from './src/street-lights.js';
 export { createWaterLife } from './src/water-life.js';
 export { createLandmarkFactory } from './src/landmarks.js';
 export { createWeatherRig } from './src/weather-rig.js';

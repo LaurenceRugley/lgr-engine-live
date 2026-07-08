@@ -36,6 +36,7 @@
    ============================================================ */
 import * as THREE from 'three';
 import { damp, clamp } from './math.js';
+import { createSeatedLook } from './interior.js';
 
 /* L107 — the ONE "no open water here" sentinel, shared by the medium probe's guard (`waterY > NO_WATER`) and by
    every waterHeightAt sampler (the engine default + the city sea sampler). Was two mismatched locals (pilot -900 /
@@ -127,6 +128,9 @@ export const CRAFT_PROFILE = {
   maxV: 5.0,         // max vertical speed (u/s)
   chaseDist: 9.5,    // a wider chase than the ATV (it's airborne)
   chaseElev: 0.40,   // ≈ 23° chase pitch
+  // L-cockpit: the eye anchor in the craft's LOCAL frame (right/up/forward). Used by the cockpit POV only;
+  // profiles without `eye` (e.g. ATV_PROFILE) fall back to a safe default in the pilot controller.
+  eye: { x: 0, y: 0.35, z: 0.1 },   // centred, 0.35 u above craft origin, 0.1 u forward (cockpit sill)
   // L108 (part C): the collision SPHERE — cabin-sized, NOT rotor-tip (studio demos cheat small so grazes feel
   // forgiving). A profile carrying `collide` opts the craft into building push-out; the ATV omits it (v1 = air craft).
   // PUSH_MAX must exceed maxSpeed (8) so a full-throttle head-on ram can't out-run the push-out and tunnel
@@ -260,6 +264,14 @@ export function createPilotController({ rig, world } = {}) {
   let craft = null;          // the possessed pilotable (a followable carrying `.pilot`)
   let model = null;          // the active MovementModel (Strategy instance)
   let enterT = 0;            // ENTERING countdown
+  let fpBlend = 0;           // 0 = chase view · 1 = cockpit POV (today only integer values; named for future tween)
+
+  // L-cockpit: a SEATED LOOK instance owned by this controller (not reused from the office — one instance each).
+  // Drives head-turn from right-drag / touch look-zone while in cockpit mode; smooth recenter on exit.
+  const pilotLook = createSeatedLook({ yawLimit: 70, pitchUp: 25, pitchDown: 20 });
+  // Scratch vectors: built once in the closure, never allocated in the hot path.
+  const _eyeWorld = new THREE.Vector3();
+  const _eyeDir   = new THREE.Vector3();
 
   /* possess(pilotable): bind the craft's model, freeze its autonomy, and start the ENTERING camera
      MOVE (a swing-in to the chase view — never a cut). Returns false if the thing isn't pilotable. */
@@ -281,7 +293,7 @@ export function createPilotController({ rig, world } = {}) {
     // current + future pilotable inherits it, zero per-entry-path wiring). Gate is `piloting` (armed here, disarmed
     // in release). NOTE for when the cockpit POV ships: also gate `enabled` on `fpBlend < 0.5` (unshipped now → don't
     // reference it, or `undefined < 0.5` disables the arm — spec decision R2).
-    if (rig.setSpringArm) rig.setSpringArm({ segmentQuery: world.segmentHit, getGroundY: world.heightAt, radius: 0.25, enabled: true });
+    if (rig.setSpringArm) rig.setSpringArm({ segmentQuery: world.segmentHit, getGroundY: world.heightAt, radius: 0.25, enabled: fpBlend < 0.5 });
     phase = 'entering'; enterT = ENTER_TIME;
     return true;
   }
@@ -293,6 +305,8 @@ export function createPilotController({ rig, world } = {}) {
     craft.pilot.resumeAutonomy();
     rig.clearFollow();
     if (rig.setSpringArm) rig.setSpringArm(null);   // L108: disarm the spring-arm → the free/attract camera is byte-identical again
+    fpBlend = 0; pilotLook.recenter();               // L-cockpit: exit fp mode, smooth recenter of head-turn
+    if (rig.clearEye) rig.clearEye();               // let camera-rig's orbit block resume
     craft = null; model = null; phase = 'free'; enterT = 0;
     return true;
   }
@@ -329,11 +343,66 @@ export function createPilotController({ rig, world } = {}) {
       if (collideOn) world.collide(s, dt, cfg);
     }
     p.setTransform(s);                                      // write the new transform onto the entity's mesh
-    rig.setAzimuth(s.yaw + Math.PI);                        // reactive chase: rig K-damps curr→goal = lag/swing
+
+    // Tick the seated look every PILOTING frame (smooth recenter when fpBlend=0, active head-turn when =1).
+    pilotLook.update(dt);
+
+    if (fpBlend >= 0.5) {
+      // COCKPIT POV: place the eye inside the craft and aim it along heading + seated look offset.
+      // `eye` is a LOCAL offset from the craft's centre (right/up/forward in the craft's frame).
+      // Fallback to a safe centred position for profiles without an `eye` (e.g. ATV_PROFILE).
+      const eye = (p.profile && p.profile.eye) || { x: 0, y: 0.3, z: 0 };
+      const sinY = Math.sin(s.yaw), cosY = Math.cos(s.yaw);
+      // Rotate the local eye offset by the craft's yaw (Y-axis rotation):
+      //   worldX += localRight*cos(yaw) + localForward*sin(yaw)
+      //   worldZ += -localRight*sin(yaw) + localForward*cos(yaw)
+      _eyeWorld.set(
+        s.x + eye.x * cosY + eye.z * sinY,
+        s.y + eye.y,
+        s.z - eye.x * sinY + eye.z * cosY,
+      );
+      // Look direction = craft heading rotated by the seated-look yaw+pitch offsets.
+      // At combinedYaw=0 / lPitch=0 this gives (0,0,1) = straight forward along +Z. C++ anchor:
+      // equivalent to composing a Y-rotation (combinedYaw) then an X-rotation (lPitch) on the +Z axis.
+      const combinedYaw = s.yaw + pilotLook.yaw;   // heading + head-turn yaw offset
+      const lPitch = pilotLook.pitch;               // head-tilt (positive = looking up)
+      _eyeDir.set(
+        Math.sin(combinedYaw) * Math.cos(lPitch),
+        Math.sin(lPitch),
+        Math.cos(combinedYaw) * Math.cos(lPitch),
+      );
+      rig.setEye(_eyeWorld, _eyeDir);
+    } else {
+      rig.setAzimuth(s.yaw + Math.PI);                      // reactive chase: rig K-damps curr→goal = lag/swing
+    }
   }
 
+  /* setView('chase'|'cockpit'): toggle between the external chase cam and the first-person cockpit eye.
+     Guards: no-op if no craft possessed (can't mount a cockpit eye with no craft). */
+  function setView(view) {
+    if (!craft) return;
+    const next = (view === 'cockpit') ? 1 : 0;
+    if (next === fpBlend) return;
+    fpBlend = next;
+    if (fpBlend < 0.5) {
+      // RETURNING to chase — recenter head-turn, re-arm the spring-arm, snap chase azimuth behind the craft
+      pilotLook.recenter();
+      if (rig.clearEye) rig.clearEye();
+      if (rig.setSpringArm) rig.setSpringArm({ segmentQuery: world.segmentHit, getGroundY: world.heightAt, radius: 0.25, enabled: true });
+      if (craft) rig.setAzimuth(craft.pilot.getTransform().yaw + Math.PI, true);
+    } else {
+      // ENTERING cockpit — disarm the spring-arm (it would clip the eye through the hull)
+      if (rig.setSpringArm) rig.setSpringArm({ enabled: false });
+    }
+  }
+
+  /* addLookDrag(dx, dy): feed pointer deltas into the cockpit head-turn (called by main.js from the
+     right-drag / touch look-zone path that bypasses the piloting early-return). */
+  function addLookDrag(dx, dy) { pilotLook.addDrag(dx, dy); }
+
   return {
-    possess, release, step,
+    possess, release, step, setView, addLookDrag,
+    get fpBlend() { return fpBlend; },
     get active() { return !!craft; },
     get piloting() { return phase === 'piloting'; },
     get state() { return phase; },
