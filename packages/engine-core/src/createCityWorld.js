@@ -52,6 +52,10 @@ import waterSurfaceFrag  from './shaders/water-surface.frag';
 
 // L112 — night factor (city-side: renderCityPipeline + renderCityBeautyTo)
 const sunDownK = (y) => 1.0 - THREE.MathUtils.smoothstep(y, -0.02, 0.45);
+// F2b — horizon gate for the +0.35·sunDownK fill boost (grazing-sun washout fix).
+// 0 when sun is at or above the horizon (y >= 0), ramps to 1 at y = -0.06 (sun 6° below).
+// Formula: 1 - smoothstep(y, -0.06, 0). Unit-tested in city-fill-gate.test.mjs.
+const nightFillGate = (y) => 1 - THREE.MathUtils.smoothstep(y, -0.06, 0);
 const NIGHT_STREET_WARM = new THREE.Color('#3a2c22');
 // L114 fix D: WRAP the water clock (bounds hash inputs; seamless for sin(uTime*0.9))
 const WATER_CLOCK_PERIOD = (2 * Math.PI / 0.9) * 9;   // ≈62.8 s
@@ -683,7 +687,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     const _lw = lowSunWashK(sunRig.sunArc.y);
     waterMaterial.uniforms.uGlintK.value = _lw;
     const _sd = sunDownK(sunRig.sunArc.y);
-    city.fill.intensity = _baseFill * (1 - 0.60 * _midK - 0.35 * _lw) + 0.35 * _sd;
+    city.fill.intensity = _baseFill * (1 - 0.60 * _midK - 0.35 * _lw) + 0.35 * _sd * nightFillGate(sunRig.sunArc.y);
     scene.environmentIntensity = _baseEnvI * (1 - 0.45 * _midK - 0.58 * _lw);
     windowRecess.value = _midK;
     city.fill.groundColor.copy(sunRig.hemiGround).lerp(NIGHT_STREET_WARM, 0.55 * _sd);
@@ -746,7 +750,8 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     const lw = lowSunWashK(sunRig.sunArc.y);
     waterMaterial.uniforms.uGlintK.value = beauty ? lw : 0.0;
     const sd = sunDownK(sunRig.sunArc.y);
-    city.fill.intensity = beauty ? _baseFill * (1 - 0.60 * midK - 0.35 * lw) + 0.35 * sd : _baseFill;
+    // F2b: nightFillGate gates the fill boost to engage only below the horizon (0 at y≥0, 1 at y≤-0.06).
+    city.fill.intensity = beauty ? _baseFill * (1 - 0.60 * midK - 0.35 * lw) + 0.35 * sd * nightFillGate(sunRig.sunArc.y) : _baseFill;
     windowRecess.value = beauty ? midK : 0;
     if (beauty) {
       filmicMaterial.uniforms.uWarmBal.value = 0.90 * midK;
@@ -774,6 +779,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     if (mode === 1 && !beauty) {
       renderer.setRenderTarget(finalDest);
       renderer.render(scene, rig.camera);
+      window.__style = 'raw';           // F1: label truth — raw (vector+mode1, no post)
     } else if (mode === 1) {
       renderer.setRenderTarget(beautyRT);
       renderer.render(scene, rig.camera);
@@ -786,6 +792,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
       filmicMaterial.uniforms.uChroma.value = 0.0;
       filmicMaterial.uniforms.uDither.value = 1.0;
       runPass(filmicMaterial, finalDest);
+      window.__style = 'beauty';        // F1: label truth — mode-1 filmic beauty
     } else {
       renderer.setRenderTarget(beauty ? beautyRT : sceneRT);
       renderer.render(scene, rig.camera);
@@ -799,6 +806,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
         filmicMaterial.uniforms.uChroma.value = 1.0;
         filmicMaterial.uniforms.uDither.value = beauty ? 1.0 : 0.0;
         runPass(filmicMaterial, finalDest);
+        window.__style = beauty ? 'beauty' : 'raw';  // F1: label truth — mode-2 beauty or raw (vector)
       } else {
         filmicMaterial.uniforms.uScene.value = sceneRT.texture;
         filmicMaterial.uniforms.uAces.value = 0.0;

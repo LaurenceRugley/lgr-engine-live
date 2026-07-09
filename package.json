@@ -19,6 +19,7 @@
     "tier-guard": "node tools/tier-guard.mjs --serve projects/city/dist",
     "tier-guard:update": "node tools/tier-guard.mjs --update --serve projects/city/dist",
     "smoke": "node tools/smoke.mjs",
+    "attract-probe": "node tools/attract-probe.mjs",
     "dive-probe": "node tools/dive-probe.mjs",
     "cwv-probe": "node tools/cwv-probe.mjs",
     "scroll-probe": "node tools/scroll-probe.mjs",

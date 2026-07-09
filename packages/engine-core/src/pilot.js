@@ -411,6 +411,8 @@ export function createPilotController({ rig, world } = {}) {
 
   return {
     possess, release, step, setView, addLookDrag,
+    // Gyro seam: expose the look controller so createGyroLook can call look.setTarget directly.
+    get look() { return pilotLook; },
     get fpBlend() { return fpBlend; },
     get active() { return !!craft; },
     get piloting() { return phase === 'piloting'; },

@@ -91,6 +91,10 @@ export { createPilotController, createGroundModel, createSpacecraftModel, ATV_PR
 // placed-life.js wires it; pilot.js toggles visibility on cockpit/chase transitions.
 export { createCockpit } from './src/cockpit.js';
 
+// VIZ MOBILE — gyro-look: DeviceOrientation → cockpit seated-look seam.
+// mapGyroToLook: pure exported function (node-testable); createGyroLook: stateful controller.
+export { createGyroLook, mapGyroToLook } from './src/gyro-look.js';
+
 // VIZ SLICE 2 — step-through code/algorithm TRACER seams:
 // createTracer: element-addressed op recording (compare/swap/mark/edgeVisit — structural faithfulness).
 // createTracePlayer: discrete stepIndex + morph-timeline tween for within-step visual blending.

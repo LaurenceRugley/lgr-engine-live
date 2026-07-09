@@ -32,6 +32,7 @@ import {
   THREE, createEngine, CAM, PROFILES, PROFILE_KEYS, createCapture, createViewerUI,
   createAppShell, readAppFlags, fromURLParams, createSceneTransition, createDevMode,
   createAudioBus, createAmbientBed, createPositionalField, createRotor,
+  createGyroLook,
 } from '@lgr/engine-core';
 // L114: the loop Timer is now owned by createAppShell (was `const { Timer } = THREE` here); createHints is wrapped by shell.hints.
 
@@ -484,6 +485,7 @@ if (typeof window !== 'undefined') {
 let piloting = false;                                  // does the pilot own input + the camera this frame?
 window.__piloting = false;
 let pilotLooking = false;                              // L-cockpit: right-drag look-around is active (bypasses the piloting early-return)
+let cockpitTouchId = null;                             // VIZ MOBILE: active touch identifier for cockpit one-finger look (null = not active)
 const pilotAxes = { throttle: 0, steer: 0, lift: 0 };   // the axis bundle (a POD struct the model reads; L77 + lift)
 const heldPilot = new Set();                           // tokens currently held (keyboard ∪ touch d-pad) → axes
 let stickThrottle = 0, stickSteer = 0;                 // L104 P2: ANALOG axes from the floating thumbstick (touch) — compose with the keys/lift
@@ -705,8 +707,13 @@ function toggleCockpit() {
   _cockpitActive = !_cockpitActive;
   engine.pilot.setView(_cockpitActive ? 'cockpit' : 'chase');
   if (_cockpitView) _cockpitView.textContent = _cockpitActive ? '👁 Chase' : '🎯 Cockpit';
+  // VIZ MOBILE: show motion chip only while in cockpit view + coarse pointer; disable gyro on exit.
+  if (_gyroChip) _gyroChip.style.display = (_cockpitActive && _coarsePointer) ? '' : 'none';
+  if (!_cockpitActive && _gyroLook && _gyroLook.enabled) _gyroLook.disable();
 }
 let _cockpitView = null;   // the cockpit-toggle button in the pilot HUD (created in pilotHUD below)
+let _gyroChip = null;      // VIZ MOBILE: the "📱 Motion" chip button (null until the pilot HUD is built)
+let _gyroLook = null;      // VIZ MOBILE: createGyroLook instance (null until cockpit is first entered)
 
 function releasePilot() {
   if (!piloting) return false;
@@ -716,6 +723,9 @@ function releasePilot() {
   const _returnFocus = document.activeElement === _exitEl || document.activeElement === renderer.domElement || document.activeElement === document.body;
   _morphTimers.forEach(clearTimeout); _morphTimers = [];   // L106 (audit fix): cancel any in-flight takeover-morph so its trailing setPostMode() can't stomp the tier you pick right after exiting
   _cockpitActive = false; if (_cockpitView) _cockpitView.textContent = '🎯 Cockpit';   // L-cockpit: reset toggle on exit
+  // VIZ MOBILE: disable gyro + hide chip when we leave the craft entirely.
+  if (_gyroLook && _gyroLook.enabled) _gyroLook.disable();
+  if (_gyroChip) _gyroChip.style.display = 'none';
   engine.pilot.release(); piloting = false; window.__piloting = false; heldPilot.clear(); recomputeAxes();
   refreshPilotHUD();
   if (_returnFocus && _flyChip && _flyChip.classList.contains('on')) _flyChip.focus();
@@ -773,6 +783,10 @@ const pilotHUD = (() => {
   .pilot-hud.touch .pilot-pad { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); pointer-events:none; }
   .pilot-hud.touch .pilot-lift { right:max(20px, env(safe-area-inset-right)); bottom:max(24px, env(safe-area-inset-bottom)); }
   .pilot-hud.touch .pilot-exit { right:max(16px, env(safe-area-inset-right)); top:max(16px, env(safe-area-inset-top)); }
+  /* VIZ MOBILE — motion/gyro chip: top-left corner of the cockpit overlay (hidden by default; shows only on coarse-pointer + cockpit). */
+  .pilot-gyro { position:absolute; left:16px; top:16px; padding:0 14px; height:44px; border-radius:10px; border:1px solid #2a2f3a;
+    background:rgba(16,18,24,.85); color:#e8edf4; cursor:pointer; pointer-events:auto; font:inherit; display:none; }
+  .pilot-gyro.active { color:#7fe0ff; border-color:#2a567a; }
   `;
   document.head.appendChild(css);
   const drive = document.createElement('div'); drive.className = 'pilot-drive'; drive.textContent = '▶ Drive — Enter / tap';
@@ -781,6 +795,7 @@ const pilotHUD = (() => {
   // d-pad + lift are labelled groups so a screen reader announces the cluster on entry.
   hud.innerHTML = `<div class="pilot-speed">—</div><button class="pilot-exit" title="Exit (Esc)" aria-label="Exit the craft (Escape)">✕</button>
     <button class="pilot-cockpit" title="Cockpit view (C)" aria-label="Toggle cockpit view (C key)">🎯 Cockpit</button>
+    <button class="pilot-gyro" title="Gyroscope look-around" aria-label="Toggle gyroscope look-around">📱 Motion</button>
     <div class="pilot-pad" role="group" aria-label="Flight — thrust and steering (hold a control)">
       <span></span><button data-tok="up" aria-label="Thrust forward — hold">▲</button><span></span>
       <button data-tok="left" aria-label="Turn left — hold">◀</button><button data-tok="down" aria-label="Reverse — hold">▼</button><button data-tok="right" aria-label="Turn right — hold">▶</button>
@@ -792,6 +807,19 @@ const pilotHUD = (() => {
   hud.querySelector('.pilot-exit').addEventListener('click', () => releasePilot());
   _cockpitView = hud.querySelector('.pilot-cockpit');   // L-cockpit: store ref so toggleCockpit() can update its label
   _cockpitView.addEventListener('click', () => toggleCockpit());
+  // VIZ MOBILE: gyro chip — tap IS the iOS permission gesture (must be direct click handler, not async at arm time).
+  _gyroChip = hud.querySelector('.pilot-gyro');
+  _gyroChip.addEventListener('click', async () => {
+    if (!_gyroLook) _gyroLook = createGyroLook({ look: engine.pilot.look });
+    if (_gyroLook.enabled) { _gyroLook.disable(); _gyroChip.classList.remove('active'); return; }
+    const r = await _gyroLook.enable();
+    if (r.ok) {
+      _gyroChip.classList.add('active');
+    } else {
+      _gyroChip.style.display = 'none';   // denied/unsupported → remove the chip; recurs to toast
+      officeUI.toast('Motion access denied — use the cockpit drag to look around.');
+    }
+  });
   // on-screen d-pad + climb/dive → the SAME held-set as the keyboard (press to engage, release/leave to disengage).
   hud.querySelectorAll('.pilot-pad button, .pilot-lift button').forEach((b) => {
     const tok = b.dataset.tok;
@@ -1585,6 +1613,12 @@ const touchMid = (t0, t1) => [(t0.clientX + t1.clientX) / 2, (t0.clientY + t1.cl
 const touchDist = (t0, t1) => Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
 let tapMoved = false;   // L22: a one-finger TAP (no drag) acts like a left-click (enter office / a prop)
 renderer.domElement.addEventListener('touchstart', (e) => {
+  // VIZ MOBILE: cockpit one-finger look — arm BEFORE the piloting early-return (must not conflict with d-pad/lift).
+  if (piloting && _cockpitActive && e.touches.length === 1) {
+    cockpitTouchId = e.touches[0].identifier;
+    lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+    e.preventDefault(); return;
+  }
   if (piloting) return;                                 // L76: drive via the on-screen d-pad (its own DOM listeners), not the canvas
   if (e.touches.length === 1) {
     poking = sceneMode === 'city' && !sculpting;        // L69: in sculpt mode a one-finger drag brushes, not ripples
@@ -1605,6 +1639,16 @@ renderer.domElement.addEventListener('touchstart', (e) => {
 }, { passive: false });
 renderer.domElement.addEventListener('touchmove', (e) => {
   e.preventDefault();
+  // VIZ MOBILE: cockpit look — route drag to addLookDrag BEFORE the piloting early-return.
+  if (piloting && _cockpitActive && cockpitTouchId !== null) {
+    for (let i = 0; i < e.touches.length; i++) {
+      if (e.touches[i].identifier === cockpitTouchId) {
+        engine.pilot.addLookDrag(e.touches[i].clientX - lastX, e.touches[i].clientY - lastY);
+        lastX = e.touches[i].clientX; lastY = e.touches[i].clientY;
+        return;
+      }
+    }
+  }
   if (piloting) return;                                 // L76: no canvas-drag while driving
   if (e.touches.length === 1) {
     const tx = e.touches[0].clientX, ty = e.touches[0].clientY;
@@ -1627,6 +1671,8 @@ renderer.domElement.addEventListener('touchmove', (e) => {
   }
 }, { passive: false });
 window.addEventListener('touchend', (e) => {
+  // VIZ MOBILE: clear cockpit touch tracker BEFORE the piloting early-return.
+  if (cockpitTouchId !== null) { cockpitTouchId = null; }
   if (piloting) return;                                 // L76: taps don't follow/dive while driving
   // a quick, still ONE-finger tap = a click: follow (inspect) / enter the office (city) or run a prop (office).
   if (!tapMoved && performance.now() - downT < 350 && (!e.touches || e.touches.length === 0)) {
@@ -1758,7 +1804,10 @@ const frame = (dt, t) => {
     // the camera follows the player) — the L06–L08 pipeline straight to the screen.
     renderCityPipeline(style, null);
   } else {
-    // OFFICE / DIVE — render the room's "window" texture first (so it's alive), then draw the room
+    // OFFICE / DIVE — not a city frame; clear __style so it never carries a stale stylized value
+    // off-city (F1 label-truth: the city pipeline writes __style every frame it runs; off-city we clear).
+    window.__style = '';
+    // render the room's "window" texture first (so it's alive), then draw the room
     // (and the crossfade if diving). The CORNER fitout's window is the live city; the BASEMENT
     // fitout's "window" is the little vignette diorama. We render only the active tier's source.
     office.update(dt, t, sunRig);   // sunRig → the cat sleeps at night, wakes by day
@@ -1806,7 +1855,9 @@ const poke = {
   stop: () => { poking = false; },
 };
 function captureState() {
-  const style = window.__style || (engine.mode === 1 ? 'raw' : engine.mode === 2 ? 'filmic' : 'auto');
+  // F1: derive tier from engine.mode directly — a stale __style (e.g. 'pixel' persisting after switching to beauty)
+  // must never win. For stylized modes (3/7/8), __style carries the fine-grained label (pixel/toon/blend/auto).
+  const style = engine.mode === 1 ? 'raw' : engine.mode === 2 ? 'filmic' : (window.__style || 'auto');
   return { lesson: 23, clock: sunRig.clock, style: (engine.vector ? 'vec-' : '') + style, profile: city.state.profile.key, weather: weatherRig.kind, scene: sceneMode };
 }
 /* L23: the office verbs the director needs that have NO keyboard binding (the dive/exit/weather DO
@@ -2012,6 +2063,8 @@ if (typeof window !== 'undefined') {
   window.__heli = () => (engine.seizeCraft ? engine.seizeCraft.label : null);   // the seize craft's label (null if none)
   window.__flyLabel = () => flyVerbLabel();                            // 'Fly' (air) | 'Drive' (ground) — for Phase-2's verb bar
   window.__postMode = () => engine.mode;                               // L104 P2: current post tier (1/2 beauty · 7 pixel · 8 toon · 3 auto) — morph probe
+  window.__setPostMode = (m) => setPostMode(m);                        // F1: harness setter — tier-guard preflight drives setPostMode(2) then asserts __style==='beauty'
+  window.__pilotLookYaw = () => engine.pilot && engine.pilot.look ? engine.pilot.look.yaw : null;  // F5: expose look.yaw for mobile-cockpit-probe assertion
 }
 
 // L104 P3 — boot owner Developer Mode if enabled via ?dev=1 or the persisted hidden-key flag (never in ?preview/?demo).

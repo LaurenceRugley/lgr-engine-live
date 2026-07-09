@@ -73,6 +73,12 @@ export function createSeatedLook({ yawLimit = 80, pitchUp = 32, pitchDown = 20, 
       if (down) tPitch = clamp(tPitch - s, -pitchDown, pitchUp);
     },
     recenter() { tYaw = 0; tPitch = 0; },
+    // Gyro seam: set absolute target angles (positive = right / up, clamped). Negates yawDeg
+    // internally to match the addDrag convention (positive addDrag dx = looking left).
+    setTarget(yawDegRight, pitchDegUp) {
+      tYaw   = clamp(-yawDegRight, -yawLimit, yawLimit);
+      tPitch = clamp(pitchDegUp,   -pitchDown, pitchUp);
+    },
     update(dt) {                                       // frame-rate-independent easing toward the target
       const k = 1 - Math.exp(-damp * dt);
       yaw += (tYaw - yaw) * k; pitch += (tPitch - pitch) * k;
