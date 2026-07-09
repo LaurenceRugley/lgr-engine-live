@@ -55,6 +55,11 @@ export const ATV_PROFILE = {
   turnRate: 2.1,     // max yaw rate (rad/s) at speed
   chaseDist: 7.0,    // camera dolly distance behind the craft (perspective)
   chaseElev: 0.42,   // camera pitch (rad ≈ 24°) — a low over-the-shoulder chase
+  // H — feel envelope (tunable; owner's hands are final judge)
+  steerAttack: 0.18, steerRelease: 0.22, liftAttack: 0.12,   // damp τ (seconds) for each axis
+  expo: 0.5,         // steer expo curve steepness (0=linear, 1=cubic; 0.5 = mild S-curve)
+  bankMax: 0.35, bankTau: 0.18,   // lean angle (rad) + damp τ for coordinated bank
+  camLead: 0.14,     // camera azimuth lead (rad per normalised steer at turn=2 rad/s)
 };
 
 /* ── THE GROUND MOVEMENT MODEL (Strategy) ────────────────────────────────────
@@ -128,6 +133,11 @@ export const CRAFT_PROFILE = {
   maxV: 5.0,         // max vertical speed (u/s)
   chaseDist: 9.5,    // a wider chase than the ATV (it's airborne)
   chaseElev: 0.40,   // ≈ 23° chase pitch
+  // H — feel envelope (tunable; owner's hands are final judge)
+  steerAttack: 0.15, steerRelease: 0.20, liftAttack: 0.10,   // damp τ (seconds) for each axis
+  expo: 0.5,         // steer expo curve steepness (0=linear, 1=cubic; 0.5 = mild S-curve)
+  bankMax: 0.40, bankTau: 0.14,   // lean angle (rad) + damp τ for coordinated bank
+  camLead: 0.18,     // camera azimuth lead (rad per normalised steer at turn=1.8 rad/s)
   // L-cockpit: the eye anchor in the craft's LOCAL frame (right/up/forward). Used by the cockpit POV only;
   // profiles without `eye` (e.g. ATV_PROFILE) fall back to a safe default in the pilot controller.
   eye: { x: 0, y: 0.35, z: 0.1 },   // centred, 0.35 u above craft origin, 0.1 u forward (cockpit sill)
@@ -234,13 +244,18 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
       if (state.y < terrainY) { state.y = terrainY; if (state.vy < 0) state.vy = 0; }   // can't sink through the ground
       // WATER SURFACE FLOOR: only block DOWNWARD motion — positive lift always escapes, no sticky latch.
       if (waterY > NO_WATER && state.y < waterY) { state.y = waterY; if (state.vy < 0) state.vy = 0; }
-      // ORIENT: a saucer — yaw + a partial BANK into turns + a little PITCH from climb/dive. Small cosmetic angles,
-      // so an Euler→quaternion build is safe (gimbal lock only bites near ±90° pitch, which we never reach).
-      // L110 (HOTFIX): the cosmetic BANK sign flips WITH the yaw flip above, so the craft still leans INTO the (now
-      // corrected) turn rather than out of it. (steer=+1 = right → lean right.) [visual — confirm on Laurence's re-test.]
-      const bank = clamp(axes.steer * 0.35, -0.4, 0.4);
+      // ORIENT: a saucer — yaw + a coordinated BANK into turns + a little PITCH from climb/dive. Small cosmetic
+      // angles, so an Euler→quaternion build is safe (gimbal lock only bites near ±90° pitch, which we never reach).
+      // H — coordinated bank: derive from the EASED steer (axes is _ax from the controller) × speed fraction.
+      // Damped toward the target so the craft leans gradually INTO a turn and levels on exit — not a snap.
+      // state.bank persists across frames; init to 0 on first step (no prior value on a fresh possess).
+      state.bank ??= 0;
+      const speedFrac = clamp(Math.abs(state.speed) / par.maxSpeed, 0, 1);
+      const bMax = profile.bankMax || 0.4;
+      const targetBank = clamp(axes.steer * speedFrac * bMax, -bMax, bMax);
+      state.bank = damp(state.bank, targetBank, 1 / (profile.bankTau || 0.14), dt);
       const pitch = clamp(-state.vy * 0.06, -0.3, 0.3);
-      _e.set(pitch, state.yaw, bank, 'YXZ'); state.quat.setFromEuler(_e);
+      _e.set(pitch, state.yaw, state.bank, 'YXZ'); state.quat.setFromEuler(_e);
     }
     return state;
   }
@@ -265,6 +280,11 @@ export function createPilotController({ rig, world } = {}) {
   let model = null;          // the active MovementModel (Strategy instance)
   let enterT = 0;            // ENTERING countdown
   let fpBlend = 0;           // 0 = chase view · 1 = cockpit POV (today only integer values; named for future tween)
+  // H — eased axis closure: steer/lift damp toward the raw input each frame; throttle bypass (has accel/drag).
+  let _ax = { throttle: 0, steer: 0, lift: 0 };
+  // expo(x, a): gentle S-curve on the steer axis — soft near centre, full authority at the edge.
+  // a=0: linear (identity). a=1: cubic. a≈0.5: mild curve. Formula: x*(a·x²+(1-a)).
+  const expo = (x, a) => x * (a * x * x + (1 - a));
 
   // L-cockpit: a SEATED LOOK instance owned by this controller (not reused from the office — one instance each).
   // Drives head-turn from right-drag / touch look-zone while in cockpit mode; smooth recenter on exit.
@@ -282,6 +302,7 @@ export function createPilotController({ rig, world } = {}) {
     const p = craft.pilot;
     const make = MODEL_FACTORIES[p.model] || MODEL_FACTORIES.ground;
     model = make(p.profile);
+    _ax.throttle = 0; _ax.steer = 0; _ax.lift = 0;          // H — zero envelope on each new possession (no carry-over)
     p.suspendAutonomy();                                     // stop the entity's idle/park loop while piloted
     // CAMERA MOVE (not a cut): follow the craft's live position + ease the chase dolly; SNAP the orbit
     // azimuth behind the heading so the swing-in takes the short way, then let the rig ease the rest.
@@ -329,6 +350,21 @@ export function createPilotController({ rig, world } = {}) {
     // PILOTING — the Strategy does the work; the controller just routes + drives the camera.
     const s = p.getTransform();                             // the live mutable movement state
     const ax = axes || ZERO_AXES;
+
+    // H — INPUT ENVELOPE: ease raw steer/lift to analog before the model (all input sources share this path).
+    // Throttle passes through unchanged — it already has accel/drag smoothing; double-smoothing = laggy.
+    // steerAttack guards against missing fields on old profiles (fall-through = byte-identical pre-H).
+    const prof = p.profile || {};
+    if (prof.steerAttack) {
+      const steerK = Math.abs(ax.steer) > 0.01 ? 1 / prof.steerAttack : 1 / prof.steerRelease;
+      const liftK  = Math.abs(ax.lift)  > 0.01 ? 1 / prof.liftAttack  : 1 / prof.steerRelease;
+      _ax.steer    = damp(_ax.steer, expo(ax.steer, prof.expo), steerK, dt);
+      _ax.lift     = damp(_ax.lift,  ax.lift, liftK, dt);
+    } else {
+      _ax.steer = ax.steer; _ax.lift = ax.lift;
+    }
+    _ax.throttle = ax.throttle;
+
     // L108 (part C) — the ONE collision hook: integrate, then push the craft-sphere out of buildings BEFORE the
     // transform is written (the move-and-slide resolve slot). Strategy-agnostic → every craft with a `collide`
     // profile inherits it with zero model edits. TUNNELING GUARD: a fast craft (|speed|·dt > 0.3) on a spike
@@ -339,10 +375,10 @@ export function createPilotController({ rig, world } = {}) {
     const collideOn = cfg && world.collide && world.collideActive && world.collideActive();
     if (collideOn && Math.abs(s.speed) * dt > 0.3) {
       const h = dt * 0.5;
-      model.step(s, ax, h, world); world.collide(s, h, cfg);
-      model.step(s, ax, h, world); world.collide(s, h, cfg);
+      model.step(s, _ax, h, world); world.collide(s, h, cfg);
+      model.step(s, _ax, h, world); world.collide(s, h, cfg);
     } else {
-      model.step(s, ax, dt, world);
+      model.step(s, _ax, dt, world);
       if (collideOn) world.collide(s, dt, cfg);
     }
     p.setTransform(s);                                      // write the new transform onto the entity's mesh
@@ -376,7 +412,10 @@ export function createPilotController({ rig, world } = {}) {
       );
       rig.setEye(_eyeWorld, _eyeDir);
     } else {
-      rig.setAzimuth(s.yaw + Math.PI);                      // reactive chase: rig K-damps curr→goal = lag/swing
+      // H — camera lead: sweep azimuth slightly ahead of the turn so the scene opens up as you steer.
+      // camLead (rad) × eased steer (signed) — subtle offset; the rig's own K-damp provides the sweep lag.
+      const camLead = (p.profile && p.profile.camLead) || 0;
+      rig.setAzimuth(s.yaw + Math.PI - camLead * _ax.steer);   // reactive chase: rig K-damps curr→goal = lag/swing
     }
   }
 

@@ -83,7 +83,9 @@ window.__engine = engine;   // L114 debug/harness handle (cf. __worldApi) — to
 //   • onResize sizes the dive-crossfade RTs + the office camera that engine.resize() doesn't know about (it returns
 //     the same drawing-buffer size the shell hands us). city keeps its inline createCapture (poke/verbs are defined
 //     deep in the file) + tap-pick (interwoven inline touch) — both deliberately NOT via the shell here.
-const app = readAppFlags(window.location.search);
+// I — read lgr_dev_on ONCE here so resolveProfile has it and line 2079 doesn't re-read localStorage.
+const _devOnRaw = (() => { try { return localStorage.getItem('lgr_dev_on') === '1'; } catch(e) { return false; } })();
+const app = readAppFlags(window.location.search, { devOn: _devOnRaw });
 const shell = createAppShell(engine, {
   name: 'city',
   flags: { ...app, demo: DEMO },
@@ -686,7 +688,7 @@ function flyVerbLabel() {
 // persisted localStorage flag; the backtick (`) key toggles it at runtime (the hidden key). create/destroy on toggle so
 // when OFF nothing exists → client tiers byte-identical. The seam lives in engine-core; main just wires the data accessors.
 let devMode = null;
-const DEV_OK = !PREVIEW && !DEMO;
+const DEV_OK = app.mode.can('devTools');   // I: thin alias — AUTHOR (lgr_dev_on) grants devTools; PRESENT + ?preview do not
 function setDev(on) {
   if (!DEV_OK || on === !!devMode) return;
   if (on) {
@@ -749,6 +751,8 @@ const pilotHUD = (() => {
   .pilot-hud.on { opacity:1; }
   .pilot-speed { position:absolute; left:50%; top:18px; transform:translateX(-50%); padding:8px 16px; border-radius:999px;
     background:rgba(16,18,24,.78); color:#e8edf4; letter-spacing:.04em; }
+  /* G — coarse: left-align + shrink pill; push below the 📱 Motion chip (top:16px + h:44px + 16px gap = top:76px). */
+  @media (pointer:coarse){.pilot-speed{left:16px;transform:none;font-size:12px;top:76px;}}
   .pilot-exit { position:absolute; right:16px; top:16px; min-width:44px; height:44px; border-radius:10px; border:1px solid #2a2f3a;
     background:rgba(16,18,24,.85); color:#ff9b8a; cursor:pointer; pointer-events:auto; font:inherit; }
   .pilot-cockpit { position:absolute; right:72px; top:16px; padding:0 14px; height:44px; border-radius:10px; border:1px solid #2a2f3a;
@@ -878,8 +882,12 @@ const pilotHUD = (() => {
       if (mode === 'pilot' && telem) {
         // spacecraft → MEDIUM · ALT/DEPTH · climb arrow · speed; ATV (no medium) → the control hint + speed.
         const arrow = telem.climb > 0.3 ? ' ↑' : telem.climb < -0.3 ? ' ↓' : '';
+        // G — coarse/narrow: drop medium prefix + use integer values so the pill never wraps at 390px.
+        const coarse = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
         const txt = telem.medium
-          ? `${telem.medium.toUpperCase()} · ${telem.depth > 0.1 ? 'DEPTH ' + telem.depth.toFixed(1) : 'ALT ' + telem.altitude.toFixed(1)}${arrow} · ${Math.abs(telem.speed).toFixed(1)} m/s`
+          ? coarse
+            ? `${telem.depth > 0.1 ? 'DEPTH ' + Math.round(telem.depth) : 'ALT ' + Math.round(telem.altitude)}${arrow} · ${Math.round(Math.abs(telem.speed))} m/s`
+            : `${telem.medium.toUpperCase()} · ${telem.depth > 0.1 ? 'DEPTH ' + telem.depth.toFixed(1) : 'ALT ' + telem.altitude.toFixed(1)}${arrow} · ${Math.abs(telem.speed).toFixed(1)} m/s`
           : `${hints || 'driving'} · ${Math.abs(telem.speed).toFixed(1)} m/s`;
         if (txt !== _last) { speedEl.textContent = txt; speedEl.dataset.medium = telem.medium || 'air'; _last = txt; }
       } else _last = '';
@@ -894,6 +902,8 @@ function refreshPilotHUD() {
   // L110 (audit P0-5): hide the ⌘K FAB while the pilot HUD is up — on touch the always-on FAB (bottom-right, z6) sits
   // exactly over the pilot CLIMB/DESCEND lift cluster (same corner, same z), and it paints on top (appended later).
   if (viewerUI && viewerUI.setFabVisible) viewerUI.setFabVisible(mode !== 'pilot');
+  // G — hide "⌃ Controls" pill while piloting on fine pointers (coarse already handled by CSS media query).
+  if (viewerUI && viewerUI.setPillVisible) viewerUI.setPillVisible(mode !== 'pilot');
   document.body.classList.toggle('piloting', mode === 'pilot');
 }
 if (typeof window !== 'undefined') {
@@ -1978,9 +1988,18 @@ const viewerState = () => ({
   brushRadius: editor.brush.radius, brushStrength: editor.brush.strength, brushDensity: editor.brush.density, scatterHidden: editor.scatterHidden,   // L74: control-card live values
   saveSlots: listWorlds(), saveStatus: lastStatus,   // L75: save/load panel (slot list + last status line)
 });
-const showUI = _q.get('ui') !== '0' && !_q.has('capture') && !PREVIEW;   // L79: preview hides the viewer bar (+ rail/save panel)
+// I: PRESENT always hides; AUTHOR + !?ui=0 + !?capture shows. ?preview handled by resolveProfile → PRESENT.
+const showUI = app.mode.can('editorChrome') && _q.get('ui') !== '0' && !_q.has('capture');
 const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 viewerUI = createViewerUI({ controls: viewerControls, state: viewerState, show: showUI, coarse });
+// I — OWNER badge: always-visible tag when AUTHOR mode is active (shared-screen / screen-cast safety indicator).
+if (app.mode.badge) {
+  const _b = document.createElement('div');
+  _b.id = 'lgr-owner-badge';
+  _b.textContent = '◆ OWNER';
+  _b.style.cssText = 'position:fixed;top:44px;right:8px;z-index:5;padding:0 10px;height:22px;line-height:22px;border-radius:11px;background:rgba(90,60,200,.82);color:#e8deff;font:700 9px/22px ui-monospace,monospace;letter-spacing:.12em;pointer-events:none;';
+  document.body.appendChild(_b);
+}
 
 /* Apply the boot URL params (the shareable-link half). `?profile`/`?city` were applied in
    createCity; here we set camera / style / time of day. We drive them through the SAME command
@@ -2068,7 +2087,7 @@ if (typeof window !== 'undefined') {
 }
 
 // L104 P3 — boot owner Developer Mode if enabled via ?dev=1 or the persisted hidden-key flag (never in ?preview/?demo).
-if (DEV_OK && (_q.get('dev') === '1' || (() => { try { return localStorage.getItem('lgr_dev_on') === '1'; } catch (e) { return false; } })())) setDev(true);
+if (DEV_OK && (_q.get('dev') === '1' || _devOnRaw)) setDev(true);   // I: _devOnRaw already read at boot (eliminates second localStorage call)
 
 shell.start(frame);   // L114: start the loop HERE (was tick()) — after preview/attract/seize setup, so the boot order is exact.
 

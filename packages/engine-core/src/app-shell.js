@@ -21,16 +21,20 @@
 import * as THREE from 'three';
 import { createHints } from './hints.js';
 import { createCapture } from './capture.js';
+import { resolveProfile } from './ui-mode.js';
 
 // The APP-half URL flags, parsed ONCE and handed to createAppShell (the same "params passed in" move L109 uses,
 // so there's exactly one URLSearchParams per page). `demo` is the rule all three mains duplicated verbatim today.
-export function readAppFlags(search) {
+// I — opts.devOn (boolean): caller reads lgr_dev_on localStorage and passes the result; keeps readAppFlags pure +
+// testable. Office/hoard pass no opts → devOn=false → PRESENT (byte-identical to pre-I for them).
+export function readAppFlags(search, { devOn = false } = {}) {
   const q = new URLSearchParams(search);
   const capture = q.has('capture');
   const demo = q.get('demo') === '1' || capture;   // ?demo=1 OR any ?capture → strip branding / demo framing
   const coarse = typeof window !== 'undefined' && !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   const ui = q.get('ui');                            // '0' → embed mode (hide the footer). null otherwise.
-  return { q, demo, coarse, ui, capture };
+  const mode = resolveProfile(search, { devOn });   // I: PRESENT (clean default) | AUTHOR (lgr_dev_on unlock)
+  return { q, demo, coarse, ui, capture, mode };
 }
 
 export function createAppShell(engine, { name, flags, capture = false, onResize } = {}) {

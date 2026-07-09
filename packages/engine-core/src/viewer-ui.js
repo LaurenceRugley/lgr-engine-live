@@ -124,6 +124,8 @@ const CSS = `
   color: #d8dde6; font: 600 12px/1 ui-monospace, monospace; letter-spacing: .04em; cursor: pointer;
   align-items: center; gap: 7px; box-shadow: 0 6px 24px rgba(0,0,0,0.4); pointer-events: auto; }
 .vui-show.on { display: inline-flex; }
+/* G — suppress on coarse: the ⌘K FAB + bottom-sheet grip already cover it; no-op on desktop. */
+@media (pointer:coarse){.vui-show{display:none!important}}
 /* L27 on-screen STYLE HINT — a small top-centre pill naming the current look as you zoom the AUTO
    Style-LOD ladder (vector → toon → 16-bit → 8-bit → Game Boy), so the morph is legible. Fades in on
    change, out when idle; pointer-events none (never blocks the canvas). Hidden with the bar (M) + ?ui=0. */
@@ -721,7 +723,9 @@ export function createViewerUI({ controls, state, show, coarse }) {
   // (the pilot HUD's CLIMB/DESCEND lift cluster overlaps it exactly). Engine-first seam; the FAB only exists on coarse
   // pointers (fab is null on desktop → no-op). Toggling `.on` drives its display (see .vui-fab.on).
   function setFabVisible(v) { if (fab) fab.classList.toggle('on', !!v); }
-  return { toggle, setHidden, refresh, setStyleHint, setInspect, announce, setFabVisible, destroy() { clearInterval(timer); window.removeEventListener('resize', onResize); bar.remove(); info.remove(); more.remove(); pill.remove(); stylePill.remove(); inspectPanel.remove(); rail.remove(); card.remove(); save.remove(); liveRegion.remove(); envPanel.remove(); if (sheet) sheet.remove(); if (fab) fab.remove(); cmdk.destroy(); style.remove(); clearTimeout(hintTimer); } };
+  // G — let a project hide the "⌃ Controls" pill while piloting on fine pointers (mirrors setFabVisible).
+  function setPillVisible(v) { if (pill) pill.classList.toggle('on', !!v); }
+  return { toggle, setHidden, refresh, setStyleHint, setInspect, announce, setFabVisible, setPillVisible, destroy() { clearInterval(timer); window.removeEventListener('resize', onResize); bar.remove(); info.remove(); more.remove(); pill.remove(); stylePill.remove(); inspectPanel.remove(); rail.remove(); card.remove(); save.remove(); liveRegion.remove(); envPanel.remove(); if (sheet) sheet.remove(); if (fab) fab.remove(); cmdk.destroy(); style.remove(); clearTimeout(hintTimer); } };
 
   function sep() { const s = document.createElement('div'); s.className = 'sep'; return s; }
 }
