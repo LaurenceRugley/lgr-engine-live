@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "LGR WebGL Lab — an npm-workspaces monorepo: a reusable @lgr/engine-core + per-project apps (city showcase, John's office, The Hoard). Built end-to-end for learning Three.js + GLSL.",
+  "description": "LGR WebGL Lab \u2014 an npm-workspaces monorepo: a reusable @lgr/engine-core + per-project apps (city showcase, John's office, The Hoard). Built end-to-end for learning Three.js + GLSL.",
   "workspaces": [
     "packages/*",
     "projects/*"
   ],
   "scripts": {
-    "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard && npm run build -w projects/showcase-lab && npm run build -w projects/lessons && npm run build -w projects/tracer",
+    "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard && npm run build -w projects/showcase-lab && npm run build -w projects/lessons && npm run build -w projects/tracer && npm run build -w projects/atlas",
+    "build:atlas": "npm run build -w projects/atlas",
     "build:city": "npm run build -w projects/city",
     "build:office": "npm run build -w projects/office",
     "build:hoard": "npm run build -w projects/hoard",
@@ -21,10 +22,15 @@
     "smoke": "node tools/smoke.mjs",
     "attract-probe": "node tools/attract-probe.mjs",
     "dive-probe": "node tools/dive-probe.mjs",
+    "consumer-probe": "node tools/consumer-probe.mjs",
+    "egg-probe": "node tools/egg-probe.mjs",
+    "mobile-cockpit-probe": "node tools/mobile-cockpit-probe.mjs",
+    "night-sky-probe": "node tools/night-sky-probe.mjs --serve projects/city/dist",
     "cwv-probe": "node tools/cwv-probe.mjs",
     "scroll-probe": "node tools/scroll-probe.mjs",
-    "test": "node --test packages/engine-core/src/*.test.mjs packages/engine-core/src/math/*.test.mjs",
-    "asset-factory": "node asset-factory/process.mjs"
+    "test": "node --test packages/engine-core/src/*.test.mjs packages/engine-core/src/math/*.test.mjs packages/engine-core/src/hero/*.test.mjs tools/*.test.mjs",
+    "asset-factory": "node asset-factory/process.mjs",
+    "build:lib": "npm run build:lib -w packages/engine-core"
   },
   "devDependencies": {
     "playwright-core": "^1.49.0",

@@ -100,12 +100,39 @@ const wrap = (x) => x - Math.floor(x);                       // → [0,1)
 const lerp = (a, b, f) => a + (b - a) * f;
 const damp = (curr, goal, dt) => curr + (goal - curr) * (1 - Math.exp(-EASE_K * dt));
 
-export function createSunRig({ t = 0.5 } = {}) {              // boot at noon
+/* L-N re-skin: the day/night KEYFRAMES are now injectable so a client build hands in its own
+   environment sets (a noir night-only mood, a bright product palette, …) WITHOUT editing this file.
+   applyEnvironment() indexes the ring as `% 4`, so the schema is EXACTLY 4 keyframes in
+   night→dawn→noon→dusk order. This validator fails LOUD at construction (Rule 12) on a malformed
+   set — a client build should crash at boot with a clear message, never silently render wrong.
+   Exported so it can be node-tested. See LIB-README "SunRig keyframe schema". */
+const KF_COLOR_FIELDS = ['sun', 'hemiSky', 'hemiGround', 'horizon', 'sky', 'outline', 'gradeTint', 'gradeLift'];
+const KF_NUMBER_FIELDS = ['intensity', 'exposure', 'window', 'toonGain', 'turbidity', 'rayleigh', 'mie', 'mieG', 'gradeSat', 'gradeContrast'];
+export function validateSunKeyframes(keyframes) {
+  if (!Array.isArray(keyframes) || keyframes.length !== 4) {
+    throw new Error(`createSunRig: keyframes must be an array of EXACTLY 4 (night/dawn/noon/dusk), got ${Array.isArray(keyframes) ? keyframes.length : typeof keyframes}`);
+  }
+  keyframes.forEach((k, i) => {
+    if (!k || typeof k !== 'object') throw new Error(`createSunRig: keyframe[${i}] is not an object`);
+    for (const f of KF_COLOR_FIELDS) {
+      // A colour field must be something THREE.Color can parse (hex string or number). Reject undefined/null early.
+      if (k[f] == null) throw new Error(`createSunRig: keyframe[${i}] ("${k.name ?? '?'}") missing colour field "${f}"`);
+    }
+    for (const f of KF_NUMBER_FIELDS) {
+      if (typeof k[f] !== 'number' || !Number.isFinite(k[f])) throw new Error(`createSunRig: keyframe[${i}] ("${k.name ?? '?'}") field "${f}" must be a finite number, got ${k[f]}`);
+    }
+  });
+  return keyframes;
+}
+
+export function createSunRig({ t = 0.5, keyframes = KEYFRAMES } = {}) {   // boot at noon; default keyframes byte-identical
   let currT = t, goalT = t;
   let auto = false, reducedMotion = false;
 
+  validateSunKeyframes(keyframes);   // fail loud at construction on a malformed client set
+
   /* Parse the keyframe hexes into Color objects ONCE (no per-frame string parsing). */
-  const KF = KEYFRAMES.map((k) => ({
+  const KF = keyframes.map((k) => ({
     name: k.name,
     sun: new THREE.Color(k.sun), hemiSky: new THREE.Color(k.hemiSky),
     hemiGround: new THREE.Color(k.hemiGround), horizon: new THREE.Color(k.horizon),

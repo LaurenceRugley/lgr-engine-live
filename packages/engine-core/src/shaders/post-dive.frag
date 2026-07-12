@@ -24,14 +24,15 @@ uniform sampler2D uA;
 uniform sampler2D uB;
 uniform float uT;
 uniform vec2  uFocus;
+uniform float uZoom;    // 0 = calm crossfade (no zoom), 1 = full dive zoom (default)
 
 void main() {
   // EASE the progress so the dive accelerates in then settles (cubic ease-in-out).
   float t = uT * uT * (3.0 - 2.0 * uT);
 
-  // ZOOM source A toward the focus point: scale UVs around uFocus from 1.0 down to ~0.32, so
-  // the focused region rushes up to fill the frame as we "approach" it.
-  float scale = mix(1.0, 0.32, t);
+  // ZOOM source A toward the focus point: scale UVs around uFocus from 1.0 down to ~0.32.
+  // uZoom dials the zoom depth — at 0 the scale stays 1.0 (pure crossfade, no fly-through).
+  float scale = mix(1.0, mix(1.0, 0.32, uZoom), t);
   vec2 aUv = uFocus + (vUv - uFocus) * scale;
   vec3 a = texture2D(uA, aUv).rgb;
 

@@ -70,9 +70,39 @@ const params = new URLSearchParams(window.location.search);
 let citySeed = (params.get('city') ? Number(params.get('city')) : 0) || ((Math.random() * 1e9) | 0);
 let profileIndex = Math.max(0, PROFILE_KEYS.indexOf(params.get('profile') || 'manhattan'));
 
+/* THE "!" STING — the hidden cardboard box's payoff (egg v2). The ENGINE owns noticing (the
+   proximity latch in createHiddenProp); this consumer owns REACTING. Same fixed-chip idiom as
+   the mute button below: inject a <style> once, append one element, no framework, no audio.
+   Hoisted `function` so it can be handed to createEngine on the next line.
+   Shown in ?preview too — a harmless delight, and the owner's default. */
+function _showEggChip() {
+  const style = document.createElement('style');
+  style.textContent = '.lgr-egg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:20;'
+    + 'font:700 64px/1 system-ui,sans-serif;color:#e2564d;text-shadow:0 0 18px rgba(226,86,77,.75);'
+    + 'pointer-events:none;}'
+    + '@keyframes lgr-egg-sting{0%{opacity:0;transform:translate(-50%,-50%) scale(.4);}'
+    + '12%{opacity:1;transform:translate(-50%,-50%) scale(1.15);}'
+    + '20%{transform:translate(-50%,-50%) scale(1);}'
+    + '80%{opacity:1;}100%{opacity:0;}}'
+    + '.lgr-egg--anim{animation:lgr-egg-sting 1.6s ease-out forwards;}'
+    // Reduced motion: keep the chip, drop the scale-punch — WCAG 2.3.3 (idiom: the takeover at :560).
+    + '@media (prefers-reduced-motion: reduce){.lgr-egg--anim{animation:lgr-egg-sting 1.6s step-end forwards;}}';
+  document.head.appendChild(style);
+
+  const chip = document.createElement('div');
+  chip.className = 'lgr-egg lgr-egg--anim';
+  chip.textContent = '!';
+  chip.setAttribute('role', 'status');            // announce it; it is the only feedback (no audio)
+  chip.setAttribute('aria-label', 'You found the hidden cardboard box');
+  document.body.appendChild(chip);
+  // The latch guarantees ONE call, so a one-shot self-cleanup is sufficient — no timer to cancel.
+  chip.addEventListener('animationend', () => { chip.remove(); style.remove(); }, { once: true });
+  window.__eggFound = true;                        // harness/probe handle (cf. __engine, __world)
+}
+
 /* ENGINE BOOTSTRAP — build the renderer/scene/sim/city/post stack and grab the handles.
    Everything below is the consumer: behaviour that reads these handles. */
-const engine = createEngine({ demo: DEMO, citySeed, profileIndex });
+const engine = createEngine({ demo: DEMO, citySeed, profileIndex, onEggFound: _showEggChip });
 window.__engine = engine;   // L114 debug/harness handle (cf. __worldApi) — tools/dive-probe.mjs drives the reset-siting regression guard through it
 
 // L114 app-shell — city is the FULL, blocking adoption (the money path). The shell owns the loop skeleton +
@@ -1718,10 +1748,18 @@ const hintEl = _hideHint ? null : document.querySelector('.hint');   // L114: th
 const baseHint = hintEl ? hintEl.textContent : '';
 let lastClock = '';
 let cityLabel = '';                                 // "seed 1234 · manhattan", set by cityHint()
+// L-N (SITE finding 2026-07-10): the bare /live/ URL is a PROSPECT surface, and `seed 1234 · manhattan`
+// reads as internal dev telemetry to them. Reclassify under the profile gate: AUTHOR keeps the full
+// seed·profile·clock line (owner needs it); PRESENT gets the prospect-clean line — the helpful controls
+// hint + the time-of-day clock, WITHOUT the seed/profile internals. Taste call: keep the clock (it's
+// ambient/atmospheric, not telemetry), drop only the seed·profile. AUTHOR is byte-identical to before.
+const _hintAuthor = app.mode.can('editorChrome');   // AUTHOR only; PRESENT + ?preview → false
 function updateClock(clock) {
   if (!hintEl || clock === lastClock) return;
   lastClock = clock;
-  hintEl.textContent = `${baseHint} · ${cityLabel} · ${clock}`;
+  hintEl.textContent = _hintAuthor
+    ? `${baseHint} · ${cityLabel} · ${clock}`
+    : `${baseHint} · ${clock}`;
 }
 // Refresh the city label (seed + profile) in the hint after a reroll / profile cycle.
 function cityHint() {

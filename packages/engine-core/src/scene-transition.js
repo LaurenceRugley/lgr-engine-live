@@ -36,6 +36,7 @@ export function createSceneTransition({ rate = 4.6 } = {}) {
     uniforms: {
       uA: { value: null }, uB: { value: null },
       uT: { value: 0 }, uFocus: { value: new THREE.Vector2(0.5, 0.5) },
+      uZoom: { value: 1.0 },  // 0 = calm crossfade; 1 = full dive (default, backward-compat)
     },
   });
   let mode = 'a';        // 'a' | 'in' | 'b' | 'out'
@@ -69,8 +70,10 @@ export function createSceneTransition({ rate = 4.6 } = {}) {
     return mode;
   }
 
+  function setZoom(v) { material.uniforms.uZoom.value = Math.max(0, Math.min(1, v)); }
+
   return {
-    material, setSources, enter, exit, update, snap,
+    material, setSources, enter, exit, update, snap, setZoom,
     get mode() { return mode; },
     get t() { return t; },
     get transitioning() { return mode === 'in' || mode === 'out'; },

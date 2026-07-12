@@ -7,7 +7,13 @@
   "sideEffects": false,
   "main": "index.js",
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./src/graph-spec.js": "./src/graph-spec.js",
+    "./src/graph-layout.js": "./src/graph-layout.js",
+    "./src/ingest-vault.js": "./src/ingest-vault.js"
+  },
+  "scripts": {
+    "build:lib": "vite build --config vite.lib.config.js && vite build --config vite.lib.core.config.js && vite build --config vite.lib.hero.config.js"
   },
   "dependencies": {
     "shiki": "^4.3.1",

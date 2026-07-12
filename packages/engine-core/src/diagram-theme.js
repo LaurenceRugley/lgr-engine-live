@@ -68,6 +68,8 @@ const ACCENT = {
   guide: '#7a566a',          // = dusk.hemiSky — guide/grid lines (muted plum)
   ihat:  '#ff8a5a',          // = dusk.sky — i-hat basis vector (warm orange)
   jhat:  oklch(65, 0.13, 235), // cool blue complementary to ihat — j-hat basis vector
+  gold:  '#d9b36c',            // the ENGINE's brand gold (the loader mark's #b89968, lifted for dark-bg
+                               // display) — tokenized in slice 14; ops entities + future brand accents read it
 };
 
 // 1.2× type scale — base 11px (diagram labels are smaller than UI text)
@@ -97,10 +99,42 @@ const SUBSTRATE = {
 
 export const THEME = Object.freeze({ NEUTRAL, ACCENT, TYPE, STROKE, SUBSTRATE });
 
-/* applyThemeToRoot — writes all token values as CSS custom properties to :root.
-   Call once on page load; every styled element can then reference var(--lgr-*).
-   Pure side-effect: the THEME object is the source of truth, CSS is the projection. */
-export function applyThemeToRoot(root = document.documentElement) {
+/* ============================================================
+   PAPER — the light token set (VIZ SLICE 12, the STUDIO look). Publication-grade: warm paper, ink text,
+   the SAME four accent HUE IDENTITIES (live-ops warm orange · doctrine blue · initiative terracotta ·
+   learning plum) re-derived DARKER + saturated so they hold as solid FILLS on paper (≥3:1) and the ink
+   text holds ≥4.5:1. THE TRAP this set exists for (named where the renderer swaps too): additive glow is
+   a no-op toward white — light mode is a rendering-strategy change, and these are its colors.
+   THEME stays the dusk export (every existing consumer binds it at import); THEMES + applyThemeToRoot(name)
+   are the additive seam.
+   ============================================================ */
+const P_NEUTRAL = {
+  bg:      oklch(96, 0.012, 85),   // warm paper, just off-white
+  surface: oklch(92, 0.014, 82),   // card / panel — a step below paper
+  border:  oklch(80, 0.018, 78),   // hairlines
+  dim:     oklch(48, 0.020, 60),   // secondary text on paper
+  text:    oklch(24, 0.020, 55),   // ink
+};
+const P_ACCENT = {
+  axis:  oklch(46, 0.115, 32),     // terracotta ink (initiative)
+  guide: oklch(42, 0.085, 330),    // plum ink (learning + guide strokes)
+  ihat:  oklch(52, 0.140, 45),     // warm orange ink (live-ops)
+  jhat:  oklch(45, 0.105, 240),    // blue ink (doctrine)
+  gold:  '#7a5f2e',                // gold as INK on paper (ops entities in print mode)
+};
+export const THEMES = Object.freeze({
+  dusk:  THEME,
+  paper: Object.freeze({ NEUTRAL: P_NEUTRAL, ACCENT: P_ACCENT, TYPE, STROKE, SUBSTRATE: { halo: { color: P_NEUTRAL.bg, blur: 2, spread: 1 }, scrim: { color: P_NEUTRAL.bg, opacity: 0.85 } } }),
+});
+
+/* applyThemeToRoot(name|root, root?) — writes the token values as CSS custom properties to :root.
+   Backward compatible: applyThemeToRoot() = dusk (the original signature took only a root element).
+   The THEME objects are the source of truth, CSS is the projection. */
+export function applyThemeToRoot(nameOrRoot = 'dusk', maybeRoot) {
+  const name = typeof nameOrRoot === 'string' ? nameOrRoot : 'dusk';
+  const root = (typeof nameOrRoot === 'string' ? maybeRoot : nameOrRoot) || document.documentElement;
+  const T = THEMES[name] || THEME;
+  const { NEUTRAL, ACCENT, TYPE, STROKE, SUBSTRATE } = T;
   const vars = [
     ['--lgr-bg',      NEUTRAL.bg],
     ['--lgr-surface', NEUTRAL.surface],
@@ -112,6 +146,7 @@ export function applyThemeToRoot(root = document.documentElement) {
     ['--lgr-guide',   ACCENT.guide],
     ['--lgr-ihat',    ACCENT.ihat],
     ['--lgr-jhat',    ACCENT.jhat],
+    ['--lgr-gold',    ACCENT.gold],
 
     ['--lgr-type-xs', TYPE.xs],
     ['--lgr-type-sm', TYPE.sm],

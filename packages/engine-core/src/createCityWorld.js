@@ -14,7 +14,9 @@
    ============================================================ */
 import * as THREE from 'three';
 
-import { createCity, LAYOUT } from './citygen.js';
+import { createCity, LAYOUT, mulberry32 } from './citygen.js';
+import { createHiddenProp } from './hidden-prop.js';
+import { pickStreetIntersection } from './hidden-prop-logic.js';
 import { createCityLife, buildGraph } from './agents.js';
 import { createStreetLights } from './street-lights.js';
 import { createWaterLife } from './water-life.js';
@@ -61,7 +63,7 @@ const NIGHT_STREET_WARM = new THREE.Color('#3a2c22');
 const WATER_CLOCK_PERIOD = (2 * Math.PI / 0.9) * 9;   // ≈62.8 s
 const AERIAL_BASE = 0.016;   // always-on aerial perspective floor (additive with weather fog)
 
-export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex = 0 } = {}) {
+export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex = 0, onEggFound = null } = {}) {
   // Destructure stable references from core (these don't change after construction).
   const {
     renderer, scene, rig, sunRig, drawBuffer,
@@ -324,6 +326,39 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
   placedLife.group.visible = false;
   scene.add(placedLife.group);
   inspectorSources.push(placedLife);
+
+  /* ---- THE HIDDEN CARDBOARD BOX (egg v2) ------------------------------------------------
+     A box dropped on a street crossing somewhere in the city. Fly near it once and the "!"
+     chip stings. `createHiddenProp` adds its OWN always-visible group to the scene — note we
+     do NOT parent it to `placedLife.group` two lines above, which is `visible = false` in
+     city mode: a box there would be invisible in flight while still shifting the render
+     baseline. (Being wrong in two directions at once is how a bug hides from its own test.)
+
+     Placement is a seed-picked STREET INTERSECTION from the exported LAYOUT. Buildings only
+     ever stand on blocks, so a street crossing is collision-free by construction — no probe,
+     no raycast, no retry loop. The salt keeps the egg's PRNG stream independent of the city's
+     own, so the two never share a draw order.
+
+     SCOPE OF THE DETERMINISM: the spot is a pure function of the citySeed the world was
+     CONSTRUCTED with, so `?city=X` always hides the box in the same place — that is the
+     "tell a friend" property. It is computed ONCE here: an in-session reroll (`G` →
+     `city.generate(...)`) rebuilds the blocks but does NOT re-site the box. That is safe (the
+     street grid is seed-INVARIANT — always ±4.9/±2.45/0 — so the box stays on a real street,
+     never inside a new building), it just means a rerolled city keeps the previous city's
+     hiding spot. Re-siting on reroll is a DESIGN call (it would teleport the box mid-flight
+     and needs a latch-reset policy), so it is flagged in HANDOFF, not silently invented. */
+  const EGG_SEED_SALT = 0xB0B1E5;
+  const EGG_SIZE = 0.5;
+  const _eggRnd = mulberry32((citySeed ^ EGG_SEED_SALT) >>> 0)();
+  const _eggAt = pickStreetIntersection(LAYOUT, _eggRnd);
+  const hiddenBox = createHiddenProp({
+    scene,
+    // street slab sits at PLINTH_TOP + 0.02 (citygen.js:316); rest the box ON it, not in it.
+    at: { x: _eggAt.x, y: LAYOUT.PLINTH_TOP + 0.02 + EGG_SIZE / 2, z: _eggAt.z },
+    radius: 5,
+    size: EGG_SIZE,
+    onEnter: () => { if (onEggFound) onEggFound(); },
+  });
 
   /* L104 SEIZE-CRAFT SEAM */
   const seizeGroup = new THREE.Group(); seizeGroup.raycast = () => {}; scene.add(seizeGroup);
@@ -924,6 +959,11 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     swayWind.value = 0.035 + 0.05 * overcast;
     clouds.update(dt, elapsed, sunRig, weatherRig);
     if (worldActive) placedLife.update(dt, elapsed, sunRig);
+    /* The egg ticks UNCONDITIONALLY — unlike placedLife above, it is not gated on
+       `worldActive`, because the box lives in the CITY and the craft flies the city.
+       `seizeEnt` is null until the player seizes a craft, so guard it: no craft, no
+       proximity test, no hop. */
+    hiddenBox.update(seizeEnt ? seizeEnt.obj.position : null, dt);
     seizeGroup.visible = !worldActive;
     if (seizeEnt && !worldActive) seizeEnt.update(dt, elapsed, sunRig);
     if (_aircraftLights && !worldActive) {
@@ -987,6 +1027,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     // city content
     windowGlow, landmarkFactory, city, cityLife, waterLife, weatherRig, clouds,
     inspector, world, catalog, editor, pilot,
+    hiddenBox,
     spawnSeizeCraft,
     get seizeCraft() { return seizeEnt ? seizeEnt.followable : null; },
     // water

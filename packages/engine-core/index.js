@@ -28,7 +28,7 @@ export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.j
 export { createCityWorld } from './src/createCityWorld.js';
 export { createCameraRig, CAM } from './src/camera-rig.js';
 export { createCity, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32 } from './src/citygen.js';
-export { createSunRig } from './src/sun-rig.js';
+export { createSunRig, validateSunKeyframes } from './src/sun-rig.js';
 export { createCityLife, buildGraph } from './src/agents.js';
 // L-streetlamps — warm glow sprites along the city street graph (night-only, byte-identical-safe).
 export { createStreetLights } from './src/street-lights.js';
@@ -51,7 +51,7 @@ export { createAppShell, readAppFlags } from './src/app-shell.js';
 
 // VIZ SLICE 0+1 — diagram-theme (dusk-harbor OKLCH tokens), morph-timeline (one-scalar t engine),
 // matrix-grid factory (index-stable 2×2 transform lattice + colored basis arrows).
-export { THEME, applyThemeToRoot } from './src/diagram-theme.js';
+export { THEME, THEMES, applyThemeToRoot } from './src/diagram-theme.js';   // THEMES.paper = the STUDIO light set (slice 12)
 export { createMorphTimeline, easeInOutCubic } from './src/math/morph-timeline.js';
 export { createMatrixGrid } from './src/math/matrix-grid.js';
 
@@ -59,6 +59,12 @@ export { createMatrixGrid } from './src/math/matrix-grid.js';
 // poster generator, site-gen + prompt layer target; the seed of the site-builder cockpit (versioned, tolerant of
 // unknown top-level sections).
 export { validateSceneSpec, fromURLParams, toURLParams, applySceneSpec, SCENE_SPEC_VERSION } from './src/scene-spec.js';
+
+// VIZ SLICE 3 — GraphSpec v1 (scene-spec's sibling for graph data): validate/index + the deterministic
+// radial layout + the memory-vault ingester. Lifted from projects/atlas/ once createEngineCore landed.
+export { validateGraphSpec, indexNodes, KINDS, RELS, GRAPH_SPEC_VERSION, heatFromAgeDays, HEAT_TAU_DAYS } from './src/graph-spec.js';
+export { createGraphLayout, DEFAULT_RINGS } from './src/graph-layout.js';
+export { parseFrontmatter, extractLinks, extractMarkdownLinks, noteToRecords, buildGraphSpec, extractExcerpt } from './src/ingest-vault.js';
 
 // L-stress-2 — createProductStage: a self-contained studio-lit GLB inspector (own scene/camera/IBL/loader/orbit +
 // variant swap), sharing the engine renderer with save/restore state isolation. Engine-first: the capability lives
@@ -80,6 +86,8 @@ export { createInspector } from './src/inspect.js';
 
 // L73 — PLACE-ENTITIES: the world editor's "drop in life" pool (gull/boat/fish/cloud/wander-person).
 export { createPlacedLife } from './src/placed-life.js';
+export { createHiddenProp } from './src/hidden-prop.js';
+export { pickStreetIntersection, createProximityLatch } from './src/hidden-prop-logic.js';
 
 // L74 — the WORLD-EDITOR tool dispatcher (createEditor): one reusable object owning the tool state + brush + routing.
 export { createEditor } from './src/editor.js';
@@ -104,6 +112,28 @@ export { createTracer }                  from './src/tracer.js';
 export { createTracePlayer }             from './src/trace-player.js';
 export { createCellField, CELL_COLORS }  from './src/cell-field.js';
 export { createCodePanel }               from './src/code-panel.js';
+
+// VIZ SLICE 3/5 — createGraphView: GraphSpec + positions -> the live node/edge mesh group. Instanced
+// ribbon-quad edges (curved, gradient, flow band) + two-layer billboard nodes (SDF core + additive halo),
+// with heat/pulse/focus-dim. Mission Control's renderer ability; the ribbon is what unlocks the pixel look.
+export { createGraphView, getKindColors } from './src/graph-view.js';   // getKindColors: the legend's anti-drift color source (slice 8)
+
+// VIZ SLICE 9 — renderNoteHtml: the READER's first-party mini markdown renderer (escape-first,
+// [[wikilinks]] as graph navigation, fenced-block islands). No markdown dep (dependency-minimalism).
+export { renderNoteHtml, scanFileRefs } from './src/render-markdown.js';
+
+// VIZ SLICE 4 — createGraphLabels: the first-party DOM label overlay (world→screen per frame, degree-ranked
+// LOD, focus-aware, pointer-transparent). No SDF/troika dep — the browser already renders text (dep-minimalism).
+export { createGraphLabels } from './src/graph-labels.js';
+
+// VIZ SLICE 5 — createGraphAtmosphere: the screen-space FBM nebula + a parallaxing starfield slab. The
+// layer that turns "a graph on a webpage" into "a graph in space" (design doc §8). Two draw calls, no deps.
+export { createGraphAtmosphere } from './src/graph-atmosphere.js';
+
+// VIZ SLICE 6 — createGraphSim: the LIVING GRAPH. A first-party force simulation (semi-implicit Euler,
+// d3-force as REFERENCE SPEC not dependency) that mutates the shared positions Map in place. Pure math,
+// no THREE — node-testable. Obsidian-style pinned drag, alpha cooling, and an exact hard-stop at rest.
+export { createGraphSim, SIM_DEFAULTS } from './src/graph-sim.js';
 
 // L76 — shared scalar maths (the dt-correct `damp` ease, lifted out of camera-rig so rig + models share one).
 export { damp, clamp, angleDelta } from './src/math.js';

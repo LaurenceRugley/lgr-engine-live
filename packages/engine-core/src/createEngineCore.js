@@ -118,44 +118,65 @@ export function createEngineCore(opts = {}) {
   const AERIAL_BASE = 0.016;
   const FOG_NIGHT_TINT = new THREE.Color('#74508f');
   const _fogColor = new THREE.Color();
-  const rig = createCameraRig({ aspect: _cW() / _cH() });
+  /* L-N re-skin FORWARDING: the camera-rig clamps + sun keyframes are injectable at the factory
+     (Tasks 3+4), but a CLIENT reaches the engine through HERE — so createEngineCore must forward
+     `opts.cameraRig` / `opts.sunKeyframes`, or the seams stay engine-core-source-only (PARTIAL,
+     the no-pretending corner this lesson graduates). Omitted → factory defaults → byte-identical.
+     `aspect` is computed here and always wins over any client cameraRig object. */
+  const rig = createCameraRig({ ...(opts.cameraRig || {}), aspect: _cW() / _cH() });
 
   /* 2b) SUN RIG (MOVED to core — post materials bind sunRig.* BY REFERENCE at construction). */
-  const sunRig = createSunRig({ t: 0.5 });
+  const sunRig = createSunRig({ t: 0.5, keyframes: opts.sunKeyframes });
 
   /* ------------------------------------------------------------
      8) THE POST CHAIN — render targets + fullscreen passes.
      ------------------------------------------------------------ */
-  const sceneDepth = new THREE.DepthTexture(drawBuffer.x, drawBuffer.y);
-  const sceneRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
+  /* L-O PERF — LEAN mode. A beauty-only DIRECT-render consumer (hero / atlas / product-stage) renders solely into
+     beautyRT+bloom and never touches the STYLIZED tiers (sceneRT/filmicRT/toonRT/pixelRT) or god-rays (rays*). Those
+     RTs are ~119 MB idle VRAM at DPR2. `createEngineCore({ lean: true })` skips allocating them; their construction-
+     time sampler uniforms bind a 1×1 DUMMY the lean consumer never samples (it never runs those passes). The DEFAULT
+     path (lean=false — city/office/hoard/atlas) allocates + binds EXACTLY as before → byte-identical BY CONSTRUCTION
+     (the strongest guarantee for the governing invariant; no first-morph hitch, no city-render-path edit). Deliberate
+     deviation from universal "first-use" laziness: the city's mix pass relies on construction-only uToon/uPixel
+     bindings, so true first-use would require editing the byte-identical city render path — see HANDOFF. */
+  const _lean = !!opts.lean;
+  /* One shared 1×1 opaque-black texture — the placeholder for lean's un-allocated RT sampler uniforms. Never
+     sampled by a lean consumer (those passes don't run); if it ever were, it reads black (a no-op under ×0 gates). */
+  const _dummyTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
+  _dummyTex.needsUpdate = true;
+  const _tex = (rt) => (rt ? rt.texture : _dummyTex);   // RT.texture, or the dummy when lean skipped it
+
+  const sceneDepth = _lean ? null : new THREE.DepthTexture(drawBuffer.x, drawBuffer.y);
+  const sceneRT = _lean ? null : new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     depthBuffer: true, stencilBuffer: false, depthTexture: sceneDepth,
   });
-  const filmicRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
+  const filmicRT = _lean ? null : new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     depthBuffer: false, stencilBuffer: false,
   });
-  /* L83 MSAA — isolated multisampled beauty RT. Beauty renders here; pixel/toon/vector keep sceneRT. */
+  /* L83 MSAA — isolated multisampled beauty RT. Beauty renders here; pixel/toon/vector keep sceneRT. ALWAYS allocated
+     (the one RT every consumer, incl. lean hero, renders into). */
   const beautyRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     depthBuffer: true, stencilBuffer: false, samples: 4,
     type: THREE.HalfFloatType,   // L-dusk-washout-r4: true HDR so ACES sees unbounded values
   });
-  const toonRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
+  const toonRT = _lean ? null : new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     depthBuffer: false, stencilBuffer: false,
   });
-  const pixelRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
+  const pixelRT = _lean ? null : new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     depthBuffer: false, stencilBuffer: false,
   });
-  /* L66 BLOOM buffers — half resolution. */
+  /* L66 BLOOM buffers — half resolution. ALWAYS allocated (the beauty path — incl. lean hero — uses bloom). */
   let bloomW = Math.max(1, Math.floor(drawBuffer.x / 2)), bloomH = Math.max(1, Math.floor(drawBuffer.y / 2));
   const bloomA = new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
   const bloomB = new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
-  /* L107 GOD-RAY buffers — also half-res. */
-  const raysBright = new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
-  const raysRT     = new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
+  /* L107 GOD-RAY buffers — also half-res. STYLIZED-adjacent (beauty-city only; the hero director skips godraysPass). */
+  const raysBright = _lean ? null : new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
+  const raysRT     = _lean ? null : new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
   // NOTE: planarRefl is city-owned (city registers it with the resize registry below).
 
   const postScene  = new THREE.Scene();
@@ -167,7 +188,7 @@ export function createEngineCore(opts = {}) {
     vertexShader: fullscreenVert,
     fragmentShader: postFilmicFrag,
     uniforms: {
-      uScene:      { value: sceneRT.texture },
+      uScene:      { value: _tex(sceneRT) },
       uTime:       { value: 0 },
       uResolution: { value: new THREE.Vector2(drawBuffer.x, drawBuffer.y) },
       uGrain:      { value: 1.0 },
@@ -184,7 +205,7 @@ export function createEngineCore(opts = {}) {
       uWarmBal:      { value: 0.0 },
       uDither:       { value: 0.0 },
       uTonemap:      { value: 0.0 },
-      uRaysTex:      { value: raysRT.texture },
+      uRaysTex:      { value: _tex(raysRT) },
       uRays:         { value: 0.0 },
       uBeautyExp:    { value: 1.0 },
     },
@@ -193,7 +214,7 @@ export function createEngineCore(opts = {}) {
   /* L66 BLOOM materials + pass. */
   const brightMaterial = new THREE.ShaderMaterial({
     vertexShader: fullscreenVert, fragmentShader: postBrightFrag,
-    uniforms: { uScene: { value: sceneRT.texture }, uThreshold: { value: 0.78 } },
+    uniforms: { uScene: { value: _tex(sceneRT) }, uThreshold: { value: 0.78 } },
   });
   const blurMaterial = new THREE.ShaderMaterial({
     vertexShader: fullscreenVert, fragmentShader: postBlurFrag,
@@ -220,11 +241,14 @@ export function createEngineCore(opts = {}) {
   const RAY_THRESHOLD = 1.9, RAYS_MAX = 0.22;
   const godraysMaterial = new THREE.ShaderMaterial({
     vertexShader: fullscreenVert, fragmentShader: postGodraysFrag,
-    uniforms: { uBright: { value: raysBright.texture }, uSunUv: { value: new THREE.Vector2(0.5, 0.5) },
+    uniforms: { uBright: { value: _tex(raysBright) }, uSunUv: { value: new THREE.Vector2(0.5, 0.5) },
       uDensity: { value: 0.9 }, uDecay: { value: 0.96 }, uWeight: { value: 0.05 } },
   });
   const _sunClip = new THREE.Vector4();
   function godraysPass(srcRT) {
+    /* L-O: lean consumers never allocate the rays RTs (and the hero director skips this pass anyway).
+       Guard so a stray call no-ops instead of runPass'ing into a null target (= the screen). */
+    if (!raysRT || !raysBright) { filmicMaterial.uniforms.uRays.value = 0.0; return; }
     _sunClip.set(rig.camera.position.x + sunRig.sunDir.x * 88, rig.camera.position.y + sunRig.sunDir.y * 88, rig.camera.position.z + sunRig.sunDir.z * 88, 1.0)
       .applyMatrix4(rig.camera.matrixWorldInverse).applyMatrix4(rig.camera.projectionMatrix);
     const w = _sunClip.w;
@@ -261,7 +285,7 @@ export function createEngineCore(opts = {}) {
     vertexShader: fullscreenVert,
     fragmentShader: postPixelFrag,
     uniforms: {
-      uScene:        { value: filmicRT.texture },
+      uScene:        { value: _tex(filmicRT) },
       uResolution:   { value: new THREE.Vector2(drawBuffer.x, drawBuffer.y) },
       uPixelSize:    { value: PIXEL_SIZE },
       uPalette:      { value: PALCACHE.inkgold[2] },
@@ -275,7 +299,7 @@ export function createEngineCore(opts = {}) {
     vertexShader: fullscreenVert,
     fragmentShader: postPixelkitFrag,
     uniforms: {
-      uScene:       { value: filmicRT.texture },
+      uScene:       { value: _tex(filmicRT) },
       uResolution:  { value: new THREE.Vector2(drawBuffer.x, drawBuffer.y) },
       uGridWidth:   { value: 160 },
       uDither:      { value: 0.55 },
@@ -291,7 +315,7 @@ export function createEngineCore(opts = {}) {
     vertexShader: fullscreenVert,
     fragmentShader: postToonFrag,
     uniforms: {
-      uScene:         { value: filmicRT.texture },
+      uScene:         { value: _tex(filmicRT) },
       uDepth:         { value: sceneDepth },
       uResolution:    { value: new THREE.Vector2(drawBuffer.x, drawBuffer.y) },
       uBands:         { value: 4.0 },
@@ -309,8 +333,8 @@ export function createEngineCore(opts = {}) {
     vertexShader: fullscreenVert,
     fragmentShader: postMixFrag,
     uniforms: {
-      uToon:  { value: toonRT.texture },
-      uPixel: { value: pixelRT.texture },
+      uToon:  { value: _tex(toonRT) },
+      uPixel: { value: _tex(pixelRT) },
       uBlend: { value: 0.0 },
     },
   });
@@ -329,14 +353,15 @@ export function createEngineCore(opts = {}) {
     rig.setViewport(_cW(), _cH());
     renderer.setSize(_cW(), _cH());
     const db = renderer.getDrawingBufferSize(new THREE.Vector2());
-    sceneRT.setSize(db.x, db.y);
-    filmicRT.setSize(db.x, db.y);
+    /* L-O: `?.` guards the lean-skipped stylized/rays RTs (null); beautyRT + bloom are always allocated. */
+    sceneRT?.setSize(db.x, db.y);
+    filmicRT?.setSize(db.x, db.y);
     beautyRT.setSize(db.x, db.y);
-    toonRT.setSize(db.x, db.y);
-    pixelRT.setSize(db.x, db.y);
+    toonRT?.setSize(db.x, db.y);
+    pixelRT?.setSize(db.x, db.y);
     bloomW = Math.max(1, db.x >> 1); bloomH = Math.max(1, db.y >> 1);
     bloomA.setSize(bloomW, bloomH); bloomB.setSize(bloomW, bloomH);
-    raysBright.setSize(bloomW, bloomH); raysRT.setSize(bloomW, bloomH);
+    raysBright?.setSize(bloomW, bloomH); raysRT?.setSize(bloomW, bloomH);
     filmicMaterial.uniforms.uResolution.value.set(db.x, db.y);
     pixelMaterial.uniforms.uResolution.value.set(db.x, db.y);
     pixelkitMaterial.uniforms.uResolution.value.set(db.x, db.y);

@@ -141,6 +141,14 @@ export function createCameraRig({
   elevation = 0.52,     // ≈ 30°, a comfortable perspective start
   distance = 12,        // L13: +~9% so the bigger generated city isn't tight in dimetric
   zoom = 5.5,           // ortho half-height in WORLD units (+~10% for the city)
+  /* L-N re-skin: the WORLD-SCALE clamps + the style-LOD bands are now factory options so a
+     client build on a different-scale world (a room, a planet) re-frames WITHOUT editing this
+     file. Every default is today's value → a default build is byte-identical. */
+  elMin = EL_MIN, elMax = EL_MAX,                       // free-orbit elevation clamp (rad)
+  distMin = DIST_MIN, distMax = DIST_MAX,               // perspective dolly clamp (world units)
+  zoomMin = ZOOM_MIN, zoomMax = ZOOM_MAX,               // ortho half-height clamp (world units)
+  styleDistNear = STYLE_DIST_NEAR, styleDistFar = STYLE_DIST_FAR,   // style-LOD dolly band
+  styleZoomNear = STYLE_ZOOM_NEAR, styleZoomFar = STYLE_ZOOM_FAR,   // style-LOD ortho band
 } = {}) {
   /* TWO camera objects, one of each projection. Switching mode just changes which
      one we hand back to the renderer — we never rebuild a camera mid-flight. Both
@@ -226,7 +234,7 @@ export function createCameraRig({
   function orbit(dAz, dEl) {
     goal.azimuth += dAz;
     if (!elevationLocked) {
-      goal.elevation = THREE.MathUtils.clamp(goal.elevation + dEl, EL_MIN, EL_MAX);
+      goal.elevation = THREE.MathUtils.clamp(goal.elevation + dEl, elMin, elMax);
     }
   }
 
@@ -243,9 +251,9 @@ export function createCameraRig({
          camera zoom?" bug. */
   function zoomBy(factor) {
     if (mode === CAM.PERSPECTIVE) {
-      goal.distance = THREE.MathUtils.clamp(goal.distance * factor, DIST_MIN, DIST_MAX);
+      goal.distance = THREE.MathUtils.clamp(goal.distance * factor, distMin, distMax);
     } else {
-      goal.zoom = THREE.MathUtils.clamp(goal.zoom * factor, ZOOM_MIN, ZOOM_MAX);
+      goal.zoom = THREE.MathUtils.clamp(goal.zoom * factor, zoomMin, zoomMax);
     }
   }
 
@@ -361,7 +369,7 @@ export function createCameraRig({
     if (snap) curr.target.copy(goal.target);
   }
   function setZoom(z, snap = false) {
-    goal.zoom = THREE.MathUtils.clamp(z, ZOOM_MIN, ZOOM_MAX);
+    goal.zoom = THREE.MathUtils.clamp(z, zoomMin, zoomMax);
     if (snap) curr.zoom = goal.zoom;
   }
 
@@ -378,7 +386,7 @@ export function createCameraRig({
     if (snap) curr.azimuth = goal.azimuth;
   }
   function setElevation(e, snap = false) {
-    goal.elevation = THREE.MathUtils.clamp(e, EL_MIN, EL_MAX);
+    goal.elevation = THREE.MathUtils.clamp(e, elMin, elMax);
     if (snap) curr.elevation = goal.elevation;
   }
 
@@ -390,8 +398,8 @@ export function createCameraRig({
     followFn = getWorldPos;
     if (snap) { followFn(_followPos); goal.target.copy(_followPos); curr.target.copy(_followPos); }
     if (frame != null) {
-      if (mode === CAM.PERSPECTIVE) goal.distance = THREE.MathUtils.clamp(frame, DIST_MIN, DIST_MAX);
-      else goal.zoom = THREE.MathUtils.clamp(frame, ZOOM_MIN, ZOOM_MAX);
+      if (mode === CAM.PERSPECTIVE) goal.distance = THREE.MathUtils.clamp(frame, distMin, distMax);
+      else goal.zoom = THREE.MathUtils.clamp(frame, zoomMin, zoomMax);
     }
   }
   function clearFollow() { followFn = null; }
@@ -433,8 +441,8 @@ export function createCameraRig({
        number for both). Read-only accessor; no behaviour change. */
     get styleT() {
       return mode === CAM.PERSPECTIVE
-        ? THREE.MathUtils.clamp((curr.distance - STYLE_DIST_NEAR) / (STYLE_DIST_FAR - STYLE_DIST_NEAR), 0, 1)
-        : THREE.MathUtils.clamp((curr.zoom - STYLE_ZOOM_NEAR) / (STYLE_ZOOM_FAR - STYLE_ZOOM_NEAR), 0, 1);
+        ? THREE.MathUtils.clamp((curr.distance - styleDistNear) / (styleDistFar - styleDistNear), 0, 1)
+        : THREE.MathUtils.clamp((curr.zoom - styleZoomNear) / (styleZoomFar - styleZoomNear), 0, 1);
     },
     setMode, orbit, zoomBy, pan, setViewport, update,
   };
