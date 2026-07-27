@@ -56,6 +56,16 @@ const engine = createEngine({ demo: app.demo, citySeed: seed, profileIndex: 0, c
 const { renderer, scene, rig, sunRig } = engine;
 const shell = createAppShell(engine, { name: 'hoard2', flags: app });
 
+// PRECISION-SAFE MOBILE PATH (owner iPhone root-cause: FRAG highp = p0). No high-precision fragment math
+// → PBR (MeshStandardMaterial, per-FRAGMENT lighting) underflows to BLACK on iOS, while unlit renders
+// (?safe=1 confirmed). Auto-detect it and route game meshes to MeshLambertMaterial (much simpler lighting,
+// mediump-tolerant) rendered DIRECT (the proven safe path, keeping real colours/maps). ?lowp=1 forces it
+// for testing on any device; ?lowp=0 disables the auto path.
+const _fragHighp = (() => { try { const gl = renderer.getContext(); const f = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT); return f ? f.precision : 0; } catch { return 1; } })();
+const _lowpParam = app.q.get('lowp');
+const LOWP = !SAFE && (_lowpParam === '1' || (_lowpParam !== '0' && _fragHighp === 0));
+window.__lowp = LOWP;
+
 /* ---------- core seams ---------- */
 const registry = createRegistry();
 const events = createEventBus();
@@ -167,6 +177,33 @@ function safeRender() {
   renderer.render(scene, rig.camera);
 }
 
+/* ---------- LOWP — the auto precision-safe path: LIT (Lambert) game mats, direct render, no post ---------- */
+const _lowpCache = new Map(); // origMaterial → its MeshLambertMaterial twin (keeps colour/map, per-vertex-safe lighting)
+const _lowpSeen = new WeakSet();
+function _toLambert(m) {
+  let L = _lowpCache.get(m);
+  if (L) return L;
+  L = new THREE.MeshLambertMaterial({
+    color: m.color ? m.color.clone() : new THREE.Color(0xffffff), map: m.map || null,
+    emissive: m.emissive ? m.emissive.clone() : new THREE.Color(0x000000), emissiveMap: m.emissiveMap || null,
+    transparent: !!m.transparent, opacity: m.opacity != null ? m.opacity : 1, side: m.side,
+    flatShading: !!m.flatShading, vertexColors: !!m.vertexColors, alphaTest: m.alphaTest || 0,
+  });
+  _lowpCache.set(m, L);
+  return L;
+}
+function lowpRender() {
+  scene.traverse((o) => {
+    if (!(o.isMesh || o.isSkinnedMesh) || _lowpSeen.has(o)) return;
+    if (Array.isArray(o.material)) { if (o.material.some(_isLit)) { o.material = o.material.map((m) => (_isLit(m) ? _toLambert(m) : m)); _lowpSeen.add(o); } }
+    else if (_isLit(o.material)) { o.material = _toLambert(o.material); _lowpSeen.add(o); }
+  });
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(scene.fog ? scene.fog.color : new THREE.Color(0x8a8f80), 1); // day/night haze as the sky
+  renderer.clear(true, true, true);
+  renderer.render(scene, rig.camera);
+}
+
 /* ---------- ?debug=gl — screenshot-able GL-stack overlay ---------- */
 function buildGlDebug() {
   const gl = renderer.getContext();
@@ -180,7 +217,7 @@ function buildGlDebug() {
     `RENDERER ${de ? gl.getParameter(de.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}`,
     `VENDOR   ${de ? gl.getParameter(de.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)}`,
     `${gl.getParameter(gl.VERSION)} · WebGL2=${renderer.capabilities.isWebGL2}`,
-    `FRAG highp ${P(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)}  (p0 = NO highp → mediump underflow!)`,
+    `FRAG highp ${P(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)}  (p0 = NO highp → LOWP path ${LOWP ? 'ON' : 'off'})`,
     `FRAG medp ${P(gl.FRAGMENT_SHADER, gl.MEDIUM_FLOAT)} · VERT highp ${P(gl.VERTEX_SHADER, gl.HIGH_FLOAT)}`,
     `ext colorBufFloat ${ex('EXT_color_buffer_float')} · halfFloatLinear ${ex('OES_texture_half_float_linear')} · colorBufHalf ${ex('EXT_color_buffer_half_float')}`,
     `ctx alpha=${a.alpha} depth=${a.depth} stencil=${a.stencil} aa=${a.antialias} preMult=${a.premultipliedAlpha} preserve=${a.preserveDrawingBuffer}`,
@@ -227,8 +264,9 @@ function gameStep(dt, t) {
 
   engine.updateWorld(dt, t, { shadowsOn: true, seasonTarget: 0 }); // day/night, ambient, shadows
   curStyle = engine.decideStyle();
-  if (SAFE) safeRender();   // ?safe=1 — bare scene, flat unlit mats, no post (iOS-black bisect)
-  else dive.present(dt);    // the single present
+  if (SAFE) safeRender();       // ?safe=1 — bare scene, flat unlit mats, no post (iOS-black bisect)
+  else if (LOWP) lowpRender();  // auto (or ?lowp=1) — precision-safe LIT path for no-highp GPUs (iOS)
+  else dive.present(dt);        // the single present
 }
 
 /* ---------- readiness (drop the boot cover once the world is dressed) ---------- */
