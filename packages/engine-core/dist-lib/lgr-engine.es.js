@@ -19484,21 +19484,21 @@ function W_(e, t, n) {
 function G_(e) {
 	(Array.isArray(e) ? e : [e]).forEach((e) => e && e.dispose && e.dispose());
 }
-function K_({ seed: e = 1, profileIndex: t = 0, landmarkFactory: n = null, windowGlow: r }) {
-	let i = new mr(), a = new mr(), o = new mr();
-	a.raycast = () => {}, o.raycast = () => {}, i.add(a, o);
-	let s = new hu(16773594, 3);
-	s.position.set(.45, .6, -.65).multiplyScalar(10);
-	let c = new Xl(7313331, 2762272, 1);
-	i.add(s, c);
-	let l = 0, u = [], d = {
+function K_({ seed: e = 1, profileIndex: t = 0, profile: n = null, landmarkFactory: r = null, windowGlow: i }) {
+	let a = n, o = new mr(), s = new mr(), c = new mr();
+	s.raycast = () => {}, c.raycast = () => {}, o.add(s, c);
+	let l = new hu(16773594, 3);
+	l.position.set(.45, .6, -.65).multiplyScalar(10);
+	let u = new Xl(7313331, 2762272, 1);
+	o.add(l, u);
+	let d = 0, f = [], p = {
 		seed: e,
 		profileIndex: t,
-		profile: N_[t],
+		profile: a || N_[t],
 		extent: 0,
 		meshCount: 0
 	};
-	function f(e, t, n, r) {
+	function m(e, t, n, r) {
 		let i = new Z(new es(e, .04, t), o_(new tl({
 			color: r,
 			roughness: .95,
@@ -19506,29 +19506,29 @@ function K_({ seed: e = 1, profileIndex: t = 0, landmarkFactory: n = null, windo
 		}), { color: r }));
 		return i.position.y = n, i.userData.ground = !0, i;
 	}
-	function p(e, t) {
-		for (let e of a.children) e.geometry && e.geometry.dispose(), G_(e.material);
-		a.clear();
-		for (let e of o.children) {
+	function h(e, t) {
+		for (let e of s.children) e.geometry && e.geometry.dispose(), G_(e.material);
+		s.clear();
+		for (let e of c.children) {
 			let t = e.userData && e.userData.ownsGeometry;
 			e.traverse((e) => {
 				e.isMesh && (G_(e.material), t && e.geometry && e.geometry.dispose());
 			});
 		}
-		o.clear(), u.length = 0, l = 0;
-		let r = k_(e), i = N_[t], s = (V_ - 1) / 2 * R_, c = 7.075;
-		d = {
+		c.clear(), f.length = 0, d = 0;
+		let n = k_(e), i = a || N_[t], o = (V_ - 1) / 2 * R_, l = 7.075;
+		p = {
 			seed: e,
 			profileIndex: t,
 			profile: i,
-			extent: c + (i.coast?.base ?? H_.BASE),
+			extent: l + (i.coast?.base ?? H_.BASE),
 			meshCount: 0
 		};
-		let p = W_(e, c, i.coast);
-		d.coast = p;
-		let b = new Hs();
-		p.points.forEach((e, t) => t ? b.lineTo(e.x, e.y) : b.moveTo(e.x, e.y)), b.closePath();
-		let x = new Z(new Ec(b, {
+		let u = W_(e, l, i.coast);
+		p.coast = u;
+		let h = new Hs();
+		u.points.forEach((e, t) => t ? h.lineTo(e.x, e.y) : h.moveTo(e.x, e.y)), h.closePath();
+		let S = new Z(new Ec(h, {
 			depth: 2,
 			bevelEnabled: !1,
 			steps: 1
@@ -19538,133 +19538,133 @@ function K_({ seed: e = 1, profileIndex: t = 0, landmarkFactory: n = null, windo
 			flatShading: !0,
 			side: 2
 		}), { color: i.ground }));
-		x.rotation.x = -Math.PI / 2, x.position.y = F_ - 2, x.userData.ground = !0, a.add(x);
-		let S = 2 * 7.195;
-		a.add(f(S, S, .32, i.street)), v(p.harborX, i);
-		let C = [];
-		for (let e = 0; e < V_; e++) for (let t = 0; t < V_; t++) C.push([e, t]);
-		let w = /* @__PURE__ */ new Set(), T = Math.max(1, Math.round(C.length * .08));
-		for (; w.size < T;) w.add(r.int(0, C.length - 1));
-		let E = r.range(-2.45 * .6, R_ * .6), D = r.range(-2.45 * .6, R_ * .6), O = Math.hypot(s, s), k = [];
-		if (C.forEach(([e, t], n) => {
-			let o = (e - (V_ - 1) / 2) * R_, s = (t - (V_ - 1) / 2) * R_;
-			if (a.add(f(I_, I_, .32999999999999996, i.sidewalk).translateX(o).translateZ(s)), w.has(n)) {
-				a.add(f(I_ - z_ * 2, I_ - z_ * 2, .35, i.park).translateX(o).translateZ(s));
-				let e = r.int(3, 5);
-				for (let t = 0; t < e; t++) y(o + r.range(-.6, .6), s + r.range(-.6, .6), i, r);
+		S.rotation.x = -Math.PI / 2, S.position.y = F_ - 2, S.userData.ground = !0, s.add(S);
+		let C = 2 * 7.195;
+		s.add(m(C, C, .32, i.street)), b(u.harborX, i);
+		let w = [];
+		for (let e = 0; e < V_; e++) for (let t = 0; t < V_; t++) w.push([e, t]);
+		let T = /* @__PURE__ */ new Set(), E = Math.max(1, Math.round(w.length * .08));
+		for (; T.size < E;) T.add(n.int(0, w.length - 1));
+		let D = n.range(-2.45 * .6, R_ * .6), O = n.range(-2.45 * .6, R_ * .6), k = Math.hypot(o, o), A = [];
+		if (w.forEach(([e, t], r) => {
+			let a = (e - (V_ - 1) / 2) * R_, o = (t - (V_ - 1) / 2) * R_;
+			if (s.add(m(I_, I_, .32999999999999996, i.sidewalk).translateX(a).translateZ(o)), T.has(r)) {
+				s.add(m(I_ - z_ * 2, I_ - z_ * 2, .35, i.park).translateX(a).translateZ(o));
+				let e = n.int(3, 5);
+				for (let t = 0; t < e; t++) x(a + n.range(-.6, .6), o + n.range(-.6, .6), i, n);
 				return;
 			}
-			let c = I_ - z_ * 2, l = r.chance(i.pSplit) ? 2 : 1, u = r.chance(i.pSplit) ? 2 : 1, d = c / l, p = c / u;
+			let c = I_ - z_ * 2, l = n.chance(i.pSplit) ? 2 : 1, u = n.chance(i.pSplit) ? 2 : 1, d = c / l, f = c / u;
 			for (let e = 0; e < l; e++) for (let t = 0; t < u; t++) {
-				let n = o - c / 2 + d * (e + .5), a = s - c / 2 + p * (t + .5), l = Math.max(.6, d - .1), u = Math.max(.6, p - .1), f = Math.hypot(n - E, a - D) / O, m = Math.exp(-(f * f) / (2 * i.sigma * i.sigma)), g = Math.max(.5, .5 + (i.hMax - .5) * m * r.range(.75, 1.25));
-				g > i.hMax * .5 && Math.min(l, u) >= .7 && k.push({
-					lx: n,
-					lz: a,
+				let r = a - c / 2 + d * (e + .5), s = o - c / 2 + f * (t + .5), l = Math.max(.6, d - .1), u = Math.max(.6, f - .1), p = Math.hypot(r - D, s - O) / k, m = Math.exp(-(p * p) / (2 * i.sigma * i.sigma)), h = Math.max(.5, .5 + (i.hMax - .5) * m * n.range(.75, 1.25));
+				h > i.hMax * .5 && Math.min(l, u) >= .7 && A.push({
+					lx: r,
+					lz: s,
 					fw: l,
 					fd: u,
-					h: g,
-					r: f
-				}), h(n, a, l, u, g, i, r);
+					h,
+					r: p
+				}), _(r, s, l, u, h, i, n);
 			}
-		}), n && n.ready) {
-			k.sort((e, t) => e.r - t.r);
+		}), r && r.ready) {
+			A.sort((e, t) => e.r - t.r);
 			let e = [], t = i.landmarks;
-			for (let r = 0; r < t.length && k.length; r++) {
+			for (let n = 0; n < t.length && A.length; n++) {
 				let a = null;
-				for (let t of k) if (e.every((e) => Math.hypot(e.lx - t.lx, e.lz - t.lz) > R_ * .9)) {
+				for (let t of A) if (e.every((e) => Math.hypot(e.lx - t.lx, e.lz - t.lz) > R_ * .9)) {
 					a = t;
 					break;
 				}
-				a ||= k[0], e.push(a), g(a.lx, a.lz);
-				let s = i.hMax * n.heightFactor(t[r]), c = n.make(t[r], {
+				a ||= A[0], e.push(a), v(a.lx, a.lz);
+				let o = i.hMax * r.heightFactor(t[n]), s = r.make(t[n], {
 					x: a.lx,
 					z: a.lz,
 					w: a.fw,
 					d: a.fd,
-					h: s,
+					h: o,
 					plinthTop: F_
 				});
-				if (c) {
-					o.add(c);
-					let e = new zr().setFromObject(c);
-					_(e.min.x - .15, e.max.x + .15, e.min.z - .15, e.max.z + .15);
+				if (s) {
+					c.add(s);
+					let e = new zr().setFromObject(s);
+					y(e.min.x - .15, e.max.x + .15, e.min.z - .15, e.max.z + .15);
 				}
 			}
 		}
-		a.traverse((e) => {
+		s.traverse((e) => {
 			e.isMesh && (e.userData.ground ? (e.castShadow = !1, e.receiveShadow = !0) : e.material && e.material.isMeshBasicMaterial ? (e.castShadow = !1, e.receiveShadow = !1) : (e.castShadow = !0, e.receiveShadow = !0));
-		}), o.traverse((e) => {
+		}), c.traverse((e) => {
 			e.isMesh && (e.castShadow = !0, e.receiveShadow = !0);
-		}), d.meshCount = a.children.length + o.children.length;
-		let A = 0;
-		for (let e of a.children) {
+		}), p.meshCount = s.children.length + c.children.length;
+		let j = 0;
+		for (let e of s.children) {
 			let t = e.position;
-			A = (Math.imul(A, 16777619) ^ (Math.round(t.x * 100) * 2654435761 ^ Math.round(t.y * 100) * 40503 ^ Math.round(t.z * 100) * 2246822519)) >>> 0;
+			j = (Math.imul(j, 16777619) ^ (Math.round(t.x * 100) * 2654435761 ^ Math.round(t.y * 100) * 40503 ^ Math.round(t.z * 100) * 2246822519)) >>> 0;
 		}
-		for (let e of d.coast.points) A = (Math.imul(A, 16777619) ^ (Math.round(e.x * 100) * 2654435761 ^ Math.round(e.y * 100) * 40503)) >>> 0;
-		d.sig = A;
-		let j = [];
-		for (let e of a.children) {
+		for (let e of p.coast.points) j = (Math.imul(j, 16777619) ^ (Math.round(e.x * 100) * 2654435761 ^ Math.round(e.y * 100) * 40503)) >>> 0;
+		p.sig = j;
+		let M = [];
+		for (let e of s.children) {
 			if (!e.userData.collide || e.geometry.type !== "BoxGeometry") continue;
 			let t = e.geometry.parameters, n = e.position;
-			j.push(n.x - t.width / 2, n.y - t.height / 2, n.z - t.depth / 2, n.x + t.width / 2, n.y + t.height / 2, n.z + t.depth / 2);
+			M.push(n.x - t.width / 2, n.y - t.height / 2, n.z - t.depth / 2, n.x + t.width / 2, n.y + t.height / 2, n.z + t.depth / 2);
 		}
-		for (let e of o.children) m.setFromObject(e), j.push(m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z);
-		d.solids = new Float32Array(j), window.__city = {
+		for (let e of c.children) g.setFromObject(e), M.push(g.min.x, g.min.y, g.min.z, g.max.x, g.max.y, g.max.z);
+		p.solids = new Float32Array(M), typeof window < "u" && (window.__city = {
 			seed: e,
 			profile: i.key,
-			meshes: d.meshCount,
-			sig: A,
-			solids: d.solids.length / 6
-		};
+			meshes: p.meshCount,
+			sig: j,
+			solids: p.solids.length / 6
+		});
 	}
-	let m = new zr();
-	function h(e, t, n, i, o, s, c) {
-		let d = a_(new tl({
+	let g = new zr();
+	function _(e, t, n, r, a, o, c) {
+		let l = a_(new tl({
 			flatShading: !0,
 			roughness: .7,
 			metalness: .05,
 			envMapIntensity: .3
 		}), {
-			color: M_(c.pick(s.towers), c),
-			id: ++l,
-			windowGlow: r,
-			winColors: s.winColors,
-			litFrac: s.nightLit
-		}), f = new Z(new es(n, o, i), d);
-		if (f.position.set(e, F_ + o / 2, t), f.userData.lot = [e, t], f.userData.collide = !0, a.add(f), s.roofTint) {
-			let r = o_(new tl({
-				color: s.roofTint,
+			color: M_(c.pick(o.towers), c),
+			id: ++d,
+			windowGlow: i,
+			winColors: o.winColors,
+			litFrac: o.nightLit
+		}), u = new Z(new es(n, a, r), l);
+		if (u.position.set(e, F_ + a / 2, t), u.userData.lot = [e, t], u.userData.collide = !0, s.add(u), o.roofTint) {
+			let i = o_(new tl({
+				color: o.roofTint,
 				roughness: .85,
 				flatShading: !0
-			}), { color: s.roofTint }), c = new Z(new es(n * 1.02, .08, i * 1.02), r);
-			c.position.set(e, F_ + o + .04, t), c.userData.lot = [e, t], c.userData.collide = !0, a.add(c);
+			}), { color: o.roofTint }), c = new Z(new es(n * 1.02, .08, r * 1.02), i);
+			c.position.set(e, F_ + a + .04, t), c.userData.lot = [e, t], c.userData.collide = !0, s.add(c);
 		}
-		if (o < 1.4) {
-			let r = c.pick(s.shopfronts), o = new Z(new es(n * 1.04, .18, i * 1.04), o_(new tl({
-				color: r,
+		if (a < 1.4) {
+			let i = c.pick(o.shopfronts), a = new Z(new es(n * 1.04, .18, r * 1.04), o_(new tl({
+				color: i,
 				roughness: .8,
 				flatShading: !0
-			}), { color: r }));
-			o.position.set(e, .39, t), o.userData.lot = [e, t], o.userData.collide = !0, a.add(o);
+			}), { color: i }));
+			a.position.set(e, .39, t), a.userData.lot = [e, t], a.userData.collide = !0, s.add(a);
 		}
-		let p = F_ + o, m = n, h = i;
-		if (o > s.hMax * .5 && c.chance(.55)) {
-			let u = n * c.range(.5, .72), d = i * c.range(.5, .72), f = o * c.range(.18, .4), g = new Z(new es(u, f, d), a_(new tl({
+		let p = F_ + a, m = n, h = r;
+		if (a > o.hMax * .5 && c.chance(.55)) {
+			let l = n * c.range(.5, .72), u = r * c.range(.5, .72), f = a * c.range(.18, .4), g = new Z(new es(l, f, u), a_(new tl({
 				flatShading: !0,
 				roughness: .7,
 				metalness: .05,
 				envMapIntensity: .3
 			}), {
-				color: M_(c.pick(s.towers), c),
-				id: ++l,
-				windowGlow: r,
-				winColors: s.winColors,
-				litFrac: s.nightLit
+				color: M_(c.pick(o.towers), c),
+				id: ++d,
+				windowGlow: i,
+				winColors: o.winColors,
+				litFrac: o.nightLit
 			}));
-			g.position.set(e, F_ + o + f / 2, t), g.userData.lot = [e, t], g.userData.collide = !0, a.add(g), p = F_ + o + f, m = u, h = d;
+			g.position.set(e, F_ + a + f / 2, t), g.userData.lot = [e, t], g.userData.collide = !0, s.add(g), p = F_ + a + f, m = l, h = u;
 		}
-		if (o > s.hMax * .45 && c.chance(s.roofRate)) {
+		if (a > o.hMax * .45 && c.chance(o.roofRate)) {
 			let n = c.chance(.5) ? new Z(new es(m * .4, .18, h * .4), o_(new tl({
 				color: "#9a9a9a",
 				flatShading: !0
@@ -19672,72 +19672,72 @@ function K_({ seed: e = 1, profileIndex: t = 0, landmarkFactory: n = null, windo
 				color: "#b9bec4",
 				flatShading: !0
 			}), { color: "#b9bec4" }));
-			if (n.position.set(e + c.range(-.1, .1), p + .11, t + c.range(-.1, .1)), n.userData.lot = [e, t], n.geometry.type === "BoxGeometry" && (n.userData.collide = !0), a.add(n), c.chance(.25)) {
+			if (n.position.set(e + c.range(-.1, .1), p + .11, t + c.range(-.1, .1)), n.userData.lot = [e, t], n.geometry.type === "BoxGeometry" && (n.userData.collide = !0), s.add(n), c.chance(.25)) {
 				let n = new Z(new Ic(.05, 6, 5), new oa({
 					color: "#ff3b30",
 					transparent: !0,
 					opacity: 1
 				}));
-				n.position.set(e, p + .15, t), n.userData.lot = [e, t], n.raycast = () => {}, a.add(n), u.push({
+				n.position.set(e, p + .15, t), n.userData.lot = [e, t], n.raycast = () => {}, s.add(n), f.push({
 					mesh: n,
 					phase: c.range(0, 6.28)
 				});
 			}
 		}
-		if (o > s.hMax * .7 && c.chance(.35)) {
-			let n = o * c.range(.18, .34), r = new Z(new rs(.018, .05, n, 6), o_(new tl({
+		if (a > o.hMax * .7 && c.chance(.35)) {
+			let n = a * c.range(.18, .34), r = new Z(new rs(.018, .05, n, 6), o_(new tl({
 				color: "#c8ccd2",
 				flatShading: !0
 			}), { color: "#c8ccd2" }));
-			r.position.set(e, p + n / 2, t), r.userData.lot = [e, t], r.raycast = () => {}, a.add(r);
-		}
-	}
-	function g(e, t) {
-		for (let n = a.children.length - 1; n >= 0; n--) {
-			let r = a.children[n];
-			r.userData.lot && Math.abs(r.userData.lot[0] - e) < 1e-4 && Math.abs(r.userData.lot[1] - t) < 1e-4 && (r.geometry && r.geometry.dispose(), G_(r.material), a.remove(r));
-		}
-		for (let e = u.length - 1; e >= 0; e--) u[e].mesh.parent || u.splice(e, 1);
-	}
-	function _(e, t, n, r) {
-		for (let i = a.children.length - 1; i >= 0; i--) {
-			let o = a.children[i];
-			o.userData.lot && o.position.x >= e && o.position.x <= t && o.position.z >= n && o.position.z <= r && (o.geometry && o.geometry.dispose(), G_(o.material), a.remove(o));
+			r.position.set(e, p + n / 2, t), r.userData.lot = [e, t], r.raycast = () => {}, s.add(r);
 		}
 	}
 	function v(e, t) {
+		for (let n = s.children.length - 1; n >= 0; n--) {
+			let r = s.children[n];
+			r.userData.lot && Math.abs(r.userData.lot[0] - e) < 1e-4 && Math.abs(r.userData.lot[1] - t) < 1e-4 && (r.geometry && r.geometry.dispose(), G_(r.material), s.remove(r));
+		}
+		for (let e = f.length - 1; e >= 0; e--) f[e].mesh.parent || f.splice(e, 1);
+	}
+	function y(e, t, n, r) {
+		for (let i = s.children.length - 1; i >= 0; i--) {
+			let a = s.children[i];
+			a.userData.lot && a.position.x >= e && a.position.x <= t && a.position.z >= n && a.position.z <= r && (a.geometry && a.geometry.dispose(), G_(a.material), s.remove(a));
+		}
+	}
+	function b(e, t) {
 		let n = o_(new tl({
 			color: "#7a5634",
 			roughness: .95,
 			flatShading: !0
 		}), { color: "#7a5634" }), r = (e, t, r, i) => {
-			let o = new Z(new es(e, .06, t), n);
-			o.position.set(r, F_ - .16, i), a.add(o);
+			let a = new Z(new es(e, .06, t), n);
+			a.position.set(r, F_ - .16, i), s.add(a);
 		};
 		r(.24, 2, e + .02, 0), r(1.3, .22, e + .7, -.72), r(1.3, .22, e + .7, .72);
 	}
-	function y(e, t, n, r) {
-		let i = new J(n.park), o = (n, o) => {
-			let s = i.clone().offsetHSL(0, 0, r.range(-.06, .06)).getStyle(), c = new Z(new Ic(n, 7, 6), o_(new tl({
-				color: s,
+	function x(e, t, n, r) {
+		let i = new J(n.park), a = (n, a) => {
+			let o = i.clone().offsetHSL(0, 0, r.range(-.06, .06)).getStyle(), c = new Z(new Ic(n, 7, 6), o_(new tl({
+				color: o,
 				flatShading: !0
 			}), {
-				color: s,
+				color: o,
 				season: !0
 			}));
-			c.scale.y = .7, c.position.set(e, F_ + o, t), c.userData.lot = null, a.add(c);
-		}, s = new Z(new es(.05, .18, .05), o_(new tl({
+			c.scale.y = .7, c.position.set(e, F_ + a, t), c.userData.lot = null, s.add(c);
+		}, o = new Z(new es(.05, .18, .05), o_(new tl({
 			color: "#6b4a2a",
 			flatShading: !0
 		}), { color: "#6b4a2a" }));
-		s.position.set(e, .39, t), a.add(s), o(.22, .28), o(.16, .46);
+		o.position.set(e, .39, t), s.add(o), a(.22, .28), a(.16, .46);
 	}
-	function b(e) {
-		for (let t of u) t.mesh.material.opacity = .35 + .65 * (.5 + .5 * Math.sin(e * 3 + t.phase));
+	function S(e) {
+		for (let t of f) t.mesh.material.opacity = .35 + .65 * (.5 + .5 * Math.sin(e * 3 + t.phase));
 	}
-	p(e, t);
-	function x(e, t) {
-		let n = d.coast?.points;
+	h(e, t);
+	function C(e, t) {
+		let n = p.coast?.points;
 		if (!n || n.length < 3) return !1;
 		let r = !1;
 		for (let i = 0, a = n.length - 1; i < n.length; a = i++) {
@@ -19747,20 +19747,20 @@ function K_({ seed: e = 1, profileIndex: t = 0, landmarkFactory: n = null, windo
 		return r;
 	}
 	return {
-		group: i,
-		key: s,
-		fill: c,
-		update: b,
-		generate: p,
-		isLand: x,
+		group: o,
+		key: l,
+		fill: u,
+		update: S,
+		generate: h,
+		isLand: C,
 		get state() {
-			return d;
+			return p;
 		},
 		get extent() {
-			return d.extent;
+			return p.extent;
 		},
 		get waterColor() {
-			return d.profile.water;
+			return p.profile.water;
 		},
 		profiles: N_
 	};

@@ -234,7 +234,14 @@ function buildCoastline(seed, blockHalf, coast) {
 /* dispose a material (or material array) — free its GPU program-side resources. */
 function disposeMat(m) { (Array.isArray(m) ? m : [m]).forEach((x) => x && x.dispose && x.dispose()); }
 
-export function createCity({ seed = 1, profileIndex = 0, landmarkFactory = null, windowGlow }) {
+export function createCity({ seed = 1, profileIndex = 0, profile = null, landmarkFactory = null, windowGlow }) {
+  // Lesson CITYGEN-PROFILE-OBJECT: `profile` lets a consumer pass a CUSTOM profile OBJECT (same shape as a
+  // PROFILES entry) instead of indexing the three baked ones — so a project can re-skin the city's rules
+  // with its own palette/character without adding a baked profile. When omitted (null), the generator falls
+  // back to PROFILES[profileIndex] EXACTLY as before → the three existing cities render byte-identical. The
+  // override is sticky across reroll/regenerate (the custom skin persists); it's a parameterized ability
+  // only — NO content baked here.
+  const customProfile = profile;
   const group = new THREE.Group();
   // Two sub-groups with different teardown rules: PROCEDURAL meshes own their geometry (we
   // dispose it on regenerate); LANDMARK clones share cached GLB geometry (dispose materials only).
@@ -253,7 +260,7 @@ export function createCity({ seed = 1, profileIndex = 0, landmarkFactory = null,
   let winId = 0;
   const blinkers = [];             // {mesh, base} small emissive roof lights pulsed in update()
 
-  let state = { seed, profileIndex, profile: PROFILES[profileIndex], extent: 0, meshCount: 0 };
+  let state = { seed, profileIndex, profile: customProfile || PROFILES[profileIndex], extent: 0, meshCount: 0 };
 
   /* ---- small builders ------------------------------------------------------ */
   // a flat horizontal slab (street/sidewalk/park ground) at y, sized w×d, vector-tinted.
@@ -283,7 +290,7 @@ export function createCity({ seed = 1, profileIndex = 0, landmarkFactory = null,
     winId = 0;
 
     const rng = makeRng(nextSeed);
-    const prof = PROFILES[nextProfileIndex];
+    const prof = customProfile || PROFILES[nextProfileIndex];   // custom skin overrides the baked index (null → byte-identical)
     const half = ((N - 1) / 2) * PITCH;             // block-centre span half-width
     const blockHalf = half + BLOCK / 2;             // outer edge of the block field
     const extent = blockHalf + (prof.coast?.base ?? COAST.BASE);  // NOMINAL land half-size (per-profile shore)
@@ -439,7 +446,7 @@ export function createCity({ seed = 1, profileIndex = 0, landmarkFactory = null,
     for (const lm of landmarksG.children) { _solidBox.setFromObject(lm); rows.push(_solidBox.min.x, _solidBox.min.y, _solidBox.min.z, _solidBox.max.x, _solidBox.max.y, _solidBox.max.z); }
     state.solids = new Float32Array(rows);
 
-    window.__city = { seed: nextSeed, profile: prof.key, meshes: state.meshCount, sig, solids: state.solids.length / 6 };
+    if (typeof window !== 'undefined') window.__city = { seed: nextSeed, profile: prof.key, meshes: state.meshCount, sig, solids: state.solids.length / 6 };   // debug probe (guarded so createCity runs headless in node tests)
   }
   const _solidBox = new THREE.Box3();   // L112: reused scratch for landmark world-AABBs in the solids post-pass
 

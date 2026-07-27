@@ -40,13 +40,15 @@ jobs:
           npm run build:city
           npm run build:office
           npm run build:hoard
+          npm run build:hoard2
 
       - name: Assemble site (hub at root · demos under stable paths)
         run: |
           rm -rf _site
-          mkdir -p _site/live _site/hoard _site/office
+          mkdir -p _site/live _site/hoard _site/hoard2 _site/office
           cp -R projects/city/dist/*   _site/live/
           cp -R projects/hoard/dist/*  _site/hoard/
+          cp -R projects/hoard2/dist/* _site/hoard2/    # the one-shot Hoard v2 → /hoard2/ (base:'./')
           cp -R projects/office/dist/* _site/office/
           cp -R projects/live-hub/*    _site/          # the capability hub → site root
           touch _site/.nojekyll                        # keep _-prefixed Vite asset dirs

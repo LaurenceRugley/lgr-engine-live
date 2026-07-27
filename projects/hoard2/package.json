@@ -1,0 +1,16 @@
+{
+  "name": "@lgr/hoard2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Hoard v2 — zombie wave-survival, built fresh on the frozen @lgr/engine-core (one-shot run, docs/HOARD-CONTRACT.md). Iso home + first-person dive, procedural decrepit-forest world, fortify/harvest/survive.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lgr/engine-core": "*"
+  }
+}
