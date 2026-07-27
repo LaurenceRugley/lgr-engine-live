@@ -413,6 +413,17 @@ export function createPlayer(ctx) {
     fireBtn.addEventListener('touchcancel', () => { firing = false; });
     root.querySelector('.melee').addEventListener('touchstart', (e) => { e.preventDefault(); doMelee(); }, { passive: false });
     root.querySelector('.dive').addEventListener('touchstart', (e) => { e.preventDefault(); dive.toggle(); }, { passive: false });
+
+    // FP TOUCH LOOK (owner phone defect #3 — no way to look around in first-person on touch): drag on the
+    // RIGHT HALF of the screen while dived → walker.addLook (mouse-look equivalent). The left half is the
+    // move stick; the buttons (pointer-events:auto) swallow their own touches, so this never fights them.
+    // Handlers on the canvas so empty-area drags (overlay is pointer-events:none) reach here.
+    const dom = renderer.domElement, LOOK_SENS = 0.65;
+    let lookId = null, lx = 0, ly = 0;
+    dom.addEventListener('touchstart', (e) => { if (!dive.active) return; for (const t of e.changedTouches) if (lookId === null && t.clientX > window.innerWidth * 0.5) { lookId = t.identifier; lx = t.clientX; ly = t.clientY; } }, { passive: true });
+    dom.addEventListener('touchmove', (e) => { if (!dive.active) return; for (const t of e.changedTouches) if (t.identifier === lookId) { walker.addLook((t.clientX - lx) * LOOK_SENS, (t.clientY - ly) * LOOK_SENS); lx = t.clientX; ly = t.clientY; } }, { passive: true });
+    const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
+    dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
   }
   if (coarse) createTouchControls();
 

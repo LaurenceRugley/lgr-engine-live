@@ -56,9 +56,17 @@ export function createWorld(ctx) {
   // The engine's own hemi (~0.65) + the low decay sun weren't enough to lift the dark ground/trees; this
   // is a game-layer lift (hoard2 is its own project — no byte-identical tier constraint). Cool sky over a
   // dead-earth ground, kept modest so night still goes dark (it's scaled down by nightFactor in update).
-  const fill = new THREE.HemisphereLight(0x9aa7b0, 0x4a4436, 0.9);
+  // WEBKIT/iOS FIX (owner phone playtest — iso "completely dark"): the beauty tonemap crushed the arena
+  // to ~16/255 mean, invisible on-device. Boosted the fill + a flat ambient so the arena reads on any
+  // GPU; even MORE on COARSE (touch) pointers, where the device tonemap runs darkest. Night still darkens
+  // (both are scaled by nightFactor in update). Desktop keeps mood; mobile gets legibility.
+  const _coarse = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const _fillBase = _coarse ? 3.2 : 2.0;
+  const _ambBase = _coarse ? 1.4 : 0.8;
+  const fill = new THREE.HemisphereLight(0x9aa7b0, 0x4a4436, _fillBase);
   scene.add(fill);
-  const _fillBase = 0.9;
+  const amb = new THREE.AmbientLight(0x9a9482, _ambBase);
+  scene.add(amb);
 
   // Ensure a distance fog exists so night + weather read (density is driven per-frame in update()). Only
   // created if the engine didn't already supply one — never stomp an engine-owned fog.
@@ -224,6 +232,7 @@ export function createWorld(ctx) {
       fill.intensity = _fillBase * (1 - 0.55 * _nf);
       fill.color.setHex(0x9aa7b0).lerp(_moonFill, _nf);        // warm-cool sky fill → cold moonlight at night
       fill.groundColor.setHex(0x4a4436).lerp(_moonGround, _nf);
+      amb.intensity = _ambBase * (1 - 0.6 * _nf);              // flat legibility lift, fades toward night
 
       // torches gutter every frame; near-OFF by day (0.04) so they don't warm-wash the daylight arena,
       // rising to full at deep night — that's when the torch pools become the legibility (dark-but-playable).

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "LGR WebGL Lab \u2014 an npm-workspaces monorepo: a reusable @lgr/engine-core + per-project apps (city showcase, John's office, The Hoard). Built end-to-end for learning Three.js + GLSL.",
+  "description": "LGR WebGL Lab — an npm-workspaces monorepo: a reusable @lgr/engine-core + per-project apps (city showcase, John's office, The Hoard). Built end-to-end for learning Three.js + GLSL.",
   "workspaces": [
     "packages/*",
     "projects/*"
@@ -44,7 +44,8 @@
     "present-parity:update": "node tools/present-parity.mjs --update",
     "capture-camera-director": "node tools/capture-camera-director.mjs",
     "capture-build-in": "node tools/capture-build-in.mjs",
-    "capture-shadows": "node tools/capture-shadows.mjs"
+    "capture-shadows": "node tools/capture-shadows.mjs",
+    "hoard2-webkit": "node tools/hoard2-webkit-lane.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.49.0",
