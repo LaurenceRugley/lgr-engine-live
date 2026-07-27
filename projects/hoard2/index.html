@@ -2,13 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>The Hoard — survive the dead</title>
     <link rel="icon" href="data:," /><!-- suppress the implicit /favicon.ico request (keeps the zero-console-error gate honest) -->
     <style>
       :root { color-scheme: dark; }
-      html, body { margin: 0; height: 100%; background: #0e0b07; overflow: hidden; }
-      #app { position: fixed; inset: 0; }
+      /* iOS Safari: lock the page (no pan/scroll that hid the map + stole look-drags in PORTRAIT) and use
+         the DYNAMIC viewport height (dvh) so the canvas fills the VISIBLE area under the URL bar/toolbar.
+         main.js also JS-fits to visualViewport + re-resizes on orientation/URL-bar changes (belt+braces). */
+      html, body { margin: 0; height: 100dvh; background: #0e0b07; overflow: hidden; overscroll-behavior: none; position: fixed; inset: 0; width: 100%; touch-action: none; }
+      #app { position: fixed; inset: 0; height: 100dvh; touch-action: none; }
       canvas { display: block; touch-action: none; }
       /* Boot cover — hides the black first-paint until the world is dressed. Owned by the shell/ready. */
       #boot {

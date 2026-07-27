@@ -414,14 +414,15 @@ export function createPlayer(ctx) {
     root.querySelector('.melee').addEventListener('touchstart', (e) => { e.preventDefault(); doMelee(); }, { passive: false });
     root.querySelector('.dive').addEventListener('touchstart', (e) => { e.preventDefault(); dive.toggle(); }, { passive: false });
 
-    // FP TOUCH LOOK (owner phone defect #3 — no way to look around in first-person on touch): drag on the
-    // RIGHT HALF of the screen while dived → walker.addLook (mouse-look equivalent). The left half is the
-    // move stick; the buttons (pointer-events:auto) swallow their own touches, so this never fights them.
-    // Handlers on the canvas so empty-area drags (overlay is pointer-events:none) reach here.
-    const dom = renderer.domElement, LOOK_SENS = 0.65;
+    // FP TOUCH LOOK (owner defect #3 + "look only works in landscape"): ANY drag on the canvas while dived
+    // → walker.addLook. The old "right half of innerWidth" test was orientation-fragile (portrait's narrow
+    // right column above the buttons left almost no room); the stick + buttons (pointer-events:auto) swallow
+    // their own touches, so any OTHER canvas touch is safely a look. touchmove is NON-passive +
+    // preventDefault so iOS rotates the view instead of panning the page (the portrait failure).
+    const dom = renderer.domElement, LOOK_SENS = 0.6;
     let lookId = null, lx = 0, ly = 0;
-    dom.addEventListener('touchstart', (e) => { if (!dive.active) return; for (const t of e.changedTouches) if (lookId === null && t.clientX > window.innerWidth * 0.5) { lookId = t.identifier; lx = t.clientX; ly = t.clientY; } }, { passive: true });
-    dom.addEventListener('touchmove', (e) => { if (!dive.active) return; for (const t of e.changedTouches) if (t.identifier === lookId) { walker.addLook((t.clientX - lx) * LOOK_SENS, (t.clientY - ly) * LOOK_SENS); lx = t.clientX; ly = t.clientY; } }, { passive: true });
+    dom.addEventListener('touchstart', (e) => { if (!dive.active) return; for (const t of e.changedTouches) if (lookId === null) { lookId = t.identifier; lx = t.clientX; ly = t.clientY; e.preventDefault(); break; } }, { passive: false });
+    dom.addEventListener('touchmove', (e) => { if (!dive.active || lookId === null) return; for (const t of e.changedTouches) if (t.identifier === lookId) { walker.addLook((t.clientX - lx) * LOOK_SENS, (t.clientY - ly) * LOOK_SENS); lx = t.clientX; ly = t.clientY; e.preventDefault(); } }, { passive: false });
     const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
     dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
   }

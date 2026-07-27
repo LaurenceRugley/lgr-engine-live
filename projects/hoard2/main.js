@@ -66,6 +66,28 @@ const _lowpParam = app.q.get('lowp');
 const LOWP = !SAFE && (_lowpParam === '1' || (_lowpParam !== '0' && _fragHighp === 0));
 window.__lowp = LOWP;
 
+// iOS PORTRAIT VIEWPORT FIX (owner: "can't see the map; look only works in landscape"). On real iOS
+// Safari portrait the fixed #app sized to the LAYOUT viewport (taller than visible under the URL bar), so
+// the canvas overflowed the screen — the map was panned off + look-drags panned the page. Fit the
+// container to the VISUAL viewport and re-resize the engine on every orientation / URL-bar / rotate event
+// (+ a few delayed passes, since iOS settles the viewport AFTER load). Rotating "fixed it" precisely
+// because rotation fired a resize; now every case does.
+function fitViewport() {
+  const vv = window.visualViewport;
+  const w = Math.round(vv ? vv.width : window.innerWidth);
+  const h = Math.round(vv ? vv.height : window.innerHeight);
+  container.style.width = w + 'px';
+  container.style.height = h + 'px';
+  if (engine.resize) engine.resize();
+}
+if (typeof window !== 'undefined') {
+  fitViewport();
+  window.addEventListener('resize', fitViewport);
+  window.addEventListener('orientationchange', () => { fitViewport(); setTimeout(fitViewport, 300); });
+  if (window.visualViewport) { window.visualViewport.addEventListener('resize', fitViewport); window.visualViewport.addEventListener('scroll', fitViewport); }
+  for (const ms of [120, 400, 900, 1800]) setTimeout(fitViewport, ms); // iOS settles the viewport late
+}
+
 /* ---------- core seams ---------- */
 const registry = createRegistry();
 const events = createEventBus();
