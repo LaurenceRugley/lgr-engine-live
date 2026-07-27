@@ -33,6 +33,7 @@ import postBrightFrag    from './shaders/post-bright.frag';
 import postBlurFrag      from './shaders/post-blur.frag';
 import postGodraysFrag   from './shaders/post-godrays.frag';
 import postPixelkitFrag  from './shaders/post-pixelkit.frag';
+import postGradeFrag     from './shaders/post-grade.frag';   // PASS N+1: the color grade / LOOK (after filmic)
 
 // L112 — the NIGHT factor (beauty-only): 0 in full day INCLUDING noon (the byte-identical anchor),
 // ramping to 1 as the sun drops below the horizon across the dusk window. Used by bloomPass.
@@ -179,6 +180,14 @@ export function createEngineCore(opts = {}) {
   const raysRT     = _lean ? null : new THREE.WebGLRenderTarget(bloomW, bloomH, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
   // NOTE: planarRefl is city-owned (city registers it with the resize registry below).
 
+  /* GRADE buffer (Lesson PIPELINE-MULTIPLIERS) — the color-grade pass reads filmic's SDR output, so this
+     is an 8-bit RGBA target (NOT HalfFloat: filmic already tonemapped HDR->SDR; grading is post-tonemap).
+     Screen-sized, always allocated (even lean hero) so every captured hero clip can inherit one LOOK. Only
+     ever rendered INTO when a look is active (grade off by default => this RT is untouched, byte-identical). */
+  const gradeRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false,
+  });
+
   const postScene  = new THREE.Scene();
   const postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const postQuad   = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
@@ -208,6 +217,26 @@ export function createEngineCore(opts = {}) {
       uRaysTex:      { value: _tex(raysRT) },
       uRays:         { value: 0.0 },
       uBeautyExp:    { value: 1.0 },
+    },
+  });
+
+  /* GRADE material (Lesson PIPELINE-MULTIPLIERS) — PASS N+1, reads filmic's SDR output. Uniforms default
+     to the IDENTITY grade (lift 0 / gamma·gain 1 / contrast·sat 1 / no split-tone / strength 0), so even if
+     this pass runs untuned it is a bit-exact passthrough. setLook() (below) swaps in a named LOOK's params. */
+  const gradeMaterial = new THREE.ShaderMaterial({
+    vertexShader: fullscreenVert,
+    fragmentShader: postGradeFrag,
+    uniforms: {
+      uScene:         { value: _tex(gradeRT) },
+      uLift:          { value: new THREE.Vector3(0, 0, 0) },
+      uGamma:         { value: new THREE.Vector3(1, 1, 1) },
+      uGain:          { value: new THREE.Vector3(1, 1, 1) },
+      uContrast:      { value: 1.0 },
+      uSat:           { value: 1.0 },
+      uShadowTint:    { value: new THREE.Vector3(1, 1, 1) },
+      uHighlightTint: { value: new THREE.Vector3(1, 1, 1) },
+      uSplitStrength: { value: 0.0 },
+      uStrength:      { value: 0.0 },   // 0 => identity/off
     },
   });
 
@@ -345,6 +374,75 @@ export function createEngineCore(opts = {}) {
     renderer.render(postScene, postCamera);
   }
 
+  /* ============================================================
+     THE COLOR GRADE / LOOK seam (Lesson PIPELINE-MULTIPLIERS).
+     ------------------------------------------------------------
+     A named LOOK is a small parameter set for post-grade.frag. The engine ships OFF (`neutral`) so the
+     default present is byte-identical (the grade pass is skipped entirely — see createBeautyPresenter).
+     A capture/demo opts into a branded look via setLook('lgr-premium'); every hero clip then inherits the
+     same colour signature with zero per-clip wiring. Values are authored in the SDR display space the pass
+     operates in (post-tonemap), tuned by eye. strength sits in the research's 40-70% "no LUT overdose" band.
+     ============================================================ */
+  const LOOKS = {
+    neutral: null,                                   // the OFF state (identity; the pass is skipped)
+    'lgr-premium': {                                 // the one shared marketing look — warm gold, cool ink
+      lift:          [0.000, 0.006, 0.012],          // shadows drift very slightly toward deep ink (brand)
+      gamma:         [1.00, 1.00, 1.00],
+      gain:          [1.03, 1.005, 0.975],           // highlights lean warm/gold
+      contrast:      1.07,                            // a gentle S-curve for body
+      sat:           1.06,
+      shadowTint:    [0.86, 0.94, 1.06],             // cool (teal-ish) shadows
+      highlightTint: [1.06, 1.00, 0.90],             // warm (gold) highlights
+      splitStrength: 0.18,
+      strength:      0.55,                            // ~mid of the 40-70% band
+    },
+  };
+  let _look = null;               // the active look name (null = neutral/off)
+  let _gradeActive = false;       // true => createBeautyPresenter routes filmic -> gradeRT -> gradePass
+
+  /* setLook(x): x is a look NAME (key of LOOKS), a raw PARAMS object, or null/'neutral'/'off' to disable.
+     Returns the resolved look name. Unknown names throw (fail loud) rather than silently no-op. */
+  function setLook(x) {
+    let params = null, name = 'neutral';
+    if (x && typeof x === 'object') { params = x; name = 'custom'; }
+    else if (x == null || x === 'neutral' || x === 'off') { params = null; name = 'neutral'; }
+    else if (Object.prototype.hasOwnProperty.call(LOOKS, x)) { params = LOOKS[x]; name = x; }
+    else throw new Error(`setLook: unknown look "${x}" (known: ${Object.keys(LOOKS).join(', ')})`);
+
+    const u = gradeMaterial.uniforms;
+    if (!params) {
+      // Reset to identity so a later strength probe is a true no-op even before the next setLook.
+      u.uLift.value.set(0, 0, 0); u.uGamma.value.set(1, 1, 1); u.uGain.value.set(1, 1, 1);
+      u.uContrast.value = 1.0; u.uSat.value = 1.0;
+      u.uShadowTint.value.set(1, 1, 1); u.uHighlightTint.value.set(1, 1, 1);
+      u.uSplitStrength.value = 0.0; u.uStrength.value = 0.0;
+      _gradeActive = false;
+    } else {
+      const p = params;
+      u.uLift.value.fromArray(p.lift ?? [0, 0, 0]);
+      u.uGamma.value.fromArray(p.gamma ?? [1, 1, 1]);
+      u.uGain.value.fromArray(p.gain ?? [1, 1, 1]);
+      u.uContrast.value = p.contrast ?? 1.0;
+      u.uSat.value = p.sat ?? 1.0;
+      u.uShadowTint.value.fromArray(p.shadowTint ?? [1, 1, 1]);
+      u.uHighlightTint.value.fromArray(p.highlightTint ?? [1, 1, 1]);
+      u.uSplitStrength.value = p.splitStrength ?? 0.0;
+      u.uStrength.value = p.strength ?? 1.0;
+      // strength 0 is still "active" here (an explicit identity grade — used to PROVE byte-identical: the
+      // pass runs but is a bit-exact passthrough). A caller wanting OFF passes null.
+      _gradeActive = true;
+    }
+    _look = name;
+    if (typeof window !== 'undefined') window.__look = name;
+    return name;
+  }
+
+  /* gradePass(srcTexture, dest) — the grade pass itself: read srcTexture (filmic's SDR output), write dest. */
+  function gradePass(srcTexture, dest) {
+    gradeMaterial.uniforms.uScene.value = srcTexture;
+    runPass(gradeMaterial, dest);
+  }
+
   /* 11) RESIZE — core RTs + uResolution. Content RTs (grabRT, planarRefl) are registered by city
      via registerContentResizer so the engine-core module has no city knowledge. */
   const _contentResizers = [];
@@ -362,10 +460,17 @@ export function createEngineCore(opts = {}) {
     bloomW = Math.max(1, db.x >> 1); bloomH = Math.max(1, db.y >> 1);
     bloomA.setSize(bloomW, bloomH); bloomB.setSize(bloomW, bloomH);
     raysBright?.setSize(bloomW, bloomH); raysRT?.setSize(bloomW, bloomH);
+    gradeRT.setSize(db.x, db.y);   // grade RT tracks the screen (always allocated, like beautyRT)
     filmicMaterial.uniforms.uResolution.value.set(db.x, db.y);
     pixelMaterial.uniforms.uResolution.value.set(db.x, db.y);
     pixelkitMaterial.uniforms.uResolution.value.set(db.x, db.y);
     toonMaterial.uniforms.uResolution.value.set(db.x, db.y);
+    /* Keep the SHARED drawBuffer in sync with the new size. It is captured once at init (line ~97) and
+       handed out via the core API; consumers that read it every frame for cover-fit (createLookReel /
+       createBeforeAfter → uQuadRes) assumed it tracked reality, but nothing here updated it — so a box
+       that was degenerate (0-width) at init stayed (0,0) FOREVER, collapsing coverUv's x-scale to 0 and
+       leaving a sticky horizontal-streak smear that no later resize could clear (Lesson Z2b). */
+    drawBuffer.copy(db);
     for (const fn of _contentResizers) fn(db);   // city: grabRT + planarRefl + waterMaterial.uResolution
     return db;
   }
@@ -465,13 +570,17 @@ export function createEngineCore(opts = {}) {
     renderer, drawBuffer, scene, rig, sunRig,
     // post RTs
     sceneDepth, sceneRT, filmicRT, beautyRT, toonRT, pixelRT,
-    bloomA, bloomB, raysBright, raysRT,
+    bloomA, bloomB, raysBright, raysRT, gradeRT,
     // post geometry + materials
     postScene, postCamera, postQuad,
     filmicMaterial, brightMaterial, blurMaterial, godraysMaterial,
-    pixelMaterial, pixelkitMaterial, toonMaterial, mixMaterial,
+    pixelMaterial, pixelkitMaterial, toonMaterial, mixMaterial, gradeMaterial,
     // passes + caches
-    PALCACHE, ERA_TEX, runPass, bloomPass, godraysPass,
+    PALCACHE, ERA_TEX, runPass, bloomPass, godraysPass, gradePass,
+    // color grade / LOOK seam (Lesson PIPELINE-MULTIPLIERS)
+    setLook, LOOKS,
+    get gradeActive() { return _gradeActive; },
+    get look() { return _look; },
     // lifecycle
     resize,
     // profiler + governor

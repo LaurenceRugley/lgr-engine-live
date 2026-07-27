@@ -22,7 +22,7 @@
    default 0.4 is mushy; 0.25-0.3 gives the visible overshoot and bounce that reads as "alive". Because the
    multipliers are per-TICK and not per-second, the tick must be a FIXED timestep — see PITFALL 1.
 
-   THE THREE FORCES:
+   THE FOUR FORCES (collision joined in slice 18):
      REPULSION  all-pairs, d3's many-body: v += (other - self) * (strength * alpha / dist²). Note the vector
                 points self→other while `strength` is NEGATIVE, so the node moves AWAY. Magnitude falls as
                 1/dist (not 1/dist²) because the vector's own length grows with dist. A `distanceMax` cap
@@ -33,6 +33,15 @@
                 Displacement is split by `bias = degA / (degA + degB)` — the heavier node moves less.
      CENTERING  translate-to-centroid, NOT a spring. A centering spring rings and oscillates around the
                 origin forever; a translation cannot, because it adds no energy.
+     COLLISION  (slice 18 — PERSONAL SPACE) d3's forceCollide as the reference: each node is a hard
+                circle; overlapping pairs are pushed apart at their VELOCITY-ANTICIPATED positions
+                (x+vx), the correction split by radius² (the smaller disc yields more), iterated 2× per
+                tick. NOT scaled by alpha — an overlap is a fact, not a mood, and it must resolve even
+                as the sim cools. Active only when a `radii` provider is passed (older consumers get the
+                pre-18 sim unchanged). At HARD-STOP a bounded pure position-projection pass drains any
+                residual overlap BEFORE settled is declared, so the rest state is geometrically clean
+                (no intersecting pair) AND bit-identical thereafter — collision is quiescent at rest by
+                construction (no overlap → zero correction → zero movement).
 
    SEEDING (§9): the deterministic radial layout STAYS as the seed. The sim relaxes FROM it, and every
    edge's `restLen` is the seeded distance between its endpoints — so the kind-ring structure survives as
@@ -71,6 +80,10 @@ export const SIM_DEFAULTS = Object.freeze({
   linkScale:      1.0,     // multiply every seeded rest length (>1 = roomier graph)
   velEpsilon:     0.0006,  // world units/tick below which a velocity is snapped to exactly 0
   dragAlphaTarget: 0.3,    // §9: reheat target while dragging — NOT 1.0 (that re-explodes the layout)
+  collideIterations: 2,    // slice 18: d3 forceCollide's iteration knob (1-2; more = stiffer packing)
+  collideStrength:   0.7,  // slice 18: fraction of the overlap corrected per iteration (d3 default 0.7 ×
+                           // its 1.0 strength). Under 1 so collide NEGOTIATES with the springs instead of
+                           // ringing against them (the classic collide-vs-link tug — §9's oscillation trap)
 });
 
 /* REPULSION_NOTE — why -0.15 and not §9's -110.
@@ -102,6 +115,9 @@ const clampVel = (v, eps) => (v > -eps && v < eps ? 0 : v);
    spec:      a validated GraphSpec.
    positions: the Map<id,{x,y,z}> from createGraphLayout. MUTATED IN PLACE — it is the shared truth. The
               y component is never touched: this graph lives on the y=0 plane, so the sim is 2-D in (x, z).
+   opts.radii (slice 18): (id) => world-units collision radius — sampled ONCE here into a flat array (the
+              caller hands the view's own radiusOf numbers: ONE source of truth, no re-derived copy that
+              can drift). Omitted/null = no collision (every pre-18 consumer unchanged).
    Dangling edges (an endpoint with no position — the honest [[L08]] finding) are skipped, exactly as the
    renderer skips them. */
 export function createGraphSim(spec, positions, opts = {}) {
@@ -165,6 +181,11 @@ export function createGraphSim(spec, positions, opts = {}) {
   const fz = new Float64Array(N);
   let pinnedCount = 0;
 
+  // ---- collision radii (slice 18): sampled ONCE from the provider; null = collision off entirely ----
+  const collideR = typeof opts.radii === 'function'
+    ? Float64Array.from(nodes, (n) => Math.max(opts.radii(n.id) || 0, 0))
+    : null;
+
   let alpha = params.alphaInit;
   let alphaTarget = params.alphaTarget;
   let settled = false;
@@ -208,9 +229,16 @@ export function createGraphSim(spec, positions, opts = {}) {
 
     // PITFALL 3 — HARD STOP. Not "skip the render": stop integrating, snap alpha and every velocity to
     // exactly 0, so successive rest frames are bit-identical and nothing jitters in the last significant bit.
+    // Slice 18: any RESIDUAL overlap is drained by pure position projection FIRST (bounded, deterministic,
+    // no velocities involved) — so "settled" also means "no two discs intersect", and stays bit-identical
+    // afterwards because a non-overlapping rest state gives the projection nothing to do.
     if (alpha < params.alphaMin && pinnedCount === 0) {
       alpha = 0;
       vx.fill(0); vz.fill(0);
+      if (collideR) {
+        let movedAny = resolveOverlaps(200);   // one-time at hard-stop; a crowded cluster relaxes ring-by-ring
+        if (movedAny) { for (let i = 0; i < N; i++) { px[i].x = x[i]; px[i].z = z[i]; } moved = true; }
+      }
       settled = true;
       return false;
     }
@@ -244,6 +272,33 @@ export function createGraphSim(spec, positions, opts = {}) {
       const bias = linkBias[k];
       if (!pinned[b]) { vx[b] -= ix * bias; vz[b] -= iz * bias; }
       if (!pinned[a]) { vx[a] += ix * (1 - bias); vz[a] += iz * (1 - bias); }
+    }
+
+    // --- COLLISION (slice 18): d3 forceCollide, faithfully — velocity-anticipated detection, the
+    //     correction split by radius² (smaller yields more), iterated. NOT alpha-scaled: an overlap must
+    //     resolve even at the end of the cooling schedule. Pinned nodes PLOW THROUGH (§9 pitfall 2's
+    //     pattern held): they push, they are never pushed. ---
+    if (collideR) {
+      const cs = params.collideStrength;
+      for (let it = 0; it < params.collideIterations; it++) {
+        for (let i = 0; i < N; i++) {
+          const xi = x[i] + vx[i], zi = z[i] + vz[i], ri = collideR[i];
+          for (let j = i + 1; j < N; j++) {
+            const rj = collideR[j], rr = ri + rj;
+            let dx = (x[j] + vx[j]) - xi;
+            let dz = (z[j] + vz[j]) - zi;
+            let l2 = dx * dx + dz * dz;
+            if (l2 >= rr * rr) continue;
+            let l = Math.sqrt(l2);
+            if (l < 1e-9) { dx = (i * 7919 + j) % 2 ? 1e-3 : -1e-3; dz = 1e-3; l = Math.hypot(dx, dz); }   // coincident: deterministic nudge
+            const push = ((rr - l) / l) * cs;
+            const wj = (rj * rj) / (ri * ri + rj * rj);   // the smaller disc yields more (d3's r² split)
+            const ix = dx * push, iz = dz * push;
+            if (!pinned[j]) { vx[j] += ix * wj; vz[j] += iz * wj; }
+            if (!pinned[i]) { vx[i] -= ix * (1 - wj); vz[i] -= iz * (1 - wj); }
+          }
+        }
+      }
     }
 
     // --- INTEGRATE: damp, then advance. One multiplier, applied per TICK (never per second). ---
@@ -295,6 +350,77 @@ export function createGraphSim(spec, positions, opts = {}) {
     return s;
   }
 
+  /* resolveOverlaps(maxIter) — pure position projection: split each overlapping pair apart along its
+     axis (radius²-weighted, pinned nodes immovable) until no pair intersects or the budget runs out.
+     Used at hard-stop; also the mechanism a test can call directly. Returns whether anything moved. */
+  function resolveOverlaps(maxIter = 200) {
+    if (!collideR) return false;
+    let movedAny = false;
+    for (let it = 0; it < maxIter; it++) {
+      let any = false;
+      for (let i = 0; i < N; i++) {
+        const ri = collideR[i];
+        for (let j = i + 1; j < N; j++) {
+          const rr = ri + collideR[j];
+          let dx = x[j] - x[i], dz = z[j] - z[i];
+          let l2 = dx * dx + dz * dz;
+          if (l2 >= rr * rr) continue;
+          let l = Math.sqrt(l2);
+          if (l < 1e-9) { dx = (i * 7919 + j) % 2 ? 1e-3 : -1e-3; dz = 1e-3; l = Math.hypot(dx, dz); }
+          // 0.1% overshoot: exact projection asymptotes (sequential pairs re-introduce ~1e-6 slivers
+          // and the iteration budget runs out); a hair PAST separation terminates the loop clean.
+          const over = ((rr - l) / l) * 1.001;
+          const rj = collideR[j];
+          let wj = (rj * rj) / (ri * ri + rj * rj);
+          if (pinned[i] && pinned[j]) continue;      // both pinned: the user owns this overlap
+          if (pinned[i]) wj = 1; else if (pinned[j]) wj = 0;
+          x[j] += dx * over * wj; z[j] += dz * over * wj;
+          x[i] -= dx * over * (1 - wj); z[i] -= dz * over * (1 - wj);
+          any = true; movedAny = true;
+        }
+      }
+      if (!any) break;
+    }
+    return movedAny;
+  }
+
+  /* maxOverlap() — the AP/AQ gates' seam: the deepest pair intersection in world units (0 = clean). */
+  function maxOverlap() {
+    if (!collideR) return 0;
+    let worst = 0;
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        const rr = collideR[i] + collideR[j];
+        const dx = x[j] - x[i], dz = z[j] - z[i];
+        const l = Math.hypot(dx, dz);
+        if (rr - l > worst) worst = rr - l;
+      }
+    }
+    return worst;
+  }
+
+  /* reseed(seedPositions) — VIZ SLICE 19, the RESET: put every node back on its deterministic starting
+     position and let the sim run again from there. Unpins everything first (a reset during a drag would
+     otherwise leave a pinned node stranded at the pointer), zeroes velocities, and REHEATS to alphaInit —
+     the graph re-settles through the same schedule (and the same collision pass) it used at boot, so a
+     reset composes with collision instead of exploding past it.
+     seedPositions: Map<id,{x,z}> — the layout's output, the caller's source of truth (never a copy the
+     sim keeps: the seed is the LAYOUT's fact, and re-deriving it here is exactly how the two drift). */
+  function reseed(seedPositions) {
+    for (const n of nodes) {
+      const i = index.get(n.id);
+      const s = seedPositions && seedPositions.get ? seedPositions.get(n.id) : null;
+      if (pinned[i]) { pinned[i] = 0; pinnedCount--; }
+      if (s) { x[i] = s.x; z[i] = s.z; }
+      vx[i] = 0; vz[i] = 0;
+      px[i].x = x[i]; px[i].z = z[i];
+    }
+    alpha = params.alphaInit;
+    alphaTarget = params.alphaTarget;
+    settled = false;
+    moved = true;
+  }
+
   function kineticEnergy() {
     let e = 0;
     for (let i = 0; i < N; i++) e += vx[i] * vx[i] + vz[i] * vz[i];
@@ -326,6 +452,8 @@ export function createGraphSim(spec, positions, opts = {}) {
   return {
     tick, step, settleNow, reheat, pin, unpin, unpinAll,
     kineticEnergy, linkStrengthOf, setParams, dispose,
+    resolveOverlaps, maxOverlap, reseed,
+    collideRadiusOf: (id) => { const i = index.get(id); return i == null || !collideR ? 0 : collideR[i]; },
     get params() { return params; },
     get alpha() { return alpha; },
     get alphaTarget() { return alphaTarget; },

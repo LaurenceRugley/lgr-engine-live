@@ -3,7 +3,7 @@
    `node --test projects/atlas/graph-spec.test.mjs` (wired into the root `npm test` glob on lift to engine-core). */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateGraphSpec, indexNodes, KINDS, RELS, GRAPH_SPEC_VERSION, heatFromAgeDays, HEAT_FLOOR } from './graph-spec.js';
+import { validateGraphSpec, indexNodes, KINDS, RELS, GRAPH_SPEC_VERSION, heatFromAgeDays, HEAT_FLOOR, classifyMedia, hasMedia, DEEP_CHARS, ALGORITHM_KINDS, classifyHealth, worstState, mediaGlyph, mediaGlyphCode } from './graph-spec.js';
 
 const HUB = { id: 'hub', label: 'MEMORY', kind: 'hub' };
 const A = { id: 'a', label: 'A', kind: 'live-ops', type: 'memory' };
@@ -128,7 +128,7 @@ test('quiet means quiet: sub-floor heat snaps to exactly 0, and a missing age ne
 
 test('exported vocabularies are the v1 contract (KINDS grows ADDITIVELY within a version — see the vocab policy)', () => {
   assert.equal(GRAPH_SPEC_VERSION, 1);
-  assert.deepEqual(KINDS, ['hub', 'live-ops', 'doctrine', 'initiative', 'learning', 'ops']);   // 'ops' added slice 13 (FACE-1)
+  assert.deepEqual(KINDS, ['hub', 'live-ops', 'doctrine', 'initiative', 'learning', 'ops', 'site']);   // 'site' joined in the cockpit slice (additive growth, as the policy allows)   // 'ops' added slice 13 (FACE-1)
   assert.deepEqual(RELS, ['links-to', 'depends-on', 'explains', 'built-by', 'derived-from']);
 });
 
@@ -142,4 +142,133 @@ test("kind 'learning' validates (the docs/guides learning-module nodes)", () => 
 test("'batch' is a validated known key (a non-boolean batch would silently skew the heat layer)", () => {
   assert.equal(validateGraphSpec({ v: 1, nodes: [{ id: 'a', batch: true }], edges: [] }).ok, true);
   assert.equal(validateGraphSpec({ v: 1, nodes: [{ id: 'a', batch: 'yes' }], edges: [] }).ok, false);
+});
+
+/* ============================================================
+   SLICE 19 — MEDIA RICHNESS. The badge exists to answer "which nodes carry real material?" at a
+   glance, so these tests encode WHY the classifier is shaped this way: it must fire on real media
+   (figma/pdf), it must NOT fire on a stub (that is the whole signal), and DEEP_CHARS must be a
+   threshold a corpus can move — a badge that fires on 92% of the graph tells the eye nothing (which
+   is exactly what 1200 chars did to this vault; measured, then raised to 5000).
+   ============================================================ */
+test('classifyMedia: figma assets badge the node', () => {
+  const m = classifyMedia({ id: 'a', figmaAssets: [{ path: 'figma/x.png', name: 'Hero' }] });
+  assert.equal(m.figma, true);
+  assert.equal(hasMedia(m), true);
+});
+
+test('classifyMedia: a pdf asset badges; an unknown asset type does not', () => {
+  assert.equal(classifyMedia({ assets: [{ type: 'pdf', path: 'a.pdf' }] }).pdf, true);
+  assert.equal(hasMedia(classifyMedia({ assets: [{ type: 'zip', path: 'a.zip' }] })), false);
+});
+
+test('classifyMedia: a STUB does not badge — the signal only means something if it can be absent', () => {
+  const m = classifyMedia({ id: 'stub', content: '# Title\n\nA one-line pointer note.\n' });
+  assert.deepEqual(m, { figma: false, pdf: false, img: false, deep: false, interactive: false, launch: false });
+  assert.equal(hasMedia(m), false);
+});
+
+test('classifyMedia: DEEP_CHARS is the policy knob (a corpus can move the bar)', () => {
+  const node = { content: 'x'.repeat(2000) };
+  assert.equal(classifyMedia(node).deep, false, '2000 chars is not deep at the shipped 5000 bar');
+  assert.equal(classifyMedia(node, { deepChars: 1200 }).deep, true, 'a one-liner vault can lower it');
+  assert.equal(classifyMedia({ content: 'x'.repeat(DEEP_CHARS) }).deep, true, 'the bar is inclusive');
+});
+
+test('classifyMedia: garbage in → false out, never a throw (the snapshot must not break the render)', () => {
+  for (const bad of [null, undefined, {}, { assets: 'nope' }, { figmaAssets: {} }, { content: 42 }]) {
+    assert.equal(hasMedia(classifyMedia(bad)), false);
+  }
+});
+
+test('validateGraphSpec: a malformed media key fails LOUD (on the studio machine, not in the browser)', () => {
+  const ok = validateGraphSpec({ v: 1, nodes: [{ id: 'a', media: { figma: true, deep: false } }], edges: [] });
+  assert.equal(ok.ok, true);
+  const bad = validateGraphSpec({ v: 1, nodes: [{ id: 'a', media: { figma: 'yes' } }], edges: [] });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors[0], /media\.figma must be a boolean/);
+});
+
+test('ALGORITHM_KINDS never drifts from the runnable registry (a lesson must not promise what we cannot run)', async () => {
+  // graph-spec keeps a PLAIN LIST so it stays headless-pure; algorithms.js owns the implementations.
+  // The two are allowed to live apart — they are NOT allowed to disagree, which is what this asserts.
+  const { ALGORITHMS } = await import('./algorithms.js');
+  assert.deepEqual([...ALGORITHM_KINDS].sort(), Object.keys(ALGORITHMS).sort());
+});
+
+test('validateGraphSpec: an algorithm node with an UNRUNNABLE kind fails loud', () => {
+  const ok = validateGraphSpec({ v: 1, nodes: [{ id: 'a', algorithm: { kind: 'bubble-sort', input: [3, 1] } }], edges: [] });
+  assert.equal(ok.ok, true);
+  const bad = validateGraphSpec({ v: 1, nodes: [{ id: 'a', algorithm: { kind: 'quicksort' } }], edges: [] });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors[0], /not runnable/);
+});
+
+/* ============================================================
+   COCKPIT SLICE 1 — classifyHealth. A monitoring classifier is the one place where being "roughly right"
+   is worthless: the whole value is that you can TRUST the colour. So the tests pin every boundary, and
+   the one that matters most is the last: a machine that could not check must never report DOWN.
+   ============================================================ */
+test('classifyHealth: a fast 2xx is GREEN', () => {
+  assert.equal(classifyHealth({ checked: true, httpCode: 200, responseMs: 300 }), 'green');
+  assert.equal(classifyHealth({ checked: true, httpCode: 204, responseMs: 10 }), 'green');
+});
+
+test('classifyHealth: a redirect is still up (a 301 to https is how half the web works)', () => {
+  assert.equal(classifyHealth({ checked: true, httpCode: 301, responseMs: 120 }), 'green');
+  assert.equal(classifyHealth({ checked: true, httpCode: 308, responseMs: 120 }), 'green');
+});
+
+test('classifyHealth: a SLOW 2xx is WORKING (amber) — "up" is not the same as "fine"', () => {
+  assert.equal(classifyHealth({ checked: true, httpCode: 200, responseMs: 1501 }), 'working');
+  assert.equal(classifyHealth({ checked: true, httpCode: 200, responseMs: 1499 }), 'green', 'the boundary is inclusive of fast');
+  // the threshold is a POLICY the consumer owns, not a fact about HTTP
+  assert.equal(classifyHealth({ checked: true, httpCode: 200, responseMs: 600 }, { slowMs: 500 }), 'working');
+});
+
+test('classifyHealth: 4xx and 5xx are RED — the page is not being served', () => {
+  for (const code of [400, 403, 404, 500, 502, 503]) {
+    assert.equal(classifyHealth({ checked: true, httpCode: code, responseMs: 50 }), 'red', `HTTP ${code}`);
+  }
+});
+
+test('classifyHealth: a timeout or a connection error is RED (unreachable IS down, from a customer\'s chair)', () => {
+  assert.equal(classifyHealth({ checked: true, timedOut: true, responseMs: 8000 }), 'red');
+  assert.equal(classifyHealth({ checked: true, error: 'ENOTFOUND', httpCode: null }), 'red');
+});
+
+test('classifyHealth: NOT CHECKED is UNKNOWN, never red — the lie this classifier exists to prevent', () => {
+  /* A build machine with no network is not evidence that the owner's estate is down. A dashboard that
+     paints "my wifi is off" as a red outage teaches you to ignore red — which is the only way a
+     dashboard can truly fail. */
+  assert.equal(classifyHealth({ checked: false, offline: true }), 'unknown');
+  assert.equal(classifyHealth(null), 'unknown');
+  assert.equal(classifyHealth({}), 'unknown');
+  assert.equal(classifyHealth({ checked: true, httpCode: 'nonsense' }), 'unknown');
+});
+
+test('worstState: a summary wears the WORST of its members (not the average)', () => {
+  assert.equal(worstState(['green', 'green', 'red']), 'red', 'one site down means the estate is not ok');
+  assert.equal(worstState(['green', 'working']), 'working');
+  assert.equal(worstState(['green', 'green']), 'green');
+  // "unknown" outranks green: not knowing is a weaker claim than knowing it is fine
+  assert.equal(worstState(['green', 'unknown']), 'unknown');
+  assert.equal(worstState([]), 'unknown');
+});
+
+test('launch: a runnable node validates; a broken one fails LOUD (a button that goes nowhere is worse than none)', () => {
+  const ok = validateGraphSpec({ v: 1, nodes: [{ id: 'a', launch: { url: 'http://localhost:5173/?world=1', label: 'Sculpt a world' } }], edges: [] });
+  assert.equal(ok.ok, true);
+  for (const bad of [{ url: 'x' }, { label: 'y' }, { url: '', label: 'y' }, 'nope']) {
+    const r = validateGraphSpec({ v: 1, nodes: [{ id: 'a', launch: bad }], edges: [] });
+    assert.equal(r.ok, false, `launch ${JSON.stringify(bad)} should not validate`);
+  }
+});
+
+test('mediaGlyph: ROCKET outranks everything — running a thing beats reading about it', () => {
+  assert.equal(mediaGlyph({ launch: true, interactive: true, deep: true }), 'rocket');
+  assert.equal(mediaGlyph({ interactive: true, deep: true }), 'play');
+  assert.equal(mediaGlyph({ deep: true }), 'book');
+  assert.equal(mediaGlyphCode({ launch: true }), 1, 'the shader branches on this number — 1 is the rocket');
+  assert.equal(hasMedia(classifyMedia({ launch: { url: 'http://x', label: 'go' } })), true);
 });

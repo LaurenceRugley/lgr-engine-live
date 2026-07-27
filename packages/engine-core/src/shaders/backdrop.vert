@@ -6,16 +6,16 @@
 
 // A VARYING is our own channel from vertex -> fragment shader. We write it
 // here per-vertex; the rasterizer interpolates it smoothly to every pixel in
-// between before the fragment shader reads it. `vUv` = "varying UV".
+// between before the fragment shader reads it. vUv = "varying UV".
 varying vec2 vUv;
 
 void main() {
-  // `uv` is a built-in ATTRIBUTE Three.js attaches to PlaneGeometry: each
+  // uv is a built-in ATTRIBUTE Three.js attaches to PlaneGeometry: each
   // corner's 2D texture coordinate, running 0->1 across the plane. We just
   // forward it so the fragment shader can use it as a gradient coordinate.
   vUv = uv;
 
-  // THE POSITION MATH. `position` is the vertex in the model's own local space.
+  // THE POSITION MATH. position is the vertex in the model's own local space.
   // We multiply by two matrices Three.js injects for us automatically:
   //   modelViewMatrix  : local space -> camera (eye) space
   //   projectionMatrix : eye space   -> CLIP SPACE (what the GPU clips against)

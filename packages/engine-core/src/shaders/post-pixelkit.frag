@@ -2,7 +2,7 @@
    post-pixelkit.frag — Lesson 10: the generalized pixel-art core.
    ------------------------------------------------------------
    Lesson 06's pixel pass hard-coded a 5-colour palette in a uniform array. PixelKit
-   generalizes it into a reusable engine shared by BOTH the live 3D scene (the `B`-key
+   generalizes it into a reusable engine shared by BOTH the live 3D scene (the B-key
    "era" looks) and a standalone image tool (tools/pixelate.html). The pipeline is the
    same three moves — SNAP, DITHER, QUANTIZE — but every constraint is now a knob:
 
@@ -12,7 +12,7 @@
                     8-entry uniform array: up to 64 colours (uPaletteSize live count).
      uUsePalette  — 0 for the "modern/32-bit" era (snap + dither only, full colour).
 
-   WHY A PALETTE TEXTURE. A `uniform vec3[8]` can't grow — GLSL array sizes are fixed
+   WHY A PALETTE TEXTURE. A uniform vec3[8] can't grow — GLSL array sizes are fixed
    and large uniform arrays are costly. A texture is the natural variable-length buffer
    on a GPU: store the palette as a 1-row image and SAMPLE entry i. That's how indexed-
    colour hardware worked too (a palette is a look-up table — see GLOSSARY: LUT). The

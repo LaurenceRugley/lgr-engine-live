@@ -19,15 +19,28 @@
 
 uniform float uSizeMul;   // 1.0 for the core layer, >1 for the halo layer
 uniform float uScale;     // global node scale (pixel mode boosts this so small discs stay readable)
+uniform float uHaloCap;   // slice 17: 1 = apply aHaloCap (the HALO material in pixel mode), 0 = ignore
+
+attribute float aHaloCap; // slice 17: per-node halo radius cap, as a fraction of the default halo --
+                          // written on SETTLE from nearest-neighbor distance (graph-view), so crowded
+                          // neighborhoods stop pooling their glow into one blob. 1 everywhere else.
+attribute vec3  aOutline; // slice 17: this node's outline INK color (darkened kind tint; warms with
+                          // heat; carries the red/gold state channel). Only the core frag reads it.
+attribute float aBadge;   // slice 19: 1 = this node carries real material (figma/pdf/img/deep note).
+                          // CONTENT, not state -- deliberately a different channel from the hot ring.
 
 varying vec2 vP;
 varying vec3 vColor;
+varying vec3 vOutline;
+varying float vBadge;
 
 void main() {
   vP     = uv * 2.0 - 1.0;   // -1..1 across the quad; length(vP) is the unit-disc SDF coordinate
   vColor = instanceColor;    // graph-view has already folded kind, heat, focus-dim and selection into this
 
-  float radius = length(instanceMatrix[0].xyz) * uScale * uSizeMul;
+  vOutline = aOutline;
+  vBadge = aBadge;
+  float radius = length(instanceMatrix[0].xyz) * uScale * uSizeMul * mix(1.0, aHaloCap, uHaloCap);
 
   vec4 mv = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
   mv.xy += position.xy * 2.0 * radius;   // PlaneGeometry spans -0.5..0.5, so *2*radius gives radius units

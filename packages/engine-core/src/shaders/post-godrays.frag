@@ -7,8 +7,8 @@
    (sun + sky only) with per-tap decay. Buildings already occlude the sun in that bright buffer, so
    the occlusion — the whole reason shafts look 3D — comes FREE.
 
-   C++ anchor: a pure GATHER post kernel — for each pixel, a fixed-N loop stepping a `uv` iterator
-   toward `uSunUv`, `sum += tex(uv) * pow(decay, i)`. No scatter, no sync; mobile-safe (fixed N).
+   C++ anchor: a pure GATHER post kernel — for each pixel, a fixed-N loop stepping a uv iterator
+   toward uSunUv, sum += tex(uv) * pow(decay, i). No scatter, no sync; mobile-safe (fixed N).
 
    Beauty-tier only: the pass never RUNS outside beauty (gated in createEngine), and the composite in
    post-filmic multiplies the result by uRays=0 on stylized frames → byte-identical. Tinted warm for

@@ -4,7 +4,7 @@
    STYLE-LOD switches between the toon look (near) and the pixel look (far). A
    hard cut at one zoom level would pop; instead we leave a transition BAND where
    both styles are rendered to their own textures and we blend between them. This
-   pass is the blend: a single `mix()` driven by `uBlend` (0 = all toon, 1 = all
+   pass is the blend: a single mix() driven by uBlend (0 = all toon, 1 = all
    pixel), which main.js computes as a smoothstep across the band so the dissolve
    eases in and out instead of being linear. Cheapest possible pass — two reads
    and a lerp — and it only runs while you are actually inside the band.

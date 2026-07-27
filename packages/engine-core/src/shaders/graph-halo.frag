@@ -16,6 +16,9 @@
 // effect -- that crosses the bloom threshold. Recency literally becomes light.
 
 uniform float uFalloff;
+uniform float uRings;   // slice 17 (PIXEL): 0 = smooth Gaussian; N = the falloff is quantized into N
+                        // AUTHORED steps -- a chunky 2-3 ring aura the pixel look owns, instead of
+                        // whatever bands the DB32 quantizer improvises out of a smooth gradient.
 
 varying vec2 vP;
 varying vec3 vColor;
@@ -26,6 +29,7 @@ void main() {
 
   float i = exp(-d2 * uFalloff) - exp(-uFalloff);   // Gaussian, rebased so it hits 0 exactly at the rim
   i = max(i, 0.0);
+  if (uRings > 0.5) i = ceil(i * uRings) / uRings * step(0.015, i) * 0.9;   // slice 17: authored rings
 
   gl_FragColor = vec4(vColor * i, i);   // additive: alpha carries the same falloff so the blend is smooth
 }

@@ -4,7 +4,7 @@
    required job: set gl_FragColor (this pixel's red/green/blue/alpha).
    ============================================================ */
 
-// PRECISION. GLSL makes us declare how many bits floats get. `highp` = high
+// PRECISION. GLSL makes us declare how many bits floats get. highp = high
 // precision — safe for smooth gradients and time that grows large. (Vertex
 // shaders default to highp; fragment shaders don't, so we say it explicitly.)
 precision highp float;
@@ -13,8 +13,8 @@ precision highp float;
 // interpolated per-pixel. At the left edge vUv.x≈0, at the right edge ≈1.
 varying vec2 vUv;
 
-// UNIFORMS — values our JS pushes in, constant for the whole frame. `uTime`
-// animates; `uInk`/`uGold` are the two palette ends. Driving colour from
+// UNIFORMS — values our JS pushes in, constant for the whole frame. uTime
+// animates; uInk/uGold are the two palette ends. Driving colour from
 // uniforms means we can restyle from JS without editing/recompiling GLSL.
 uniform float uTime;
 uniform vec3  uInk;

@@ -166,3 +166,146 @@ test('setParams retunes live without recomputing rest lengths (the ?sim= feel lo
   assert.equal(sim.params.velocityDecay, 0.5);
   assert.deepEqual(Array.from(sim.restLengths), rest, 'rest lengths belong to the SEED, not to the tuning');
 });
+
+/* ============================================================
+   SLICE 18 — COLLISION (PERSONAL SPACE). These tests encode the slice's contract, not just behavior:
+   the whole point of collision is a GEOMETRIC GUARANTEE at rest ("no two discs intersect"), it must not
+   cost determinism (same spec → same rest positions), and it must not break the §9 interaction model
+   (a pinned drag PLOWS THROUGH; the hard-stop still produces bit-identical rest frames).
+   ============================================================ */
+const COLLIDE_SPEC = {
+  v: 1,
+  nodes: [
+    { id: 'hub', kind: 'hub' },
+    ...Array.from({ length: 12 }, (_, i) => ({ id: `n${i}`, kind: 'doctrine' })),
+  ],
+  edges: Array.from({ length: 12 }, (_, i) => ({ from: `n${i}`, to: 'hub' })),
+};
+// A deliberately CROWDED seed: a ring far too small for the radii, so collision has real work to do.
+function crowdedPositions() {
+  const m = new Map([['hub', { x: 0, y: 0, z: 0 }]]);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    m.set(`n${i}`, { x: Math.cos(a) * 1.2, y: 0, z: Math.sin(a) * 1.2 });
+  }
+  return m;
+}
+const RADII = (id) => (id === 'hub' ? 0.9 : 0.55);   // sum 1.45 vs seed gaps ~0.62 — heavy overlap
+
+test('collision: NO intersecting pair at rest (the geometric guarantee)', () => {
+  const sim = createGraphSim(COLLIDE_SPEC, crowdedPositions(), { radii: RADII });
+  sim.settleNow();
+  assert.equal(sim.settled, true);
+  assert.ok(sim.maxOverlap() <= 1e-9, `worst overlap ${sim.maxOverlap()} — discs still intersect at rest`);
+});
+
+test('collision: determinism holds (same spec + radii → identical rest positions)', () => {
+  const p1 = crowdedPositions(), p2 = crowdedPositions();
+  const a = createGraphSim(COLLIDE_SPEC, p1, { radii: RADII });
+  const b = createGraphSim(COLLIDE_SPEC, p2, { radii: RADII });
+  a.settleNow(); b.settleNow();
+  for (const id of p1.keys()) {
+    assert.equal(p1.get(id).x, p2.get(id).x, `${id}.x diverged`);
+    assert.equal(p1.get(id).z, p2.get(id).z, `${id}.z diverged`);
+  }
+});
+
+test('collision: a pinned drag PLOWS THROUGH — the pinned node never yields, others do', () => {
+  const pos = crowdedPositions();
+  const sim = createGraphSim(COLLIDE_SPEC, pos, { radii: RADII });
+  sim.settleNow();
+  // Pin n0 and drive it straight at n6's rest spot: n0 must sit EXACTLY where pinned, n6 must yield.
+  const target = { x: pos.get('n6').x, z: pos.get('n6').z };
+  sim.pin('n0', target.x, target.z);
+  sim.reheat(0.3);
+  for (let s = 0; s < 400; s++) sim.tick();
+  assert.equal(pos.get('n0').x, target.x, 'pinned node was pushed off the pointer');
+  assert.equal(pos.get('n0').z, target.z);
+  const d = Math.hypot(pos.get('n6').x - target.x, pos.get('n6').z - target.z);
+  assert.ok(d >= RADII('n0') + RADII('n6') - 0.05, `n6 did not yield (d=${d.toFixed(2)})`);
+});
+
+test('collision: hard-stop still bit-identical at rest (quiescent, no micro-jitter)', () => {
+  const pos = crowdedPositions();
+  const sim = createGraphSim(COLLIDE_SPEC, pos, { radii: RADII });
+  sim.settleNow();
+  const snap = new Map([...pos].map(([id, p]) => [id, { x: p.x, z: p.z }]));
+  for (let s = 0; s < 50; s++) sim.tick();   // 50 more frames at rest
+  for (const [id, p] of pos) {
+    assert.equal(p.x, snap.get(id).x, `${id}.x moved at rest`);
+    assert.equal(p.z, snap.get(id).z, `${id}.z moved at rest`);
+  }
+  assert.equal(sim.ticks >= 0 && sim.settled, true);
+});
+
+test('collision: release after a plow re-settles CLEAN (overlap drained again)', () => {
+  const pos = crowdedPositions();
+  const sim = createGraphSim(COLLIDE_SPEC, pos, { radii: RADII });
+  sim.settleNow();
+  sim.pin('n0', pos.get('n6').x, pos.get('n6').z);
+  sim.reheat(0.3);
+  for (let s = 0; s < 120; s++) sim.tick();
+  sim.unpin('n0');
+  sim.reheat(0);
+  sim.settleNow();
+  assert.equal(sim.settled, true);
+  assert.ok(sim.maxOverlap() <= 1e-9, `post-drag rest overlap ${sim.maxOverlap()}`);
+});
+
+test('no radii → no collision (pre-18 consumers byte-unchanged)', () => {
+  const pos = crowdedPositions();
+  const sim = createGraphSim(COLLIDE_SPEC, pos, {});
+  sim.settleNow();
+  assert.equal(sim.maxOverlap(), 0);           // the seam reports 0 when collision is off
+  assert.equal(sim.collideRadiusOf('hub'), 0);
+});
+
+/* SLICE 19 — RESET. The contract: a scattered (or dragged, or pinned) graph returns to the DETERMINISTIC
+   seed and re-settles through the same schedule — collision included — instead of exploding past it. */
+test('reset: re-seeds to the EXACT starting positions and re-runs the schedule', () => {
+  const pos = crowdedPositions();
+  const seed = crowdedPositions();   // the layout's output — the caller's source of truth
+  const sim = createGraphSim(COLLIDE_SPEC, pos, { radii: RADII });
+  sim.settleNow();
+  // scatter: drag one node far away and leave it pinned, then reset mid-pin
+  sim.pin('n3', 9, -9);
+  sim.reheat(0.3);
+  for (let s = 0; s < 60; s++) sim.tick();
+  assert.ok(Math.hypot(pos.get('n3').x - seed.get('n3').x, pos.get('n3').z - seed.get('n3').z) > 5);
+
+  sim.reseed(seed);
+  assert.equal(sim.pinnedCount, 0, 'reset must release a pin — otherwise a node is stranded at the pointer');
+  for (const [id, p] of pos) {
+    assert.equal(p.x, seed.get(id).x, `${id} did not return to the seed`);
+    assert.equal(p.z, seed.get(id).z);
+  }
+  assert.equal(sim.settled, false, 'reset must re-heat: the graph re-settles, it does not freeze on the seed');
+});
+
+test('reset: re-settles CLEAN (collision composes with the reset — no explosion, no overlap)', () => {
+  const pos = crowdedPositions();
+  const sim = createGraphSim(COLLIDE_SPEC, pos, { radii: RADII });
+  sim.settleNow();
+  sim.reseed(crowdedPositions());
+  const steps = sim.settleNow();
+  assert.equal(sim.settled, true);
+  assert.ok(sim.maxOverlap() <= 1e-9, `post-reset overlap ${sim.maxOverlap()}`);
+  assert.ok(steps < 2000, `reset took ${steps} steps to settle — the schedule should be the boot schedule`);
+  let maxR = 0;
+  for (const [, p] of pos) maxR = Math.max(maxR, Math.hypot(p.x, p.z));
+  assert.ok(maxR < 12, `reset EXPLODED the layout (maxR ${maxR.toFixed(1)})`);
+});
+
+test('reset: determinism — boot-settle and reset-settle land on the SAME rest state', () => {
+  const a = crowdedPositions(), b = crowdedPositions();
+  const simA = createGraphSim(COLLIDE_SPEC, a, { radii: RADII });
+  simA.settleNow();
+  const simB = createGraphSim(COLLIDE_SPEC, b, { radii: RADII });
+  simB.settleNow();
+  simB.reseed(crowdedPositions());
+  simB.settleNow();
+  for (const id of a.keys()) {
+    assert.equal(b.get(id).x, a.get(id).x, `${id}.x: a reset graph must be the boot graph`);
+    assert.equal(b.get(id).z, a.get(id).z);
+  }
+});

@@ -90,6 +90,12 @@ void main() {
   // EMPHASIZED (>1, incident to the selection/hover). Above 1 it also WIDENS the ribbon (1.6 -> x1.45)
   // so the selected neighborhood reads at a glance; min-width still clamps LAST (pixel-mode floor holds).
   w *= 1.0 + max(aDim - 1.0, 0.0) * 0.75;
+  /* SLICE 23 — THE CALM ALSO THINS. Brightness alone cannot quiet a pixel-mode web: DB32 has no faint
+     step for these hues, so a resting ribbon is either visible or GONE (the motion gate proves it). The
+     other axis is INK: a calmed edge (aDim < 1) narrows toward the minimum width, so the resting web uses
+     fewer pixels rather than dimmer ones. The min-width clamp below still guarantees >= 1 virtual pixel,
+     so the web thins but never strobes -- quiet, not deleted. */
+  w *= mix(0.55, 1.0, clamp(aDim, 0.0, 1.0));
   w = max(w, uMinWidth);
 
   mv.xy += side * cross * w * 0.5;

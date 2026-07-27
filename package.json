@@ -9,6 +9,9 @@
     "projects/*"
   ],
   "scripts": {
+    "check:shaders": "node tools/check-shader-backticks.mjs",
+    "prebuild": "npm run check:shaders",
+    "prebuild:lib": "npm run check:shaders",
     "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard && npm run build -w projects/showcase-lab && npm run build -w projects/lessons && npm run build -w projects/tracer && npm run build -w projects/atlas",
     "build:atlas": "npm run build -w projects/atlas",
     "build:city": "npm run build -w projects/city",
@@ -30,7 +33,16 @@
     "scroll-probe": "node tools/scroll-probe.mjs",
     "test": "node --test packages/engine-core/src/*.test.mjs packages/engine-core/src/math/*.test.mjs packages/engine-core/src/hero/*.test.mjs tools/*.test.mjs",
     "asset-factory": "node asset-factory/process.mjs",
-    "build:lib": "npm run build:lib -w packages/engine-core"
+    "build:lib": "npm run build:lib -w packages/engine-core",
+    "hero-fps": "node tools/hero-fps.mjs",
+    "before-after-probe": "node tools/before-after-probe.mjs",
+    "look-reel-probe": "node tools/look-reel-probe.mjs",
+    "capture-hero-wipe": "node tools/capture-hero-wipe.mjs",
+    "present-parity": "node tools/present-parity.mjs",
+    "present-parity:update": "node tools/present-parity.mjs --update",
+    "capture-camera-director": "node tools/capture-camera-director.mjs",
+    "capture-build-in": "node tools/capture-build-in.mjs",
+    "capture-shadows": "node tools/capture-shadows.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.49.0",

@@ -3,7 +3,7 @@
    ------------------------------------------------------------
    Bloom = "bright things bleed light into their surroundings" (the sun, the moon, star-cores,
    speculars). Step 1 isolates ONLY the bright pixels: compute each pixel's luminance and keep it
-   (soft-thresholded) above `uThreshold`, zeroing everything dimmer. So the low-poly albedo (a green
+   (soft-thresholded) above uThreshold, zeroing everything dimmer. So the low-poly albedo (a green
    tree, a grey building) is dropped and only the hot sources survive into the blur. Run at HALF
    resolution (the blur is wide + soft, so half-res is invisible and 4× cheaper). C++: a per-pixel
    high-pass filter on luminance.

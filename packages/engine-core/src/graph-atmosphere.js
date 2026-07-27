@@ -29,6 +29,10 @@ import atmosphereVert from './shaders/graph-atmosphere.vert';
 import atmosphereFrag from './shaders/graph-atmosphere.frag';
 import glintVert from './shaders/graph-glint.vert';
 import glintFrag from './shaders/graph-glint.frag';
+import starVert from './shaders/graph-star.vert';
+import starFrag from './shaders/graph-star.frag';
+import skyVert from './shaders/graph-skysprite.vert';
+import skyFrag from './shaders/graph-skysprite.frag';
 
 /* A 32-bit LCG (numerical-recipes constants). Deterministic, seeded, and dependency-free. */
 function lcg(seed) {
@@ -54,6 +58,26 @@ export function createGraphAtmosphere(opts = {}) {
   aspect = 1.6,
   bandMul = 1.0,   // slice 12 (OBSERVATORY): scales the galactic band's boost inside the banked ~18% cap
   dustMul = 1.0,   //   "": scales both dust sheets + patches
+  twinkle = 0.0,   // slice 15: star scintillation amplitude. 0 = the slice-5 static field (byte-faithful);
+                   // harbor/observatory run a whisper (~0.12), PIXEL turns it up (~0.55, chunky sparkle).
+  starShape = 0,   // slice 22: 1 = square stars (pixel), 0 = round (harbor/observatory)
+  skyStars = 0,    // slice 22 (FULL-BLEED SKY): procedural screen-space star density. 0 = the pre-22
+                   // output exactly (the world slab alone — which has a visible EDGE when you zoom out).
+                   // (Named skyStars, not stars: `stars` is already the world-slab Points mesh below.)
+  extraSmudge = 0, // slice 15: 2 extra galaxy smudges (pixel sky); 0 = shader output identical to slice 12
+  starSize = 1.6,  // slice 15: point size, DEVICE px. THE PIXEL-SKY LESSON (found by looking): a 1.6px
+                   // star box-filtered into a 4px quantizer cell averages to ~16% and rounds to BLACK —
+                   // 760 stars, zero visible. The pixel instance passes ~one-virtual-pixel (4+) so each
+                   // star OWNS a cell; density was never the problem, survival was.
+  art = 0,         // slice 16: the AUTHORED sky (gold cloud masses + cool wisps). 0 = shader output
+                   // identical to slice 15 (the uExtraSmudge pattern, again).
+  clearing = 0,    // slice 16: radial center clearing — the readability guardrail (0 = off).
+  starVariety = null,  // slice 16: { sizes: [[px, weight], …], colors: [[hex, weight], …] } — mixed
+                       // star sizes/colors from their OWN seeded stream (placement stays byte-stable).
+                       // null = every star at starSize/THEME dim, exactly the slice-15 field.
+  skySprites = null,   // slice 16: authored landmark sprites — [{ kind: 'planet'|'moon'|'sparkle'|
+                       // 'galaxy', x, z, size, tint, phase?, tilt?, y? }]. One merged billboard mesh,
+                       // one draw call. null = no layer at all.
 } = opts;
   const group = new THREE.Group();
 
@@ -75,6 +99,12 @@ export function createGraphAtmosphere(opts = {}) {
       uPan:       { value: new THREE.Vector2() },                   // camera pan → per-layer parallax (slice 9)
       uBandMul:   { value: bandMul },                               // slice 12: observatory preset knobs
       uDustMul:   { value: dustMul },
+      uExtraSmudge: { value: extraSmudge },                         // slice 15: pixel's 2 extra galaxies
+      uStars:       { value: skyStars },                            // slice 22: the full-bleed field
+      uStarTwinkle: { value: twinkle },                             //   "" : shares the look's twinkle amp
+      uStarShape:   { value: starShape },                           // slice 22: square (pixel) vs round
+      uArt:       { value: art },                                   // slice 16: authored-sky gate
+      uClearing:  { value: clearing },                              // slice 16: readability guardrail
     },
   });
   const nebula = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), nebulaMat);
@@ -93,16 +123,58 @@ export function createGraphAtmosphere(opts = {}) {
     pos[i * 3 + 1] = -depth - rnd() * 3;   // a slab, not a plane: a little y-spread reads as volume
     pos[i * 3 + 2] = Math.sin(a) * r;
   }
+  /* TWINKLE PHASES (slice 15) — a SEPARATE LCG stream, deliberately. The main `rnd` stream feeds star
+     positions and then continues into the glint placement below; inserting per-star draws into it would
+     silently move every star and glint (a byte-stability break the captures would catch, but the right
+     fix is to never cause it). Phases get their own seeded stream, so placement is untouched. */
+  const rndPhase = lcg((seed ^ 0x7717) >>> 0);
+  const phase = new Float32Array(starCount);
+  for (let i = 0; i < starCount; i++) phase[i] = rndPhase();
+
+  /* STAR VARIETY (slice 16) — per-star size + color attributes, drawn from a THIRD seeded stream
+     (placement and phase streams untouched — the slice-15 discipline). With variety null the buffers
+     are uniform-filled with the slice-15 values, so the shader change is output-identical. */
+  const rndVar = lcg((seed ^ 0x51ab) >>> 0);
+  const weightedPick = (list, u) => {
+    let total = 0; for (const [, w] of list) total += w;
+    let acc = 0;
+    for (const [v, w] of list) { acc += w; if (u <= acc / total) return v; }
+    return list[list.length - 1][0];
+  };
+  const sSize = new Float32Array(starCount);
+  const sColor = new Float32Array(starCount * 3);
+  const _dim = new THREE.Color(THEME.NEUTRAL.dim);
+  const _vc = new THREE.Color();
+  for (let i = 0; i < starCount; i++) {
+    if (starVariety) {
+      sSize[i] = weightedPick(starVariety.sizes, rndVar());
+      _vc.set(weightedPick(starVariety.colors, rndVar()));
+    } else {
+      sSize[i] = starSize;
+      _vc.copy(_dim);
+    }
+    sColor[i * 3] = _vc.r; sColor[i * 3 + 1] = _vc.g; sColor[i * 3 + 2] = _vc.b;
+  }
+
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const starMat = new THREE.PointsMaterial({
-    color: new THREE.Color(THEME.NEUTRAL.dim),
-    size: 1.6,
-    sizeAttenuation: false,   // ortho: a "distant" star is not smaller, it is just further back
+  starGeo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  starGeo.setAttribute('aSize', new THREE.BufferAttribute(sSize, 1));
+  starGeo.setAttribute('aColor', new THREE.BufferAttribute(sColor, 3));
+  /* PointsMaterial → ShaderMaterial (slice 15): twinkle needs a clock + per-star phase, which the
+     built-in material can't carry. uTwinkle = 0 reproduces the old output (see graph-star.vert). */
+  const starMat = new THREE.ShaderMaterial({
+    vertexShader: starVert,
+    fragmentShader: starFrag,
     transparent: true,
-    opacity: 0.5,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
+    uniforms: {
+      uOpacity: { value: 0.5 },
+      uTime:    { value: 0 },
+      uTwinkle: { value: twinkle },
+      // uColor/uSize became per-star attributes in slice 16 (variety); uniform-filled when it's off.
+    },
   });
   const stars = new THREE.Points(starGeo, starMat);
   stars.renderOrder = -9;
@@ -156,6 +228,70 @@ export function createGraphAtmosphere(opts = {}) {
   glints.renderOrder = -9;
   group.add(glints);
 
+  /* ---- SKY SPRITES (slice 16, PIXEL WONDER): the ringed planet, its moon, the cross sparkles,
+     the tiny galaxies — ONE merged billboard mesh, one material, one draw call. Every sprite is
+     AUTHORED (the consumer passes the list): a landmark composition, not a scatter. World-anchored
+     at slab depth, so they parallax with the star layer when the camera pans — unlike the nebula
+     quad, which is glued to the screen (that contrast IS the depth illusion). ---- */
+  let skyMesh = null, skyMat = null, skyGeo = null;
+  if (skySprites && skySprites.length) {
+    const KIND = { planet: 0, moon: 1, sparkle: 2, galaxy: 3 };
+    const N = skySprites.length;
+    const kPos = new Float32Array(N * 4 * 3);
+    const kCorner = new Float32Array(N * 4 * 2);
+    const kSize = new Float32Array(N * 4);
+    const kKind = new Float32Array(N * 4);
+    const kTint = new Float32Array(N * 4 * 3);
+    const kPhase = new Float32Array(N * 4);
+    const kIndex = new Uint16Array(N * 6);
+    const CORNERS = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+    const _tint = new THREE.Color();
+    skySprites.forEach((s, i) => {
+      const kind = KIND[s.kind] ?? 2;
+      const y = s.y ?? -depth - 1.5;
+      const tilt = s.tilt ?? 0;                  // radians; baked into the corner basis (galaxies)
+      const ct = Math.cos(tilt), st = Math.sin(tilt);
+      _tint.set(s.tint);
+      for (let c = 0; c < 4; c++) {
+        const v = i * 4 + c;
+        kPos[v * 3] = s.x; kPos[v * 3 + 1] = y; kPos[v * 3 + 2] = s.z;
+        kCorner[v * 2]     = CORNERS[c][0] * ct - CORNERS[c][1] * st;
+        kCorner[v * 2 + 1] = CORNERS[c][0] * st + CORNERS[c][1] * ct;
+        kSize[v] = s.size;
+        kKind[v] = kind;
+        kTint[v * 3] = _tint.r; kTint[v * 3 + 1] = _tint.g; kTint[v * 3 + 2] = _tint.b;
+        kPhase[v] = s.phase ?? 0;
+      }
+      const b = i * 4, ib = i * 6;
+      kIndex[ib] = b; kIndex[ib + 1] = b + 1; kIndex[ib + 2] = b + 2;
+      kIndex[ib + 3] = b; kIndex[ib + 4] = b + 2; kIndex[ib + 5] = b + 3;
+    });
+    skyGeo = new THREE.BufferGeometry();
+    skyGeo.setAttribute('position', new THREE.BufferAttribute(kPos, 3));
+    skyGeo.setAttribute('aCorner', new THREE.BufferAttribute(kCorner, 2));
+    skyGeo.setAttribute('aSize', new THREE.BufferAttribute(kSize, 1));
+    skyGeo.setAttribute('aKind', new THREE.BufferAttribute(kKind, 1));
+    skyGeo.setAttribute('aTint', new THREE.BufferAttribute(kTint, 3));
+    skyGeo.setAttribute('aPhase', new THREE.BufferAttribute(kPhase, 1));
+    skyGeo.setIndex(new THREE.BufferAttribute(kIndex, 1));
+    skyMat = new THREE.ShaderMaterial({
+      vertexShader: skyVert,
+      fragmentShader: skyFrag,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime:      { value: 0 },
+        uTwinkle:   { value: twinkle },   // the instance's twinkle amp drives the sparkles too
+        uIntensity: { value: 1.0 },
+      },
+    });
+    skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    skyMesh.frustumCulled = false;
+    skyMesh.renderOrder = -9;             // the star layer; flybys (-8) pass in front, the graph over all
+    group.add(skyMesh);
+  }
+
   /* PARALLAX_RATES (slice 9) — mirrored constants of the per-layer uPan multipliers in the frag. Exposed
      via debugLayerOffsets so a probe can assert the layers genuinely move at DIFFERENT rates when the
      camera pans (the whole point of the fake-depth trick — ortho translation gives zero real parallax). */
@@ -166,6 +302,10 @@ export function createGraphAtmosphere(opts = {}) {
      (backward-compatible with the slice-5 call shape). */
   function update(now, panX, panZ) {
     nebulaMat.uniforms.uTime.value = now;
+    starMat.uniforms.uTime.value = now;   // slice 15: the twinkle clock. The CONSUMER chooses the clock —
+                                          // atlas hands pixel mode its 10fps-quantized tick (chunky retro
+                                          // sparkle) and every other look the smooth one.
+    if (skyMat) skyMat.uniforms.uTime.value = now;   // slice 16: the sparkles ride the same clock
     if (panX !== undefined) nebulaMat.uniforms.uPan.value.set(panX * PAN_SCALE, panZ * PAN_SCALE);
   }
   function debugLayerOffsets() {
@@ -174,13 +314,35 @@ export function createGraphAtmosphere(opts = {}) {
     for (const [k, r] of Object.entries(PARALLAX_RATES)) out[k] = { x: p.x * r, y: p.y * r };
     return out;
   }
-  function setReducedMotion(on) { nebulaMat.uniforms.uDrift.value = on ? 0 : 1; }
+  /* REDUCED MOTION now gates TWO things: the nebula's autonomous drift (uDrift, slice 5) and the star
+     twinkle (slice 15) — "stars stay lit, no oscillation": amplitude to 0, never opacity. The chosen
+     amplitude is remembered so toggling reduced motion off restores the look's tuning. */
+  let _twinkleAmp = twinkle;
+  let _reduced = false;
+  function _applyTwinkle() {
+    starMat.uniforms.uTwinkle.value = _reduced ? 0 : _twinkleAmp;
+    if (skyMat) skyMat.uniforms.uTwinkle.value = _reduced ? 0 : _twinkleAmp;   // sparkles freeze LIT too
+    nebulaMat.uniforms.uStarTwinkle.value = _reduced ? 0 : _twinkleAmp;        // slice 22: procedural field too
+  }
+  function setReducedMotion(on) { _reduced = !!on; nebulaMat.uniforms.uDrift.value = on ? 0 : 1; _applyTwinkle(); }
+  function setTwinkle(amp) { _twinkleAmp = amp; _applyTwinkle(); }
   function setAspect(a) { nebulaMat.uniforms.uAspect.value = a; }
   function dispose() {
     nebula.geometry.dispose(); nebulaMat.dispose();
     starGeo.dispose(); starMat.dispose();
     glintGeo.dispose(); glintMat.dispose();
+    if (skyGeo) { skyGeo.dispose(); skyMat.dispose(); }
   }
 
-  return { group, nebula, stars, glints, update, setReducedMotion, setAspect, debugLayerOffsets, dispose };
+  return {
+    group, nebula, stars, glints, update, setReducedMotion, setTwinkle, setAspect, debugLayerOffsets, dispose,
+    /* probe seam (gate AE/AG): the live GPU-bound twinkle state — proves reduced-motion actually zeroed
+       the amplitude rather than "the screenshot looked still". */
+    debugTwinkle: () => ({ amp: starMat.uniforms.uTwinkle.value, time: starMat.uniforms.uTime.value }),
+    /* probe seams (slice 16): the art gates read GPU-bound state, sprites expose world anchors (gate AJ
+       projects the planet through the live camera and compares its screen delta to a node's). */
+    skyMesh,
+    debugArt: () => ({ art: nebulaMat.uniforms.uArt.value, clearing: nebulaMat.uniforms.uClearing.value }),
+    debugSprites: () => (skySprites ? skySprites.map((s) => ({ kind: s.kind, x: s.x, z: s.z, y: s.y ?? -depth - 1.5, size: s.size })) : []),
+  };
 }

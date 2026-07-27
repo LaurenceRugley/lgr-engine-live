@@ -11,7 +11,7 @@
    corner straight through as the clip-space position. The orthographic camera in
    JS is only there because Three.js requires *some* camera to call .render().
 
-   Our only real job: forward `uv` (0..1 across the quad) so the fragment shader
+   Our only real job: forward uv (0..1 across the quad) so the fragment shader
    knows which texel of the heightfield it is computing.
    ============================================================ */
 varying vec2 vUv;

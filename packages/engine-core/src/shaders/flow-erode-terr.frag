@@ -7,7 +7,7 @@
 
    A fragment shader writes ONE target, but erosion changes TWO fields (terrain AND sediment).
    So we run the IDENTICAL math in two sibling passes reading the SAME old state: THIS pass
-   writes terrain (T + d); flow-erode-sed.frag writes sediment (S − d). `d` is the per-cell
+   writes terrain (T + d); flow-erode-sed.frag writes sediment (S − d). d is the per-cell
    terrain delta: + = deposit (up), − = erode (down). The KEY stability guard is the per-tick
    clamp |d| ≤ MAXD (erosion is a positive-feedback loop — this stops spikes/pits/NaN).
    ============================================================ */

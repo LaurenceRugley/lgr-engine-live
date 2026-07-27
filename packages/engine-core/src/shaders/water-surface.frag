@@ -37,7 +37,7 @@ uniform float uSkyRefl;          // L108: beauty-only sky-reflection amount (0 o
 uniform vec3  uSkyReflCol;       // L108: the SunRig sky colour the sea reflects (by-ref → tracks day/night)
 uniform sampler2D uReflect;      // L108 planar mirror: the mirrored skyline rendered to a half-res RT
 uniform float uReflStrength;     // L108: THE mirror gate — beauty?1:0 AND governor-shed → 0 = no-op (byte-identical) + the shipped sky-tint fallback below runs instead
-uniform float uReflDistortMul;   // L108: how much the sim-normal tilt wobbles the reflection sample (reuses the refraction `off`, so they ripple coherently)
+uniform float uReflDistortMul;   // L108: how much the sim-normal tilt wobbles the reflection sample (reuses the refraction off, so they ripple coherently)
 uniform float uFoamStrength;     // L112: THE foam/shoreline gate — 0 on pixel/toon → the whole term is a no-op → byte-identical
 uniform float uTime;             // L112: churn + lapping animation clock
 uniform sampler2D uGrabDepth;    // L112: the grab pass's depth (what's behind the water) → shoreline thinness + depth tint

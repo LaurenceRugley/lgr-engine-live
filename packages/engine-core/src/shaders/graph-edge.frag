@@ -59,5 +59,20 @@ void main() {
 
   // vDim > 1 = the emphasized neighborhood: brightness rides in full (feeds bloom), alpha capped at
   // x1.25 -- additive alpha past that clips and bleaches the gradient (tuned by looking, slice 9).
-  gl_FragColor = vec4(col * vDim, a * min(vDim, 1.25));
+  /* SLICE 23 — THE CALM, applied where it cannot delete the web. A straight multiply by vDim scales the
+     flow band's DARK PHASE down too, and in pixel mode the trough then falls under DB32's first non-black
+     step: the resting web does not get quiet, it gets ERASED between the bands (the §8 motion gate caught
+     exactly this — the arc preset's apex read Δ=8 at calm 0.45). So a calm (vDim < 1) is applied to the
+     edge's DYNAMIC RANGE, not to its floor: the band's peak comes down, the resting floor is preserved.
+     An EMPHASIS (vDim > 1) still rides in full — that is the pop. Same one uniform, two behaviours,
+     because "quiet" and "deleted" must not be the same operation. */
+  float calm = min(vDim, 1.0);
+  float floorKeep = mix(1.0, calm, 0.35);              // the floor barely moves...
+  float bandKeep  = calm;                              // ...the band carries the quieting
+  vec3  colC = vColor * uRest * floorKeep + (vColor * 0.6 + uColor * 0.5) * band * bandKeep;
+  float aC   = uOpacity * edge * (uRest * floorKeep + 0.85 * band * bandKeep);
+  // above 1.0 (emphasis) the original full-range path takes over, unchanged
+  vec3  colF = mix(colC, col * vDim, step(1.0001, vDim));
+  float aF   = mix(aC, a * min(vDim, 1.25), step(1.0001, vDim));
+  gl_FragColor = vec4(colF, aF);
 }

@@ -21,7 +21,7 @@
    The horde is ONE InstancedMesh (one draw call), per-instance colour + size by type. The occlusion
    fade that keeps the survivor visible behind towers lives in main.js (it owns the city + camera).
    ============================================================ */
-import { THREE, vectorize } from '@lgr/engine-core';
+import { THREE, vectorize, createFlowField, createBallistics } from '@lgr/engine-core';
 
 const GAME_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', ' ']);
 
@@ -55,7 +55,7 @@ const RECIPES = [
 ];
 const PICKUP_KINDS = ['food', 'water', 'bandage', 'scrap'];   // what drops/scatters in the world
 
-export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
+export function createHoard({ extent = 8, plinthTop = 0.3, ai = 'field', gun = 'proj', onImpact = null, onDeath = null } = {}) {
   const group = new THREE.Group();
   group.visible = false;
   group.raycast = () => {};
@@ -102,9 +102,54 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
   // player state (+ L34 survival meters)
   const P = { x: 0, z: 0, vx: 0, vz: 0, hp: 100, stamina: 100, hunger: 100, thirst: 100, facing: 0, iframe: 0 };
   const WALK = 3.0, SPRINT = 5.2, ACCEL = 14, STAM_DRAIN = 34, STAM_REGEN = 22;
-  const GUN_DMG = 16, GUN_RANGE = 9, GUN_CD = 0.16, GUN_TOL = 0.7;     // hitscan
+  const GUN_DMG = 16, GUN_RANGE = 9, GUN_CD = 0.16, GUN_TOL = 0.7;     // hitscan (?gun=hitscan / v1)
+  const GUN_SPEED = 28, GUN_GRAVITY = 7, BOLT_LEN = 0.7;               // M4 projectile: fast, gentle drop
   const MELEE_DMG = 34, MELEE_RANGE = 1.05, MELEE_CD = 0.42;
   const CONTACT_R = 0.52, IFRAME = 0.6;
+  const PLAYER_R = 0.28;                                // survivor's collision radius (body capsule × scale)
+
+  /* ---- TREE / PROP COLLIDERS (L HOARD-3) — injected per MAP by the app (createForest returns them). A
+     circle list {x,z,r}; both the survivor and the horde get pushed out so nothing walks through a trunk.
+     EMPTY for the city map ⇒ the resolve is never called ⇒ city movement stays byte-identical. No hot
+     alloc: resolveColliders writes the pushed point into a reused scratch (`_rc`). ---- */
+  let colliders = [];
+  const _rc = { x: 0, z: 0 };
+
+  /* ---- FLOW-FIELD HORDE AI (Lesson M3) — the horde streams toward the survivor AROUND the trees instead
+     of straight-lining into them (v1's seek bunched against tree push-out). One grid solve, shared by all
+     zombies; each pays a single `field.sample()` lookup per step. Built ONLY when there ARE colliders (the
+     forest map) and `ai` isn't forced to 'seek' — so the CITY map (no colliders) keeps field === null and
+     its horde step stays byte-identical to before this lesson. Obstacles = the tree colliders only; the
+     BARRIER ring is deliberately NOT registered (it's a dynamic break-through wall handled by the angular
+     hold rule below — baking it as a static obstacle would make zombies path around it and never attack
+     it). The field's `update()` re-solves only when the survivor crosses a cell, so it's ~free per frame. ---- */
+  const useField = ai !== 'seek';
+  let field = null;
+  function setColliders(list) {
+    colliders = list || [];
+    field = null;
+    if (useField && colliders.length) {
+      // Bounds cover the whole play disk (radius ARENA) plus a margin; zombies inflate the trees by their
+      // body radius (~0.3) so paths keep clearance. cellSize 0.5 ⇒ a coarse, cheap grid over a small arena.
+      const B = ARENA + 1.5;
+      field = createFlowField({
+        bounds: { minX: -B, minZ: -B, maxX: B, maxZ: B },
+        cellSize: 0.5, obstacles: colliders, agentRadius: 0.3, resolveEpsilon: 1,
+      });
+    }
+  }
+  function resolveColliders(x, z, pr) {
+    _rc.x = x; _rc.z = z;
+    for (let i = 0; i < colliders.length; i++) {
+      const c = colliders[i];
+      const dx = _rc.x - c.x, dz = _rc.z - c.z, rr = c.r + pr;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < rr * rr) {
+        if (d2 > 1e-8) { const d = Math.sqrt(d2), push = (rr - d) / d; _rc.x += dx * push; _rc.z += dz * push; }
+        else { _rc.x += rr; }                          // dead-centre on a trunk → nudge out along +x
+      }
+    }
+  }
 
   /* ---- HORDE — one InstancedMesh, per-instance colour (by type) + size; CPU-stepped. ---- */
   const MAXZ = 48;
@@ -214,18 +259,124 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
     for (const z of zs) { if (!z.alive) continue; const d = (z.x - P.x) ** 2 + (z.z - P.z) ** 2; if (d < bd) { bd = d; best = z; } }
     return best;
   }
-  function killZombie(z) { z.alive = false; kills++; score += z.score; if (Math.random() < 0.3) spawnPickup(z.x, z.z); }   // L34/35: chance to drop an item
+  function killZombie(z) { z.alive = false; kills++; score += z.score; if (Math.random() < 0.3) spawnPickup(z.x, z.z); if (onDeath) onDeath(z.x, z.z); }   // L34/35: chance to drop an item; M5: blood splat
   function damageZombie(z, dmg) { z.hp -= dmg; z.flash = 0.12; if (z.hp <= 0) killZombie(z); }
 
-  function fire() {
-    if (dead || fireCd > 0) return;
-    fireCd = GUN_CD;
+  /* ---- M4 BALLISTICS — the projectile gun (default; `?gun=hitscan` restores v1). The reusable
+     createBallistics sim owns the flight (velocity + gravity drop, swept per step); THIS game injects the
+     two collision queries it needs — castWorld (trees + ground) and castTargets (the live zombies) — and
+     an onHit that applies damage. Zombies are queried directly (a per-step swept sphere test), NEVER
+     registered into a static collider grid (the brief's forbidden path). ---- */
+  const MUZZLE_Y = GROUND_Y + 0.5;
+  const zBodyY = (z) => GROUND_Y + 0.3 * z.size * ZSCALE;   // zombie body-centre height (matches the draw)
+  const _cw = { t: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 1, z: 0 } };
+  const _ct = { t: 0, target: null, point: { x: 0, y: 0, z: 0 } };
+
+  // castWorld: nearest of the ground plane + the tree cylinders (colliders) the segment crosses. Returns a
+  // reused record or null. Trees are treated as infinite vertical cylinders (a bullet can't pass behind one).
+  function castWorld(ox, oy, oz, ex, ey, ez) {
+    let bestT = Infinity, hx = 0, hy = 0, hz = 0, nx = 0, ny = 1, nz = 0;
+    // ground plane at GROUND_Y (a dropping bullet buries into the dirt)
+    if (oy > GROUND_Y && ey <= GROUND_Y) {
+      const tg = (oy - GROUND_Y) / (oy - ey);
+      if (tg >= 0 && tg <= 1 && tg < bestT) { bestT = tg; hx = ox + (ex - ox) * tg; hy = GROUND_Y; hz = oz + (ez - oz) * tg; nx = 0; ny = 1; nz = 0; }
+    }
+    // tree cylinders — 2D segment-vs-circle in xz (entry root of the quadratic)
+    const dx = ex - ox, dz = ez - oz, a = dx * dx + dz * dz;
+    if (a > 1e-9) {
+      for (let i = 0; i < colliders.length; i++) {
+        const c = colliders[i], R = c.r + 0.05;
+        const fx = ox - c.x, fz = oz - c.z;
+        const b = 2 * (fx * dx + fz * dz), cc = fx * fx + fz * fz - R * R;
+        const disc = b * b - 4 * a * cc;
+        if (disc < 0) continue;
+        const t = (-b - Math.sqrt(disc)) / (2 * a);
+        if (t >= 0 && t <= 1 && t < bestT) {
+          bestT = t; hx = ox + dx * t; hz = oz + dz * t; hy = oy + (ey - oy) * t;
+          const nl = Math.hypot(hx - c.x, hz - c.z) || 1; nx = (hx - c.x) / nl; ny = 0; nz = (hz - c.z) / nl;
+        }
+      }
+    }
+    if (bestT === Infinity) return null;
+    _cw.t = bestT; _cw.point.x = hx; _cw.point.y = hy; _cw.point.z = hz; _cw.normal.x = nx; _cw.normal.y = ny; _cw.normal.z = nz;
+    return _cw;
+  }
+
+  // castTargets: nearest live zombie the segment sweeps (each a body-height sphere). Returns reused or null.
+  function castTargets(ox, oy, oz, ex, ey, ez) {
+    const dx = ex - ox, dy = ey - oy, dz = ez - oz, a = dx * dx + dy * dy + dz * dz;
+    if (a < 1e-9) return null;
+    let bestT = Infinity, best = null, hx = 0, hy = 0, hz = 0;
+    for (let i = 0; i < MAXZ; i++) {
+      const z = zs[i]; if (!z.alive) continue;
+      const cx = z.x, cy = zBodyY(z), cz = z.z, r = 0.4 * z.size;
+      const fx = ox - cx, fy = oy - cy, fz = oz - cz;
+      const b = 2 * (fx * dx + fy * dy + fz * dz), cc = fx * fx + fy * fy + fz * fz - r * r;
+      const disc = b * b - 4 * a * cc; if (disc < 0) continue;
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      if (t >= 0 && t <= 1 && t < bestT) { bestT = t; best = z; hx = ox + dx * t; hy = oy + dy * t; hz = oz + dz * t; }
+    }
+    if (!best) return null;
+    _ct.t = bestT; _ct.target = best; _ct.point.x = hx; _ct.point.y = hy; _ct.point.z = hz;
+    return _ct;
+  }
+
+  const useProj = gun !== 'hitscan';
+  const ballistics = useProj ? createBallistics({
+    gravity: GUN_GRAVITY, maxLive: 32, maxLife: 1.4, castWorld, castTargets,
+    onHit: (h) => {
+      if (h.target) damageZombie(h.target, h.meta);
+      // M6/M5: an impact event — main.js sprays 'burst' particles and, on a WORLD hit (isWorld = no
+      // target), stamps a bullet-hole DECAL at the point/normal. Normal points the spray/decal out of the
+      // surface. (A hole on a moving zombie wouldn't stick, so decals are world-hits only.)
+      if (onImpact) onImpact('burst', h.point.x, h.point.y, h.point.z, h.normal.x, h.normal.y, h.normal.z, !h.target);
+    },
+  }) : null;
+
+  // BOLT TRACERS — one short LineSegment per live projectile (M6 owns fancier tracer ART). Positions are
+  // written straight into a preallocated buffer each frame — no per-frame geometry alloc.
+  const PMAX = 32;
+  const boltGeo = new THREE.BufferGeometry();
+  const boltPos = new Float32Array(PMAX * 2 * 3);
+  boltGeo.setAttribute('position', new THREE.BufferAttribute(boltPos, 3));
+  const bolts = new THREE.LineSegments(boltGeo, new THREE.LineBasicMaterial({ color: '#ffe08a', transparent: true, opacity: 0.95, depthWrite: false }));
+  bolts.raycast = () => {}; bolts.frustumCulled = false; bolts.visible = useProj; group.add(bolts);
+  function drawBolts() {
+    if (!ballistics) return;
+    const { px, py, pz, vx, vy, vz, alive } = ballistics;
+    for (let i = 0; i < PMAX; i++) {
+      const o = i * 6;
+      if (alive[i]) {
+        const vl = Math.hypot(vx[i], vy[i], vz[i]) || 1, bx = vx[i] / vl * BOLT_LEN, by = vy[i] / vl * BOLT_LEN, bz = vz[i] / vl * BOLT_LEN;
+        boltPos[o] = px[i]; boltPos[o + 1] = py[i]; boltPos[o + 2] = pz[i];
+        boltPos[o + 3] = px[i] - bx; boltPos[o + 4] = py[i] - by; boltPos[o + 5] = pz[i] - bz;
+      } else { for (let k = 0; k < 6; k++) boltPos[o + k] = 0; }
+    }
+    boltGeo.attributes.position.needsUpdate = true;
+  }
+
+  // aim direction (cursor, else nearest zombie, else facing) → normalized (ax,az). Shared by both guns.
+  function aimDir() {
     let ax, az;
     if (aim) { ax = aim.x - P.x; az = aim.z - P.z; }
     else { const n = nearestZombie(); if (n) { ax = n.x - P.x; az = n.z - P.z; } else { ax = Math.sin(P.facing); az = Math.cos(P.facing); } }
-    const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
-    P.facing = Math.atan2(ax, az);
-    // hitscan: the nearest live zombie within range + a thin angular corridor of the aim ray.
+    const al = Math.hypot(ax, az) || 1; _aim.x = ax / al; _aim.z = az / al;
+    P.facing = Math.atan2(_aim.x, _aim.z);
+    return _aim;
+  }
+  const _aim = { x: 0, z: 0 };
+
+  function fireProjectile() {
+    const d = aimDir();
+    // horizontal launch from the muzzle; gravity does the drop (near = flat, far = drops). The ballistics
+    // sim sweeps the flight against trees + zombies and calls onHit.
+    ballistics.fire(P.x, MUZZLE_Y, P.z, d.x, 0, d.z, GUN_SPEED, GUN_DMG);
+    if (onImpact) onImpact('muzzle', P.x, MUZZLE_Y, P.z, d.x, 0.15, d.z);   // M6: muzzle flash along the shot
+  }
+
+  function fireHitscan() {
+    const d = aimDir(); const ax = d.x, az = d.z;
+    // hitscan (v1): the nearest live zombie within range + a thin angular corridor of the aim ray.
     let best = null, bestT = Infinity;
     for (const z of zs) {
       if (!z.alive) continue;
@@ -238,10 +389,16 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
     // L40: write the tracer's two endpoints straight into the existing position attribute — no per-shot
     // `new Vector3()` x2 + no `setFromPoints` array realloc (the gun fires fast; don't churn the GC).
     const tp = tracerGeo.attributes.position;
-    tp.setXYZ(0, P.x, GROUND_Y + 0.5, P.z);
-    tp.setXYZ(1, P.x + ax * endT, GROUND_Y + 0.5, P.z + az * endT);
+    tp.setXYZ(0, P.x, MUZZLE_Y, P.z);
+    tp.setXYZ(1, P.x + ax * endT, MUZZLE_Y, P.z + az * endT);
     tp.needsUpdate = true; tracer.material.opacity = 0.95;
     if (best) damageZombie(best, GUN_DMG);
+  }
+
+  function fire() {
+    if (dead || fireCd > 0) return;
+    fireCd = GUN_CD;
+    if (useProj) fireProjectile(); else fireHitscan();
   }
   function melee() {
     if (dead || meleeCd > 0) return;
@@ -376,6 +533,18 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
 
   let camAz = Math.PI / 4;
   function setAzimuth(a) { camAz = a; }
+
+  /* ---- M2 WALKER SEAM — while the first-person walker owns movement (forest dive), the game's own iso
+     move block is suspended and main.js drives the walker + writes the pose back. moveInput exposes the
+     WASD/stick axes (so the walker reads the same input without duplicating key listeners). ---- */
+  let moveSuspended = false;
+  function setMoveSuspended(b) { moveSuspended = b; if (b) { P.vx = 0; P.vz = 0; } }
+  function moveInput() {
+    let ix = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + stick.x;
+    let iy = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + stick.y;
+    return { x: ix, y: iy, sprint: (keys.shift || stick.y > 0.95) && P.stamina > 2 };
+  }
+  function setPlayerPose(x, z, facing) { P.x = x; P.z = z; if (facing != null) P.facing = facing; P.vx = 0; P.vz = 0; }
   function setAim(x, z) { aim = { x, z }; }            // desktop cursor aim (cleared on touch via setActive)
   function setFiring(on) { firing = on; }
 
@@ -452,21 +621,26 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
       runTime += dt;
       P.iframe = Math.max(0, P.iframe - dt);
 
-      // PLAYER move (camera-relative)
-      let ix = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + stick.x;
-      let iy = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + stick.y;
-      const il = Math.hypot(ix, iy); if (il > 1) { ix /= il; iy /= il; }
-      const moving = il > 0.05;
-      const wantSprint = (keys.shift || stick.y > 0.95) && P.stamina > 2 && moving;
-      const ca = Math.cos(camAz), sa = Math.sin(camAz);
-      const dirX = ca * ix + (-sa) * iy, dirZ = (-sa) * ix + (-ca) * iy;
-      const sp = wantSprint ? SPRINT : WALK;
-      const k = 1 - Math.exp(-ACCEL * dt);
-      P.vx += (dirX * sp - P.vx) * k; P.vz += (dirZ * sp - P.vz) * k;
-      P.x += P.vx * dt; P.z += P.vz * dt;
-      const pr = Math.hypot(P.x, P.z); if (pr > ARENA) { P.x *= ARENA / pr; P.z *= ARENA / pr; P.vx = 0; P.vz = 0; }
-      if (moving) P.facing = Math.atan2(dirX, dirZ);
-      P.stamina = THREE.MathUtils.clamp(P.stamina + (wantSprint ? -STAM_DRAIN : STAM_REGEN) * dt, 0, 100);
+      // PLAYER move (camera-relative). SUSPENDED while the M2 first-person WALKER owns movement (forest
+      // dive) — main.js then drives the walker (yaw-relative WASD + its own collision) and writes the pose
+      // back via setPlayerPose. Un-suspended (god-view + every other dive) → the exact original iso move.
+      if (!moveSuspended) {
+        let ix = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0) + stick.x;
+        let iy = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0) + stick.y;
+        const il = Math.hypot(ix, iy); if (il > 1) { ix /= il; iy /= il; }
+        const moving = il > 0.05;
+        const wantSprint = (keys.shift || stick.y > 0.95) && P.stamina > 2 && moving;
+        const ca = Math.cos(camAz), sa = Math.sin(camAz);
+        const dirX = ca * ix + (-sa) * iy, dirZ = (-sa) * ix + (-ca) * iy;
+        const sp = wantSprint ? SPRINT : WALK;
+        const k = 1 - Math.exp(-ACCEL * dt);
+        P.vx += (dirX * sp - P.vx) * k; P.vz += (dirZ * sp - P.vz) * k;
+        P.x += P.vx * dt; P.z += P.vz * dt;
+        const pr = Math.hypot(P.x, P.z); if (pr > ARENA) { P.x *= ARENA / pr; P.z *= ARENA / pr; P.vx = 0; P.vz = 0; }
+        if (colliders.length) { resolveColliders(P.x, P.z, PLAYER_R); P.x = _rc.x; P.z = _rc.z; }   // trees block the survivor
+        if (moving) P.facing = Math.atan2(dirX, dirZ);
+        P.stamina = THREE.MathUtils.clamp(P.stamina + (wantSprint ? -STAM_DRAIN : STAM_REGEN) * dt, 0, 100);
+      }
 
       // SURVIVAL: hunger/thirst drain; empty → chip damage + no regen; well-fed AND hydrated → slow regen.
       P.hunger = Math.max(0, P.hunger - HUNGER_DRAIN * dt);
@@ -491,6 +665,9 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
       player.visible = !(P.iframe > 0 && Math.floor(elapsed * 20) % 2 === 0);
 
       if (firing) fire();
+      // M4: step the projectiles (integrate + swept hit-tests + onHit) AFTER firing so a just-fired bolt
+      // flies + draws this same frame, then paint the bolt tracers.
+      if (ballistics) { ballistics.update(dt); drawBolts(); }
       swing.position.set(P.x, GROUND_Y + 0.06, P.z); swing.rotation.z = -P.facing;
     }
 
@@ -504,6 +681,9 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
     }
 
     // HORDE step + contact damage + draw
+    // M3: solve the flow field ONCE this frame toward the survivor (re-solves only if they crossed a cell,
+    // so it's near-free most frames). Then every zombie reads its steering arrow from the shared field.
+    if (field && !dead) field.update(P.x, P.z, dt);
     let nearestContactDmg = 0, znear = Infinity;
     for (let i = 0; i < MAXZ; i++) {
       const z = zs[i];
@@ -512,7 +692,15 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
       const dx = P.x - z.x, dz = P.z - z.z, td = Math.hypot(dx, dz) || 1;
       if (td < znear) znear = td;
       if (!dead) {
-        const desX = (dx / td) * z.speed, desZ = (dz / td) * z.speed;
+        // DESIRED VELOCITY — M3: follow the flow field's arrow (streams around trees). Near the survivor
+        // the field's target cell reads (0,0); there we fall back to a direct seek so the zombie closes in
+        // for the bite. No field (city map / ?ai=seek) ⇒ the original straight-line seek, byte-identical.
+        let desX, desZ;
+        if (field) {
+          const s = field.sample(z.x, z.z);
+          if (s.x !== 0 || s.z !== 0) { desX = s.x * z.speed; desZ = s.z * z.speed; }
+          else { desX = (dx / td) * z.speed; desZ = (dz / td) * z.speed; }
+        } else { desX = (dx / td) * z.speed; desZ = (dz / td) * z.speed; }
         const zk = 1 - Math.exp(-6 * dt);
         z.vx += (desX - z.vx) * zk; z.vz += (desZ - z.vz) * zk;
         if (td > CONTACT_R) {
@@ -530,6 +718,7 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
             }
           }
           if (rNew < BARRIER_R - 0.1) z.in = true;          // made it inside the ring
+          if (colliders.length) { resolveColliders(nx, nz, 0.25 * z.size); nx = _rc.x; nz = _rc.z; }   // trees block the horde too
           z.x = nx; z.z = nz;
         } else if (P.iframe <= 0) { nearestContactDmg = Math.max(nearestContactDmg, z.dmg); }   // bite
       }
@@ -575,7 +764,7 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
     if (hungerFill) hungerFill.style.width = `${P.hunger}%`;
     if (thirstFill) thirstFill.style.width = `${P.thirst}%`;
     if (statEl) statEl.textContent = `WAVE ${wave}   KILLS ${kills}   SCORE ${score}`;
-    if (typeof window !== 'undefined') window.__hoard = { active, dead, paused, hp: Math.round(P.hp), stamina: Math.round(P.stamina), hunger: Math.round(P.hunger), thirst: Math.round(P.thirst), zombies: aliveCount, barriers: barriersUp, pickups: pickups.filter((p) => p.active).length, inv: Object.fromEntries(inv.map((s) => [s.id, s.n])), wave, kills, score, weapon: 'gun', znear: +znear.toFixed(2), px: +P.x.toFixed(2), pz: +P.z.toFixed(2) };
+    if (typeof window !== 'undefined') window.__hoard = { active, dead, paused, hp: Math.round(P.hp), stamina: Math.round(P.stamina), hunger: Math.round(P.hunger), thirst: Math.round(P.thirst), zombies: aliveCount, barriers: barriersUp, pickups: pickups.filter((p) => p.active).length, inv: Object.fromEntries(inv.map((s) => [s.id, s.n])), wave, kills, score, weapon: 'gun', znear: +znear.toFixed(2), px: +P.x.toFixed(2), pz: +P.z.toFixed(2), rt: +runTime.toFixed(3) };
   }
 
   function die() {
@@ -587,7 +776,8 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
   }
 
   return {
-    group, update, setActive, setAzimuth, setAim, setFiring, melee, reset, restart,
+    group, update, setActive, setAzimuth, setAim, setFiring, melee, reset, restart, setColliders,
+    setMoveSuspended, moveInput, setPlayerPose,        // M2 walker seam
     openBag, closeBag, toggleBag, addItem,             // L35 (addItem exposed for tests/seeding)
     get player() { return P; },
     get dead() { return dead; },
@@ -596,5 +786,17 @@ export function createHoard({ extent = 8, plinthTop = 0.3 } = {}) {
     get inv() { return inv.map((s) => ({ ...s })); },
     get nearestPickup() { let b = null, bd = 1e9; for (const p of pickups) { if (!p.active) continue; const d = (p.x - P.x) ** 2 + (p.z - P.z) ** 2; if (d < bd) { bd = d; b = p; } } return b ? { x: b.x, z: b.z } : null; },
     setTarget() {},                                    // sim-ready seam (target = player for v1)
+    get aiMode() { return field ? 'field' : 'seek'; }, // M3 probe: is the flow field steering the horde?
+    get fieldInfo() { return field ? { active: true, solves: field.solves, cols: field.cols, rows: field.rows } : { active: false }; },
+    get gunMode() { return useProj ? 'proj' : 'hitscan'; },   // M4 probe
+    get liveBolts() { return ballistics ? ballistics.liveCount : 0; },
+    get debugBallistics() { return ballistics; },             // M4 probe: read px/py/pz/alive to trace a bolt
+    // M1b — the rigged-character horde reads the sim through these: iterate every zombie slot (the caller
+    // checks .alive) to mirror transform + animation state, and hide the capsule InstancedMesh once the
+    // characters are live. Representation only — the sim (positions, collision, damage) is untouched.
+    get MAXZ() { return MAXZ; },
+    get CONTACT_R() { return CONTACT_R; },
+    forEachZombie(cb) { for (let i = 0; i < MAXZ; i++) cb(i, zs[i]); },
+    setZombieMeshVisible(v) { zombies.visible = !!v; },
   };
 }

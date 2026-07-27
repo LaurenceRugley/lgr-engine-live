@@ -30,7 +30,7 @@
 // One three for the whole app — imported from the engine package (see @lgr/engine-core/index.js).
 import {
   THREE, createEngine, CAM, PROFILES, PROFILE_KEYS, createCapture, createViewerUI,
-  createAppShell, readAppFlags, fromURLParams, createSceneTransition, createDevMode,
+  createAppShell, readAppFlags, fromURLParams, createDiveController, createDevMode,
   createAudioBus, createAmbientBed, createPositionalField, createRotor,
   createGyroLook,
 } from '@lgr/engine-core';
@@ -110,7 +110,8 @@ window.__engine = engine;   // L114 debug/harness handle (cf. __worldApi) — to
 //   • flags carries DEMO (which includes PREVIEW) so the shell's footer-hide rule EXACTLY matches city's canonical
 //     _hideHint (DEMO || ?ui=0 || ?capture || coarse). readAppFlags is the app-half parse; `_q` stays the SCENE
 //     parse (L109's contract — untouched here).
-//   • onResize sizes the dive-crossfade RTs + the office camera that engine.resize() doesn't know about (it returns
+//   • onResize sizes the office camera that engine.resize() doesn't know about (the dive-crossfade RTs are now
+//     owned + auto-resized by createDiveController); engine.resize() otherwise returns (it returns
 //     the same drawing-buffer size the shell hands us). city keeps its inline createCapture (poke/verbs are defined
 //     deep in the file) + tap-pick (interwoven inline touch) — both deliberately NOT via the shell here.
 // I — read lgr_dev_on ONCE here so resolveProfile has it and line 2079 doesn't re-read localStorage.
@@ -120,8 +121,9 @@ const shell = createAppShell(engine, {
   name: 'city',
   flags: { ...app, demo: DEMO },
   onResize: (db) => {
-    cityScreenRT.setSize(db.x, db.y);             // L19 dive crossfade buffers (screen-sized)
-    officeScreenRT.setSize(db.x, db.y);
+    // L60→HOARD-2: the dive's two crossfade RTs are now owned by createDiveController, which registered its
+    // own content-resizer with the engine (same resize event) — so main no longer sizes them here. We keep
+    // the office camera, which engine.resize() doesn't know about.
     office.camera.aspect = window.innerWidth / window.innerHeight;   // the office view fills the screen
     office.camera.updateProjectionMatrix();
   },
@@ -338,21 +340,46 @@ const vignetteRT = new THREE.WebGLRenderTarget(512, 320, {
 });
 office.setVignetteTexture(vignetteRT.texture);
 
-/* Dive crossfade buffers: during the ~1s transition we render the city to one screen-sized
-   target and the office to another, then post-dive.frag zoom-blends them. Outside the
-   transition only ONE scene renders straight to the screen — this double work is dive-only. */
-let cityScreenRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
-  minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false,
+/* L60 → HOARD-2 — the office dive is now the REUSABLE engine-core `createDiveController` (the city is its
+   THIRD consumer, after the cavern + the survivor game — no more parallel hand-wired dive). The controller
+   wraps the same L60 createSceneTransition seam (eased a→in→b→out→a state machine + crossfade/focus material,
+   same rate 4.6 → byte-identical feel) and ADDS the two things this file used to own: the two screen-sized
+   crossfade RTs (created + auto-resized inside via the engine's content-resizer registry) and the PRESENT
+   orchestration (settled → active view straight to screen; transition → both views to the RTs + the crossfade
+   pass). We supply only HOW to render each view:
+     • renderFrom(target) = the CITY (source A) — the L06–L08 pipeline.
+     • renderTo(target)   = the OFFICE (source B) — its per-frame pre-render (room sim tick + the glass-city or
+       basement-vignette RT the room maps onto itself) followed by drawing the room into `target`.
+   freezeFrom:false — CITY and OFFICE are independent scenes with independent cameras, so BOTH render live
+   every crossfade frame (this is NOT the single-rig game case that freezes the iso frame). The per-frame
+   style/dt/elapsed the callbacks need are stashed just before diveCtl.update() each frame (below), the same
+   pattern the survivor game uses for its curStyle. */
+let _diveStyle = 'auto', _diveDt = 0, _diveT = 0;   // per-frame stash for the dive render callbacks
+const diveCtl = createDiveController(engine, {
+  rate: 4.6,
+  freezeFrom: false,
+  renderFrom: (target) => renderCityPipeline(_diveStyle, target),
+  renderTo: (target) => {
+    // Office-side pre-render (this was the top of the old off-city branch): tick the room + its seated look,
+    // then refresh the source the room maps onto itself — the live glass-city (corner tier, ~1/3 rate) or the
+    // basement's vignette diorama. renderCityPipeline (renderFrom) fully re-sites its own state, so its output
+    // is independent of whether this beauty-ish render ran before or after it (the reset-siting invariant the
+    // dive-probe guards) — which is what makes folding the pre-render into renderTo byte-identical.
+    office.update(_diveDt, _diveT, sunRig);
+    office.look.addKeys(_diveDt, lookKeys);           // L55: held arrow-keys turn the seated head
+    window.__lookYaw = office.look.yaw; window.__lookPitch = office.look.pitch;   // L51 harness probes
+    if (office.tier === 'basement') {
+      renderer.setRenderTarget(vignetteRT);
+      renderer.render(office.vignette.scene, office.vignette.camera);
+    } else if (_winFrame % WIN_EVERY === 0) {
+      renderCityBeautyTo(windowCam, cityWindowRT);    // L40 WIN B: glass city at ~1/3 rate (a background)
+    }
+    _winFrame++;
+    // Draw the room into `target` (null → the screen when settled; source-B RT during the crossfade).
+    renderer.setRenderTarget(target);
+    renderer.render(office.scene, office.camera);
+  },
 });
-let officeScreenRT = new THREE.WebGLRenderTarget(drawBuffer.x, drawBuffer.y, {
-  minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false,
-});
-/* L60 — the dive is now a REUSABLE engine-core SCENE TRANSITION (createSceneTransition): it owns the eased
-   progress + the a→in→b→out→a state machine + the crossfade/focus material. CITY = source A, OFFICE = source
-   B. We still own the two screen-sized targets (they resize with the canvas) and hand their textures in once;
-   the module's material presents the mix during a dive. Same rate (4.6) + shader → byte-identical feel. */
-const dive = createSceneTransition({ rate: 4.6 });
-dive.setSources(cityScreenRT.texture, officeScreenRT.texture);
 
 /* SCENE-MODE STATE MACHINE — which world we draw this frame. The city↔office states are DERIVED from the
    dive module's mode (mapped below); 'hoard' is the app's own separate (instant) mode, not a dive.
@@ -1140,7 +1167,7 @@ function enterOffice(focusUv) {
   if (piloting) releasePilot();                         // L76: stop driving before a dive
   if (worldMode) toggleWorld();                         // L64: leave the terrain world before diving
   if (inspecting) toggleInspect();                      // L63: leave the inspection lens before diving
-  dive.enter(focusUv || new THREE.Vector2(0.5, 0.5));   // L60: focus push-in toward the clicked window
+  diveCtl.dive(focusUv || new THREE.Vector2(0.5, 0.5));   // L60/HOARD-2: focus push-in toward the clicked window
   sceneMode = 'diving-in'; window.__scene = sceneMode;
   office.look.recenter();              // L55: every dive starts facing forward (then drag/arrows to look around)
   lookKeys.left = lookKeys.right = lookKeys.up = lookKeys.down = false;   // clear any held arrows from city mode
@@ -1148,7 +1175,7 @@ function enterOffice(focusUv) {
 }
 function exitOffice() {
   if (sceneMode !== 'office' && sceneMode !== 'diving-in') return;
-  dive.exit();                                          // L60: reverse the transition (B→A)
+  diveCtl.surface();                                    // L60/HOARD-2: reverse the transition (B→A)
   sceneMode = 'diving-out'; window.__scene = sceneMode;
 }
 
@@ -1840,46 +1867,21 @@ const frame = (dt, t) => {
   refreshPilotHUD();
   if (tourActive) tourUpdate(dt);                       // L79: advance the guided-tour captions / day sweep
 
-  // --- L60 SCENE-MODE: advance the city↔office dive (module-owned) unless we're in the Hoard; the
-  //     module's mode drives our sceneMode for the four city/office states. ---
+  // --- L60/HOARD-2 SCENE-MODE: advance + PRESENT the city↔office dive via createDiveController (the city is
+  //     its 3rd consumer) unless we're in the Hoard. The controller renders city/office/crossfade itself via
+  //     the renderFrom/renderTo callbacks (defined at construction); we stash the per-frame style/dt/elapsed
+  //     they read, then map the controller's mode onto our four city/office sceneMode states. ---
   if (sceneMode !== 'hoard') {
-    dive.update(dt);
-    sceneMode = MODE_MAP[dive.mode]; window.__scene = sceneMode;
-  }
-
-  if (sceneMode === 'city' || sceneMode === 'hoard') {
-    // CITY (or the L32 HOARD arena — same scene + post chain, the player/horde are in the scene and
-    // the camera follows the player) — the L06–L08 pipeline straight to the screen.
-    renderCityPipeline(style, null);
+    _diveStyle = style; _diveDt = dt; _diveT = t;    // hand this frame's values to the render callbacks
+    diveCtl.update(dt);                              // advances the ease AND presents (city 'a' / office 'b' / crossfade)
+    sceneMode = MODE_MAP[diveCtl.mode]; window.__scene = sceneMode;
+    // F1 label-truth: a settled OFFICE frame runs no city pipeline, so clear the stale stylized label (a
+    // transition frame DID run renderCityPipeline via renderFrom, so it keeps that label — as before).
+    if (sceneMode === 'office') window.__style = '';
   } else {
-    // OFFICE / DIVE — not a city frame; clear __style so it never carries a stale stylized value
-    // off-city (F1 label-truth: the city pipeline writes __style every frame it runs; off-city we clear).
-    window.__style = '';
-    // render the room's "window" texture first (so it's alive), then draw the room
-    // (and the crossfade if diving). The CORNER fitout's window is the live city; the BASEMENT
-    // fitout's "window" is the little vignette diorama. We render only the active tier's source.
-    office.update(dt, t, sunRig);   // sunRig → the cat sleeps at night, wakes by day
-    office.look.addKeys(dt, lookKeys);               // L55: held arrow-keys turn the seated head (dive look-around)
-    window.__lookYaw = office.look.yaw; window.__lookPitch = office.look.pitch;   // L51 harness probes (now in city too)
-    if (office.tier === 'basement') {
-      renderer.setRenderTarget(vignetteRT);
-      renderer.render(office.vignette.scene, office.vignette.camera);
-    } else if (_winFrame % WIN_EVERY === 0) {
-      renderCityBeautyTo(windowCam, cityWindowRT);     // L40 WIN B: glass city at ~1/3 rate (it's a background)
-    }
-    _winFrame++;
-
-    if (sceneMode === 'office') {
-      renderer.setRenderTarget(null);
-      renderer.render(office.scene, office.camera);
-    } else {
-      // transition: city pipeline → cityScreenRT (source A) · office → officeScreenRT (source B) · the
-      // scene-transition material presents the focus push-in + crossfade to the screen (uT set in update()).
-      renderCityPipeline(style, cityScreenRT);
-      renderer.setRenderTarget(officeScreenRT);
-      renderer.render(office.scene, office.camera);
-      runPass(dive.material, null);
-    }
+    // HOARD arena — same city scene + post chain (the player/horde are in the scene, camera follows the
+    // player); the L06–L08 pipeline straight to the screen. Not a dive, so the controller sits idle at 'a'.
+    renderCityPipeline(style, null);
   }
 
 };   // L114: end of the `frame` body — the shell adds frameEnd + rAF (and owns the pause-on-hidden DOM wiring, removed from here).
@@ -2063,7 +2065,7 @@ const propsParam = _q.get('officeprops'); if (['painted', '3d'].includes(propsPa
 const officeParam = _q.get('office');
 if (officeParam === '1' || officeParam === 'corner' || officeParam === 'basement') {
   if (officeParam === 'basement') setFitout('basement');
-  dive.snap('b'); sceneMode = 'office'; window.__scene = sceneMode;   // L60: boot straight into the office (no dive)
+  diveCtl.transition.snap('b'); sceneMode = 'office'; window.__scene = sceneMode;   // L60/HOARD-2: boot straight into the office (no dive) — snap the underlying transition to settled-B
 }
 // L32: ?hoard=1 boots straight into the Hoard game mode.
 if (_q.get('hoard') === '1') enterHoard();

@@ -313,6 +313,16 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
   }
   const setWorldVisible = (on) => { for (const g of WORLD_GROUPS()) g.visible = on; };
 
+  /* L HOARD-3 — RUN THE ENGINE WITHOUT THE CITY. A non-city map (the forest arena) needs the renderer +
+     rig + post + SunRig but NOT the urban world. This hides every city-ground group (buildings/streets +
+     traffic + boats + street-lights, which aren't otherwise exposed) plus the bay water + the far-city
+     backdrop, while KEEPING the sky (atmosphere + sun/moon + clouds) so day/night still plays overhead.
+     Default (on=true) is the city's normal state → byte-identical when never called. */
+  const setUrbanVisible = (on) => {
+    for (const g of URBAN()) g.visible = on;   // city.group · cityLife · waterLife · streetLights
+    water.visible = on; backdrop.visible = on;
+  };
+
   function worldHeightAt(wx, wz) {
     if (!worldData) return 0;
     const { size, height, sea, relief } = worldData;
@@ -1036,5 +1046,6 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     // pilot samplers + collider
     setPilotWaterSampler, setPilotGroundSampler, collider,
     fitShadowFrustum, SHADOW_DIST,
+    setUrbanVisible,   // L HOARD-3: hide the whole city for a non-city map (keeps the sky)
   };
 }

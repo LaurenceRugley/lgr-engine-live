@@ -1,7 +1,7 @@
 /* ============================================================
    flow-erode-sed.frag — L87 GPGPU erosion, PASS 1b: write the new SEDIMENT.
    ------------------------------------------------------------
-   Sibling of flow-erode-terr.frag: the IDENTICAL erosion delta `d`, applied to sediment
+   Sibling of flow-erode-terr.frag: the IDENTICAL erosion delta d, applied to sediment
    instead of terrain. Conservation: soil removed from terrain is added to the water's
    sediment load and vice-versa, so dS = −d (erode d<0 → S rises; deposit d>0 → S falls).
    Reads the SAME old state as the terrain pass (both run before either swaps) so the two

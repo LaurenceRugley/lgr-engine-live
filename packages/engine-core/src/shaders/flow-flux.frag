@@ -3,7 +3,7 @@
    ------------------------------------------------------------
    This is the GPU port of step (1)+(2) of the CPU virtual-pipes sim in water-flow.js.
    Each output texel == one grid cell; this fragment shader IS the per-cell kernel
-   (a CUDA kernel, but `gl_FragColor`). It reads the cell's depth+terrain and its four
+   (a CUDA kernel, but gl_FragColor). It reads the cell's depth+terrain and its four
    neighbours, and writes the cell's four outflow fluxes packed in RGBA = (L, R, B, T).
 
    THE MATH (identical to the CPU oracle — that's what makes them parity-match):
@@ -14,7 +14,7 @@
        (k = min(1, W/out)) — conservation + the stability guard the research warns about.
 
    Boundaries: a cell on the grid edge has no neighbour on that side → that flux is 0
-   (the CPU does `if (i>0) …`). We replicate with index guards (floor(uv·N)).
+   (the CPU does if (i>0) …). We replicate with index guards (floor(uv·N)).
    ============================================================ */
 precision highp float;
 

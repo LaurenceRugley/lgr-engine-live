@@ -15,47 +15,83 @@
      dwell:        ms a scene is shown before auto-advance (default 18 000)
      transitionMs: crossfade duration in ms (default 1 200)
 
-   Opus-refuted invariants (MUST NOT change):
+   Opus-refuted invariants (MUST NOT change). #1/#2/#6 are now ENFORCED IN createBeautyPresenter (the
+   shared beauty-present this director drives) — they still hold verbatim, just one file over:
      1. Scenes render into beautyRT (HalfFloat MSAA) — NEVER sceneRT (8-bit).
-     2. presentBeauty sets ALL filmic uniforms EVERY frame, including uRays=0
+     2. presenter.present sets ALL filmic uniforms EVERY frame, including uRays=0
         (godrays reads the wrong camera — skip unconditionally for hero packs).
-     3. sunRig.goTo(0.75) once at init — bloom + warm grade come free by-ref.
+     3. ⚠️ THIS INVARIANT WAS A LIE, AND IT SHIPPED FOR SEVEN LESSONS (corrected L-U).
+        It used to read: "sunRig.goTo(0.75) once at init — bloom + warm grade come free by-ref."
+        THE TRUTH: `sunRig.goTo(t)` only assigns `goalT` (sun-rig.js:240). Nothing reads `goalT`
+        except `sunRig.update(dt)` (sun-rig.js:246-248) — and THIS DIRECTOR NEVER CALLS update().
+        So goTo() here is inert: the rig stays exactly where createEngineCore seeded it,
+        `createSunRig({ t: 0.5 })` = NOON, whose gradeTint is #d6e6f4 — a COOL BLUE, not a warm dusk.
+        The whole hero ring has always been graded at noon. (Verified from source AND at runtime:
+        the consumer-probe prints the live rig tint, and it reads #d6e6f4.)
+        Consequences that were paid without anyone knowing: Lattice fought a cold cast it couldn't
+        escape (L-R), Product Moment pre-warms its sweep to compensate (createProductMoment.js:27),
+        and the `sunT` option below does nothing at all (see it).
+        WHAT THIS COMMENT DOES *NOT* DO: change the grade. Making the ring actually warm re-grades all
+        8 scenes at once — an owner taste call, deliberately not taken here. This lesson only stops the
+        file from lying about what it does.
      4. Transitions reuse createSceneTransition with uZoom=0 (calm crossfade).
      5. Each pack's dispose() owns its own geometries/materials/textures/RTs.
+     6. (L-S) A pack may override the grade's INPUTS via `filmic`; the override swaps the uniform's
+        pointer and must NEVER write through it — uGradeTint.value IS sunRig.grade.tint. (In
+        createBeautyPresenter now; each consumer gets its own presenter instance = its own _graded.)
    ============================================================ */
 import * as THREE from 'three';
 import { createSceneTransition } from '../scene-transition.js';
 import { createRing, shouldAutoAdvance, disposeAll } from './hero-ring.js';
+import { createBeautyPresenter } from './createBeautyPresenter.js';
 
 export function createHeroDirector(core, {
   scenes,
   dwell        = 18_000,   /* ms: how long to show each scene before auto-advancing */
   transitionMs = 1_200,    /* ms: crossfade duration */
-  sunT         = 0.75,     /* L-N re-skin: the sun-grade the whole ring is lit + graded at.
-                              Default 0.75 = dusk (byte-identical). A client build passes its own
-                              (e.g. 0.5 noon for a bright product ring, 0.0 night for noir). */
+  /* ⚠️ INERT — this option currently does NOTHING (see invariant 3, and L-U item 2).
+     It was introduced in L-N as "the sun-grade the whole ring is lit + graded at", and it has never
+     done that. It is passed to `sunRig.goTo()`, which only sets `goalT`; `goalT` is read ONLY by
+     `sunRig.update(dt)`, which this director never calls. So every value of `sunT` — 0.0, 0.5, 0.75 —
+     produces the identical result: the rig stays at the core's boot time (noon).
+     It is kept (rather than deleted) because it is the exact seam that a future "pick the ring's grade"
+     lesson will wire, and deleting it would just churn the two example consumers that pass it. It is NOT
+     kept silently: constructing with a value that cannot take effect logs a loud warning below, and the
+     dead-option rule (no silent no-ops) is satisfied by that + this comment.
+     To WIRE it, the rig must be advanced to the goal (sun-rig has no snap verb — `update()` damps toward
+     it) — and that re-grades all 8 scenes, which is the owner taste call this lesson is not making. */
+  sunT         = 0.75,
 } = {}) {
   if (!scenes || scenes.length === 0) {
     throw new Error('createHeroDirector: scenes must be a non-empty array');
   }
 
   const {
-    renderer,
     sunRig,
     drawBuffer,
-    filmicMaterial,
-    runPass,
-    bloomPass,
-    beautyRT,
+    runPass,           // still ours: the final crossfade composite of the two capture RTs -> screen
     registerContentResizer,
     frameStart,
     frameEnd,
   } = core;
+  /* The beauty-present path (render pack -> beautyRT -> bloom -> filmic -> target, + the per-pack
+     grade pointer-swap) is now the SHARED createBeautyPresenter — one instance per director (its own
+     _graded dirty state, exactly as the inlined copy had). renderer/filmicMaterial/bloomPass/beautyRT
+     moved with it, so they are no longer destructured here. */
+  const presenter = createBeautyPresenter(core);
 
-  /* K0.3: Sun positioned once — bloom + warm grade arrive by-ref automatically
-     (filmicMaterial.uniforms.uGradeTint/uGradeLift are bound to sunRig.grade at init).
-     L-N: the grade point is now the `sunT` option (default 0.75 dusk → byte-identical). */
+  /* K0.3 (corrected L-U): this SETS A GOAL THE RIG NEVER WALKS TO — see invariant 3. It is left in
+     place because it is harmless and is the seam a future grade lesson wires; it is not left silent.
+     FAIL LOUD (Rule 12): if a caller passes a sunT the rig will not actually adopt, say so. Reading
+     `sunRig.t` gives the rig's REAL current time, so this compares intent against reality rather than
+     against a hard-coded assumption — it will start passing by itself the day someone wires update(). */
   sunRig.goTo(sunT);
+  if (typeof console !== 'undefined' && Math.abs(sunRig.t - sunT) > 1e-3) {
+    console.warn(
+      `[createHeroDirector] sunT=${sunT} has NO EFFECT: the rig is at t=${sunRig.t.toFixed(3)} and this ` +
+      `director never calls sunRig.update(), so goTo() only sets a goal nothing reads. The ring is graded ` +
+      `at the core's boot time. See invariant 3 in createHeroDirector.js.`);
+  }
 
   /* WCAG 2.3.3 — animation from interactions: if reduced-motion is requested,
      the director shows the first scene statically and never auto-advances.
@@ -110,40 +146,15 @@ export function createHeroDirector(core, {
     }
   });
 
-  /* ─── presentBeauty ─────────────────────────────────────────────────────────
-     Renders one pack through the full beauty pipeline and composites to target.
-     target = null → screen; target = transA/transB → transition capture RT.
-
-     Invariant: sets ALL filmic uniforms EVERY call.
-       uScene = beautyRT.texture   (HalfFloat HDR scene)
-       uAces  = 1                  (ACES compresses HDR highlights; no clipping)
-       uDither = 1                 (banding-free in HalfFloat→8-bit conversion)
-       uGrade = 1                  (warm dusk grade via sunRig.grade, by-ref)
-       uRays  = 0                  (godraysPass reads rig.camera — wrong camera for hero packs)
-  ─────────────────────────────────────────────────────────────────────────── */
-  function presentBeauty(pack, target) {
-    /* 1. Render pack into beautyRT (HalfFloat MSAA — invariant #1). */
-    renderer.setRenderTarget(beautyRT);
-    renderer.render(pack.scene, pack.camera);
-
-    /* 2. Bloom — brightens crests (>0.78 in HalfFloat) and patches filmicMaterial.
-          bloomPass writes uBloom + uBloomStrength. Skip → set uBloomStrength = 0. */
-    if (pack.usesBloom) {
-      bloomPass(beautyRT);
-    } else {
-      filmicMaterial.uniforms.uBloomStrength.value = 0;
-    }
-
-    /* 3. Set ALL filmic uniforms (invariant #2). */
-    filmicMaterial.uniforms.uScene.value        = beautyRT.texture;
-    filmicMaterial.uniforms.uAces.value         = 1;
-    filmicMaterial.uniforms.uDither.value       = 1;
-    filmicMaterial.uniforms.uGrade.value        = 1;
-    filmicMaterial.uniforms.uRays.value         = 0;  // skip godrays for hero
-
-    /* 4. Composite (null → screen; RT → capture for crossfade). */
-    runPass(filmicMaterial, target);
-  }
+  /* ─── L-S: THE PER-SCENE GRADE SEAM + the beauty-present — now in createBeautyPresenter ─────
+     `presenter.present(pack, target)` renders a pack through the full beauty pipeline (beautyRT ->
+     bloom -> filmic -> target) and applies that pack's optional `filmic` grade override via the
+     by-ref pointer-swap (invariant #6). ALL of that logic — the WHY-not-uGrade=0 reasoning, the
+     by-ref trap, and the byte-identical-by-construction dirty flag — lives in createBeautyPresenter.js
+     now; the director just drives it. This director owns its OWN presenter instance so its _graded
+     dirty state never crosses a wipe's. Each pack is graded into its own capture RT before the
+     transition shader lerps them, so a graded<->neutral crossfade is a lerp between two already-
+     correct images — no shared grade state left to "pop". */
 
   /* ─── Transition trigger ────────────────────────────────────────────────── */
   const centerUv = new THREE.Vector2(0.5, 0.5);  // focus center (calm; no dive point)
@@ -171,7 +182,7 @@ export function createHeroDirector(core, {
   if (reducedMotion) {
     const firstPack = scenes[0];
     firstPack.update(0, 0);  // static — uTime stays 0
-    presentBeauty(firstPack, null);
+    presenter.present(firstPack, null);
     /* Navigator still works — manual triggers snap-cut (no transition animation). */
     return {
       next, prev, goTo,
@@ -215,12 +226,12 @@ export function createHeroDirector(core, {
       /* Mid-crossfade: both packs animate; render each to a capture RT, then composite. */
       const fp = scenes[fromIdx];
       fp.update(dt, now * 0.001);
-      presentBeauty(fp,          transA);  // from-scene → transA
-      presentBeauty(currentPack, transB);  // to-scene   → transB
+      presenter.present(fp,          transA);  // from-scene → transA
+      presenter.present(currentPack, transB);  // to-scene   → transB
       runPass(transition.material, null);   // crossfade  → screen
     } else {
       /* Settled (mode='a' or mode='b'): render current pack straight to screen. */
-      presentBeauty(currentPack, null);
+      presenter.present(currentPack, null);
 
       /* Auto-advance: only when settled, single scene can't advance. */
       if (scenes.length > 1 && shouldAutoAdvance(reducedMotion, dwell, elapsed)) {

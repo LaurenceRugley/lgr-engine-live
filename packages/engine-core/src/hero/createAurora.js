@@ -88,5 +88,9 @@ export function createAurora(core, {
     }
   }
 
-  return { scene, camera, update, dispose, usesBloom: true, tone: 'dark' };
+  /* build-in casting (createBuildIn opt-in): the curtain layers assemble as an ordered multi-element
+     set. update() only writes uTime uniforms (never these meshes' transforms), so a build-in composes
+     cleanly — no position-yield needed. */
+  return { scene, camera, update, dispose, usesBloom: true, tone: 'dark',
+           buildGroups: meshes.map((m) => ({ object: m, role: 'curtain' })) };
 }

@@ -62,7 +62,7 @@ export { validateSceneSpec, fromURLParams, toURLParams, applySceneSpec, SCENE_SP
 
 // VIZ SLICE 3 — GraphSpec v1 (scene-spec's sibling for graph data): validate/index + the deterministic
 // radial layout + the memory-vault ingester. Lifted from projects/atlas/ once createEngineCore landed.
-export { validateGraphSpec, indexNodes, KINDS, RELS, GRAPH_SPEC_VERSION, heatFromAgeDays, HEAT_TAU_DAYS } from './src/graph-spec.js';
+export { validateGraphSpec, indexNodes, KINDS, RELS, GRAPH_SPEC_VERSION, heatFromAgeDays, HEAT_TAU_DAYS, classifyMedia, hasMedia, DEEP_CHARS, ALGORITHM_KINDS, mediaGlyph, mediaGlyphCode, MEDIA_GLYPHS, classifyHealth, worstState, SLOW_MS } from './src/graph-spec.js';
 export { createGraphLayout, DEFAULT_RINGS } from './src/graph-layout.js';
 export { parseFrontmatter, extractLinks, extractMarkdownLinks, noteToRecords, buildGraphSpec, extractExcerpt } from './src/ingest-vault.js';
 
@@ -130,6 +130,11 @@ export { createGraphLabels } from './src/graph-labels.js';
 // layer that turns "a graph on a webpage" into "a graph in space" (design doc §8). Two draw calls, no deps.
 export { createGraphAtmosphere } from './src/graph-atmosphere.js';
 
+/* graph-ambient (VIZ SLICE 15): rare seeded background flybys (comet + tiny ship) behind the graph —
+   the sky's delight beat. The scheduler half is pure + node-tested (graph-ambient-core.js). */
+export { createGraphAmbient } from './src/graph-ambient.js';
+export { createAmbientScheduler, lcg } from './src/graph-ambient-core.js';   // lcg: the house seeded RNG (slice 16: consumers author seeded content)
+
 // VIZ SLICE 6 — createGraphSim: the LIVING GRAPH. A first-party force simulation (semi-implicit Euler,
 // d3-force as REFERENCE SPEC not dependency) that mutates the shared positions Map in place. Pure math,
 // no THREE — node-testable. Obsidian-style pinned drag, alpha cooling, and an exact hard-stop at rest.
@@ -192,8 +197,86 @@ export { createAmbientBed } from './src/ambient-bed.js';
 export { createPositionalField } from './src/positional-field.js';
 export { createRotor } from './src/rotor.js';
 
+// Lesson HOARD-1 — a flickering warm light pool (born in The Hoard's cavern; reusable for any flame).
+export { createTorchLight, torchFlicker } from './src/createTorchLight.js';
+
+// Lesson HOARD-2 — the reusable DIVE (from-view zoom-crossfades into a to-view). One impl for the cavern,
+// the survivor game, and (staged) the city dive. Owns the two RTs + present; wraps createSceneTransition.
+export { createDiveController } from './src/createDiveController.js';
+
+// Lesson HOARD-3 — a sparse instanced forest for a flat arena (keep-out clearings + min-spacing + gameplay
+// colliders). Sibling of scatter.js (terrain scatter); this is the flat-arena, gameplay-collider forest.
+export { createForest, placeForest } from './src/createForest.js';
+
+// Lesson M3 — flow-field horde pathing: one grid solve steers a whole crowd around obstacles (a moving
+// target, tree colliders + barriers), each agent paying a single array lookup per step. Pure math (no
+// THREE) + an optional spatial-hash separation helper. The Hoard swaps its straight-line seek for this.
+export { createFlowField } from './src/createFlowField.js';
+
+// Lesson M4 — projectile simulation: pooled bullets with velocity + gravity drop, swept per step, hit
+// tests INJECTED as castWorld/castTargets callbacks (the module never depends on a collision system).
+// The Hoard's gun fires these instead of an instant hitscan.
+export { createBallistics } from './src/createBallistics.js';
+
+// Lesson M2 — first-person walk controller: full 360° pointer-lock look + yaw-relative WASD at eye height
+// with circle/AABB/arena collision. The Hoard's forest dive lands you WALKING (a NEW module, not a seated
+// mode — full unbounded yaw + move coupled to yaw ≠ createSeatedLook's clamped head-turn).
+export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
+
+// Lesson M6 — GPU particle system: ping-pong FBO sim (pos/vel state textures) + scissor-ring spawn +
+// parameterized emitters (burst/muzzle/dust), additive point render. Generalizes the water-flow-gpu GPGPU
+// pattern. HalfFloat-or-null fallback. The Hoard wires M4's onHit → burst and gun-fire → muzzle.
+export { createParticles, planSpawn } from './src/createParticles.js';
+
+// Lesson M5 — projected decals: box-projector → gather receiver triangles → Sutherland–Hodgman clip →
+// vertex ring → one draw call with GPU age-fade (bullet holes / blood / scorch, procedural atlas). The
+// Hoard wires M4's onHit → bullet hole and zombie death → ground splat.
+export { createDecals } from './src/createDecals.js';
+
+// Lesson M1a — skinned character rig: load a GLB, drive a six-state (idle/walk/run/attack/hit/death)
+// animation machine with cross-fade blending; SkeletonUtils-cloned instances share geometry, own their
+// skeleton. The Hoard's zombies become characters (M1b pools this). Pure state machine in character-anim.
+export { createCharacterRig } from './src/createCharacterRig.js';
+export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/character-anim.js';
+
+// Lesson M1b — character horde: a pooled, index-addressed, distance-LOD scale-up of the rig (the
+// Hoard swaps its instanced-capsule zombies for these, same sim).
+export { createCharacterHorde } from './src/createCharacterHorde.js';
+
+// HERO abilities in the MAIN barrel (were -lib-only) so workspace projects inherit them, not just the
+// no-build /live/ bundles. The Hoard's cavern is the first workspace consumer (assembly + self-shadow +
+// the shared beauty present). Tree-shaken out of any project that doesn't import them (sideEffects:false).
+export { createBuildIn }         from './src/hero/createBuildIn.js';
+export { createShadowRig }       from './src/hero/createShadowRig.js';
+export { createBeautyPresenter } from './src/hero/createBeautyPresenter.js';
+
 // Raw shader strings a few app-level materials compose directly (the dive crossfade; the
 // pixelate tool). Exporting them keeps projects from reaching into the package's src/shaders.
 export { default as fullscreenVert } from './src/shaders/fullscreen.vert';
 export { default as postDiveFrag } from './src/shaders/post-dive.frag';
 export { default as postPixelkitFrag } from './src/shaders/post-pixelkit.frag';
+
+// VIZ SLICE 20 — THE CURRICULUM SEAM: instrumented algorithms (shared by projects/tracer AND the atlas
+// reader — the algorithm IS the teaching artifact, so it lives in the core), a general first-party CHART
+// primitive (the cockpit's charting foundation; Big-O is only its first consumer), and a DOM step-panel
+// render adapter for the atlas reader (the WebGL cell-field adapter stays in the tracer).
+export { ALGORITHMS, bubbleSort, binarySearch, mergeSort, quickSort, heapSort, countOps, measureComplexity, raceAlgorithms, makeCaseInput, SORT_KINDS } from './src/algorithms.js';
+export { createChart, chartLayout, niceTicks, logTicks, makeScale, seriesToPoints } from './src/chart.js';
+export { createStepPanel } from './src/step-panel.js';
+
+// VIZ SLICE 24 — SEMANTIC ZOOM: pure cluster/aggregate/zoom-policy math (the renderer only obeys it).
+export {
+  clusterBy, clusterIndex, clusterOfNode, clusterMembersOf, clusterCentroids, summaryLayout, aggregateEdges, summarySpec,
+  zoomState, nearestCluster, visibleSet, ZOOM_DEFAULTS,
+} from './src/graph-clusters.js';
+
+// CURRICULUM T2 — DATA STRUCTURES: the tree ability (layout + panel) and the structures themselves.
+// tree-layout is pure geometry (every T2 structure reuses it); data-structures instruments a BST through
+// the SAME tracer/player the T1 sorts use (one step engine, three painters).
+export { treeLayout, treeEdges, treeDepth } from './src/tree-layout.js';
+export {
+  bstInsert, bstFromKeys, bstContains, bstInOrder, bstSearchCost,
+  heapIsValid, heapPush, heapPop, traceHeap, heapSortCost,
+  traceBST, balancedKeys, degenerateKeys, measureBST, STRUCTURES,
+} from './src/data-structures.js';
+export { createTreePanel } from './src/tree-panel.js';

@@ -8,7 +8,7 @@
    Lesson 04 change: we now also output the vertex's WORLD-space position
    (vWorldPos) so the fragment shader can do proper world-space lighting (a real
    view direction from the camera, a world-space light). To get world space we
-   multiply by `modelMatrix` alone (object → world); splitting the usual
+   multiply by modelMatrix alone (object → world); splitting the usual
    modelViewMatrix into viewMatrix * modelMatrix lets us grab the world position
    on the way through.
    ============================================================ */

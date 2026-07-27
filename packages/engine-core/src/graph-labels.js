@@ -205,8 +205,15 @@ export function createGraphLabels({
     return true;
   }
 
+  /* SLICE 24 — a label may not outlive its node. Semantic zoom hides members behind a cluster summary;
+     without this gate their pills stayed on screen, naming things that were not drawn. The consumer hands
+     us the SAME reveal function the renderer obeys, so the two can never disagree. null = everything. */
+  let _revealFn = null;
+  function setRevealFn(fn) { _revealFn = fn || null; }
+
   /* show/hide through the cache — the ONLY place `opacity` is written. */
   function setShown(it, want) {
+    if (want && _revealFn && _revealFn(it.id) < 0.5) want = false;   // slice 24: hidden node → hidden label
     if (it.shown === want) return;
     it.shown = want;
     it.el.style.opacity = want ? '1' : '0';
@@ -295,7 +302,7 @@ export function createGraphLabels({
   }
 
   return {
-    root, update, setSelected, setPalette, labelFor, dispose,
+    root, setRevealFn, update, setSelected, setPalette, labelFor, dispose,
     get visibleCount() { return visibleCount; },
     get alwaysVisible() { return always; },
   };

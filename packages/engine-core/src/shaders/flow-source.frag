@@ -2,7 +2,7 @@
    flow-source.frag — L87 GPGPU flow: the SOURCES splat (pour / rain).
    ------------------------------------------------------------
    Adds water into the depth field. Run on demand (a pour click, a rain tick) — NOT
-   in the per-tick hot loop — so it exactly mirrors the CPU's immediate `pourAt`/`rain`
+   in the per-tick hot loop — so it exactly mirrors the CPU's immediate pourAt/rain
    (which mutate the W array the instant they're called).
      • POUR: up to 8 discs, each (gi, gj) = fractional grid centre, radius R in CELLS,
        cone weight (1 − d/R) for cells within R — identical to the CPU disc.

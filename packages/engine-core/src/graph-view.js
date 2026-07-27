@@ -49,7 +49,7 @@
    ============================================================ */
 import * as THREE from 'three';
 import { THEME } from './diagram-theme.js';
-import { heatFromAgeDays, HEAT_TAU_DAYS } from './graph-spec.js';
+import { heatFromAgeDays, HEAT_TAU_DAYS, hasMedia, mediaGlyph, mediaGlyphCode, MEDIA_GLYPHS } from './graph-spec.js';
 import { createEdgeField } from './createEdgeField.js';
 import graphEdgeVert from './shaders/graph-edge.vert';
 import graphEdgeFrag from './shaders/graph-edge.frag';
@@ -66,6 +66,8 @@ const KIND_COLOR = {
   initiative: THEME.ACCENT.axis,
   learning:   THEME.ACCENT.guide,   // the docs/guides modules — plum, literally the "guide" accent
   ops:        THEME.ACCENT.gold,    // FACE-1 entities — the engine's GOLD, a real token since slice 14
+  site:       THEME.ACCENT.jhat,   // slice 26 (COCKPIT): the owner's live sites — cool blue, and
+                                   // the health STATE tint (green/amber/red) rides on top of it
 };
 const colorOfKind = (kind) => KIND_COLOR[kind] || THEME.NEUTRAL.dim;
 
@@ -90,6 +92,7 @@ const KIND_COLOR_PRINT = {
   initiative: _acesLift(THEMES.paper.ACCENT.axis),
   learning:   _acesLift(THEMES.paper.ACCENT.guide),
   ops:        _acesLift(THEMES.paper.ACCENT.gold),   // gold as INK on paper (tokenized, slice 14)
+  site:       _acesLift(THEMES.paper.ACCENT.jhat),   // slice 26
 };
 const KIND_UNTAGGED = { glow: THEME.NEUTRAL.dim, print: _acesLift(THEMES.paper.NEUTRAL.dim, 1.7) };
 
@@ -112,6 +115,17 @@ const BREATH_HZ        = 1.6;   // breathing frequency
 const FOCUS_DIM        = 0.18;  // non-neighbor NODE brightness multiplier once something is selected
 const EDGE_FOCUS_DIM   = 0.10;  // non-incident EDGE multiplier — edges outnumber nodes ~5:1, so they dim harder
 const EDGE_EMPH        = 1.6;   // incident-edge EMPHASIS (slice 9): >1 brightens in the frag AND widens ~×1.45 in the vert
+/* EDGE CALM (slice 23) — the RESTING state of the web. Until now "rest" meant aDim = 1 (full brightness):
+   335 bright ribbons at once, and the centre of the graph read as a bright thicket regardless of how well
+   the NODES were spaced. The declutter that actually works is to make the resting web QUIET and let
+   interaction light it: at rest every edge sits at EDGE_CALM, and hovering or selecting a node lifts its
+   incident edges to EDGE_EMPH — a ~3× jump that reads as a real POP.
+   It is a per-look number (pixel needs more floor to survive the quantizer), so the consumer sets it. */
+const EDGE_CALM_DEFAULT = 0.5;
+/* SPOTLIGHT_DIM (slice 27): harder than FOCUS_DIM. Selecting a node asks the rest of the graph to step
+   back; spotlighting a SECTION asks it to leave the room. The owner's complaint was that a clicked cluster
+   "was still mixed in" — a polite dim is what mixed-in looks like. */
+const SPOTLIGHT_DIM = 0.06;
 const SELECT_POP_S     = 0.45;  // selection pop duration (scale/brightness kick decaying to 0)
 
 // Warm white, not pure white: pure #fff turns a hot node into a hole in the dusk-harbor palette.
@@ -120,6 +134,23 @@ const WARM_WHITE = new THREE.Color('#fff2dc');
 // pulls the fill toward a saturated AMBER instead. Ordering stays monotonic in warmth, probe-assertable.
 const PRINT_AMBER = new THREE.Color('#b45309');
 const PRINT_SHADOW = new THREE.Color('#3a2e22');   // the drop-shadow ink (halo layer re-purposed)
+/* SLICE 17 — the SELECTIVE OUTLINE's color policy (pixel distinctness):
+   INK  = the node's own kind color × OUTLINE_INK — a darkened SELF tint (pixel-art "sel-out"), never
+          pure black: black outlines on a black sky erase the silhouette; a dark tint keeps the kind.
+   HOT  = above OUTLINE_HOT_MIN the ring warms toward AMBER — #d9a066 is a DB32 swatch AND a goldRamp
+          stop, so the quantizer preserves it (the reserved-step discipline). Shape+color pairing:
+          the hot node also carries the brighter halo rings — never color alone (a11y).
+   The legend reads OUTLINE_HOT via the anti-drift seam; if this constant moves, the legend follows. */
+/* SLICE 19 — THE MATERIAL PIP's palette. #cbdbfc is DB32's pale star-white: a RESERVED step the
+   quantizer maps to itself, so a 2-3 virtual-pixel pip survives instead of rounding into the fill
+   (the slice-17 outline lesson, applied to a smaller target). Paper mode uses ink. The LEGEND reads
+   these constants — never its own copy. */
+export const BADGE_COLOR = '#cbdbfc';
+export const BADGE_COLOR_PRINT = '#2f2a21';
+const OUTLINE_INK = 0.30;
+const OUTLINE_HOT = '#d9a066';
+const OUTLINE_HOT_MIN = 0.5;
+const _outlineHot = new THREE.Color(OUTLINE_HOT);
 const PRINT_PAPER  = new THREE.Color('#c9c2b4');   // what a receding mark fades TOWARD on paper (slice 12:
                                                    // focus-dim's multiply-to-black is glow logic — ink recedes
                                                    // by FADING to the page, found by looking at the capture)
@@ -160,6 +191,19 @@ export function createGraphView(core, spec, positions, opts = {}) {
   let _heatTint = WARM_WHITE;
   let _colorFloor = 0;      // pixel-mode node luma floor (QA fix 3; 0 = off)
   let _haloHueClamp = 0;    // pixel-mode halo hue clamp (QA fix 3b; 0 = full cross-kind lerp)
+  let _outlineOn = false;   // slice 17: whether the outline channel is live (pixel look)
+  let _edgeCalm = EDGE_CALM_DEFAULT;   // slice 23: the resting web's level
+  /* THE SPOTLIGHT (slice 27) — a SET of ids that owns the picture. Selection lights a node's immediate
+     NEIGHBOURHOOD ("what does this touch?"); a spotlight lights a whole SECTION ("what am I in?"). They
+     are different questions and they compose: the spotlight decides who is in the room, and the selection
+     still picks out one person in it. Null = no spotlight (the pre-27 behaviour, exactly). */
+  let _spotlight = null;
+  /* REVEAL (slice 24, SEMANTIC ZOOM) — per-node visibility in [0,1], which the consumer TWEENS.
+     A node at reveal 0 is scaled to nothing (and un-pickable); an edge's reveal is min(its endpoints'),
+     so a link cannot outlive the things it connects. This is the only thing the renderer knows about
+     semantic zoom: it obeys a number per node. All the deciding happens in graph-clusters.js (pure). */
+  const reveal = new Float32Array(N || 1).fill(1);
+  let _revealOn = false;   // false = everything visible (the pre-24 path, byte-identical)
 
   const idIndex = new Map(nodes.map((n, i) => [n.id, i]));
 
@@ -183,7 +227,11 @@ export function createGraphView(core, spec, positions, opts = {}) {
     degree.set(e.from, (degree.get(e.from) || 0) + 1);
     degree.set(e.to, (degree.get(e.to) || 0) + 1);
   }
-  const baseScaleOf = (n) => 0.26 * (1 + 0.35 * Math.log2(1 + (degree.get(n.id) || 0)));
+  /* Node size: degree by default (a well-connected note is a bigger landmark). SLICE 24 lets the consumer
+     override it — a cluster SUMMARY must be sized by how many notes it stands for, not by how many
+     aggregate bundles happen to touch it (degree gave every summary the same tiny disc, which is exactly
+     what the first overview capture showed). */
+  const baseScaleOf = opts.baseScaleOf || ((n) => 0.26 * (1 + 0.35 * Math.log2(1 + (degree.get(n.id) || 0))));
 
   // ---- shared per-node state ----
   const _m = new THREE.Matrix4();
@@ -201,6 +249,24 @@ export function createGraphView(core, spec, positions, opts = {}) {
 
   // ---- NODE LAYERS: one quad geometry shared by core + halo, billboarded in the vertex shader ----
   const quadGeo = new THREE.PlaneGeometry(1, 1);
+  /* slice 17: per-INSTANCE attributes shared by both layers (same instance ordering). aHaloCap is only
+     APPLIED where uHaloCap=1 (the halo material, pixel mode); aOutline only READ by the core frag. */
+  const haloCap = new Float32Array(N || 1).fill(1);
+  const outlineCol = new Float32Array((N || 1) * 3);
+  const haloCapAttr = new THREE.InstancedBufferAttribute(haloCap, 1);
+  const outlineAttr = new THREE.InstancedBufferAttribute(outlineCol, 3);
+  quadGeo.setAttribute('aHaloCap', haloCapAttr);
+  quadGeo.setAttribute('aOutline', outlineAttr);
+  /* THE MATERIAL BADGE (slice 19): written ONCE from the snapshot's `media` key — content is a property
+     of the note, not of the frame, so this attribute never changes after boot (unlike heat/outline).
+     hasMedia is the ONE definition (graph-spec); the legend and the inspector call the same function. */
+  /* slice 22: the attribute now carries the GLYPH CODE (1 play · 2 frame · 3 page · 4 book), not a
+     yes/no flag — the fragment branches on it. mediaGlyphCode owns the priority; nothing here re-derives it. */
+  const badge = new Float32Array(N || 1);
+  nodes.forEach((n, i) => { badge[i] = mediaGlyphCode(n.media); });
+  const badgeAttr = new THREE.InstancedBufferAttribute(badge, 1);
+  quadGeo.setAttribute('aBadge', badgeAttr);
+  const badgeCount = badge.reduce((a, b) => a + b, 0);
 
   const coreMat = new THREE.ShaderMaterial({
     vertexShader: graphNodeVert,
@@ -213,6 +279,15 @@ export function createGraphView(core, spec, positions, opts = {}) {
       uRimPower: { value: 2.6 },
       uPrint:    { value: 0 },   // slice 12: 1 = flatten fresnel/inner-light (solid print fill)
       uRimGain:  { value: 0.55 },
+      uOutlinePx: { value: 0 },  // slice 17: selective-outline width, device px (pixel look sets it)
+      uHaloCap:  { value: 0 },   // the core never caps; the attribute is declared in the shared vert
+      uBadgePx:  { value: 0 },   // slice 19: material-pip half-size, device px (0 = off)
+      /* ACES PRE-COMPENSATION, again (the studio-ink lesson, now for a 2-px pip): authored at
+         #cbdbfc the pip arrived on screen as slate-grey — the tonemap crushed it, and DB32 then
+         rounded it to a muted step nobody chose. Feeding it HDR (×2.4, deliberately UNCLAMPED —
+         sceneRT is a float buffer) makes the tonemap land it back on the pale swatch it was
+         authored as. Found by histogramming the rendered node, not by squinting at it. */
+      uBadgeColor: { value: new THREE.Color(BADGE_COLOR).multiplyScalar(2.4) },
     },
   });
   const haloMat = new THREE.ShaderMaterial({
@@ -226,6 +301,11 @@ export function createGraphView(core, spec, positions, opts = {}) {
       uSizeMul:  { value: opts.haloScale ?? 3.2 },
       uScale:    { value: opts.nodeScale ?? 1.0 },
       uFalloff:  { value: 5.5 },
+      uRings:    { value: 0 },   // slice 17: authored aura rings (pixel)
+      uHaloCap:  { value: 0 },   // slice 17: 1 = per-node NN containment (pixel)
+      uOutlinePx: { value: 0 },  // declared-in-vert hygiene; the halo frag never reads the outline
+      uBadgePx:  { value: 0 },
+      uBadgeColor: { value: new THREE.Color(BADGE_COLOR) },
     },
   });
 
@@ -366,7 +446,16 @@ export function createGraphView(core, spec, positions, opts = {}) {
   /* STATE TINT (slice 13, §12 "dim by default, glow by STATE" made literal): a per-node color mix applied
      AFTER the heat lerp — red burns red, stale cools grey, unknown greys out; green/working add nothing
      (the kind color + activity heat already say it). Computed once; zero per-frame cost for stateless nodes. */
-  const STATE_TINT = { red: [new THREE.Color('#ff3b30'), 0.55], stale: [new THREE.Color('#6a6a72'), 0.5], unknown: [new THREE.Color('#8a8a90'), 0.6] };
+  /* slice 26 (COCKPIT): green + working join the tint table. Until now a state only ever made a node LOOK
+   WORSE (red/stale/unknown); a cockpit has to be able to say "this is fine" too, and it must say it in a
+   colour, not a subtlety — reduced-motion users read state by HUE, never by the pulse. */
+const STATE_TINT = {
+  red: [new THREE.Color('#ff3b30'), 0.55],
+  working: [new THREE.Color('#ffb020'), 0.5],    // amber: up, but limping
+  green: [new THREE.Color('#30d158'), 0.45],     // healthy
+  stale: [new THREE.Color('#6a6a72'), 0.5],
+  unknown: [new THREE.Color('#8a8a90'), 0.6],
+};
   const stateTint = nodes.map((n) => (n.state && STATE_TINT[n.state]) || null);
 
   /* setState (slice 13) — the LIVE seam: what a future poller (or an ops event bus) calls when the world
@@ -490,6 +579,9 @@ export function createGraphView(core, spec, positions, opts = {}) {
       const s = baseScale[i] * pickScale;
       const p = pos[i];
       _m.makeScale(s, s, s).setPosition(p.x, p.y, p.z);
+      // slice 24: a hidden node is UN-PICKABLE — the pick proxy takes the revealed scale, so you cannot
+      // click a node that isn't on screen (the invisible-hit-target bug this seam exists to prevent).
+      if (_revealOn && reveal[i] < 0.5) _m.makeScale(1e-6, 1e-6, 1e-6).setPosition(p.x, p.y, p.z);
       pickMesh.setMatrixAt(i, _m);
     }
     pickMesh.instanceMatrix.needsUpdate = true;
@@ -523,12 +615,69 @@ export function createGraphView(core, spec, positions, opts = {}) {
     const attr = edgeGeo.getAttribute('aDim');
     const arr = attr.array;
     for (let i = 0; i < arr.length; i++) {
-      if (em == null) { arr[i] = 1; continue; }
+      // SLICE 23: rest is CALM, not full. The web is a faint substrate the nodes sit on; it only lights
+      // up where you are looking. (Was `arr[i] = 1` — a fully-lit resting web, which is what made the
+      // centre read busy no matter how far apart the nodes were spaced.)
       const a = edgeEnds[i * 2], b = edgeEnds[i * 2 + 1];
-      arr[i] = (a === em || b === em) ? EDGE_EMPH : EDGE_FOCUS_DIM;   // slice 9: incident edges now EMPHASIZE (brighten + widen), not merely survive
+      let v;
+      if (_spotlight != null) {
+        /* Inside the spotlight, the section's OWN connections are the picture: an edge with both ends in
+           the room lights up (that is the cluster's internal structure, finally visible); an edge with one
+           end outside is a thread leaving the room and is dimmed, not cut — you can still see that the
+           section connects outward. */
+        const inA = _spotlight.has(a), inB = _spotlight.has(b);
+        v = (inA && inB) ? EDGE_EMPH : (inA || inB ? EDGE_FOCUS_DIM : SPOTLIGHT_DIM);
+      } else {
+        v = (em == null)
+          ? _edgeCalm
+          : ((a === em || b === em) ? EDGE_EMPH : EDGE_FOCUS_DIM);   // slice 9: incident edges EMPHASIZE
+      }
+      /* slice 24: an edge cannot be more visible than the nodes it joins. min(), not average: a link to a
+         collapsed cluster must vanish with it, or the graph grows dangling threads to nothing. */
+      /* edgeEnds stores node IDs (the emphasis compare above is `a === em`, an id) — NOT indices. Indexing
+         `reveal` with a string gave undefined → NaN → every edge's aDim went NaN, which the hover gates
+         caught immediately. Map through idIndex, and treat an unknown endpoint as visible rather than
+         poisoning the buffer. */
+      if (_revealOn) {
+        const ia = idIndex.get(a), ib = idIndex.get(b);
+        const ra = ia == null ? 1 : reveal[ia];
+        const rb = ib == null ? 1 : reveal[ib];
+        v *= Math.min(ra, rb);
+      }
+      arr[i] = v;
     }
     attr.needsUpdate = true;
   }
+
+  /* setReveal(fn|null) — fn(id, index) → 0..1. null restores the pre-24 "everything visible" path exactly.
+     Writes are O(N + E) and happen ONLY when the visible set or a tween value changes (the consumer calls
+     it while a transition is in flight, then stops) — never per frame at rest. */
+  function setReveal(fn) {
+    if (!fn) {
+      if (_revealOn) { reveal.fill(1); _revealOn = false; refreshEdgeDim(); }
+      return;
+    }
+    _revealOn = true;
+    for (let i = 0; i < N; i++) reveal[i] = Math.max(0, Math.min(1, fn(nodes[i].id, i)));
+    refreshEdgeDim();          // edges follow their endpoints
+    syncPositions();           // the pick proxy takes the revealed scale (a hidden node is un-pickable)
+  }
+  function revealOf(id) { const i = idIndex.get(id); return i == null ? 0 : (_revealOn ? reveal[i] : 1); }
+
+  /* setEdgeCalm(v) — the resting-web level (1 = the pre-23 fully-lit web; ~0.5 = a quiet substrate).
+     The pixel look needs a higher floor than the photographic ones: a calmed ribbon still has to clear
+     DB32's first non-black step, or the web does not get quiet, it gets DELETED (the black-hole class —
+     and the motion gate is what catches it). */
+  function setEdgeCalm(v) { _edgeCalm = v; refreshEdgeDim(); }
+
+  /* setSpotlight(ids | null) — light a whole SECTION and send the rest of the graph away. Locked by the
+     caller (a click), cleared by the caller (Escape / empty click): it deliberately does not follow the
+     hover, because a spotlight that flickers as the mouse sweeps is a strobe, not a tool. */
+  function setSpotlight(ids) {
+    _spotlight = ids && ids.size ? new Set(ids) : null;
+    refreshEdgeDim();
+  }
+  function spotlightSize() { return _spotlight ? _spotlight.size : 0; }
 
   function setSelected(id) {
     const before = emphasisId();
@@ -575,7 +724,8 @@ export function createGraphView(core, spec, positions, opts = {}) {
       const isEmphasis = i === emIndex;
       const selPop = isSelected ? (1 - popT) : 0;   // 1 -> 0 over SELECT_POP_S, then stays 0
       const breath = motion ? Math.sin(now * BREATH_HZ * Math.PI * 2 + i) : 0;
-      const s = baseScale[i] * (1 + HEAT_SCALE_GAIN * heat[i] + HEAT_BREATH_GAIN * heat[i] * breath + 0.6 * selPop);
+      const s = baseScale[i] * (1 + HEAT_SCALE_GAIN * heat[i] + HEAT_BREATH_GAIN * heat[i] * breath + 0.6 * selPop)
+        * (_revealOn ? reveal[i] : 1);   // slice 24: a hidden node has no size — nothing to draw, nothing to pick
 
       const p = pos[i];
       _m.makeScale(s, s, s).setPosition(p.x, p.y, p.z);
@@ -583,7 +733,13 @@ export function createGraphView(core, spec, positions, opts = {}) {
       if (_mode === 'print') _m.setPosition(p.x + 0.05, p.y, p.z + 0.09);   // shadow offset: down-right on screen under the iso camera
       nodeHalo.setMatrixAt(i, _m);
 
-      const dim = (focusActive && !isEmphasis && !inFocus.has(nodes[i].id)) ? FOCUS_DIM : 1;
+      /* SLICE 27: the spotlight is the OUTER gate. A node outside it recedes hard (it is not in the room);
+         a node inside it stays fully lit even if the selection's neighbourhood does not reach it — which
+         is the whole point, because a section's members are related by MEANING, not by adjacency. */
+      const outsideSpot = _spotlight != null && !_spotlight.has(nodes[i].id);
+      const dim = outsideSpot
+        ? SPOTLIGHT_DIM
+        : ((focusActive && !isEmphasis && !inFocus.has(nodes[i].id) && _spotlight == null) ? FOCUS_DIM : 1);
       // GAIN CAP (slice 10, QA fix 6): heat + selection pop could stack past the point where ACES+bloom
       // bleach the node to white — the selected node stopped reading as its KIND. The cap keeps the hot
       // ceiling below the bleach point; hue survives selection (judged by screenshot, harbor selected-state).
@@ -607,6 +763,17 @@ export function createGraphView(core, spec, positions, opts = {}) {
       }
       nodeCore.setColorAt(i, _col);
 
+      /* slice 17 — the OUTLINE channel (only uploaded while the pixel outline is on): a darkened SELF
+         tint that WARMS to amber above OUTLINE_HOT_MIN, and inherits the state tint (a red lane's ring
+         is red — the state survives quantization on the ring even when the fill's tint gets crowded). */
+      if (_outlineOn) {
+        _col.copy(baseColor[i]).multiplyScalar(OUTLINE_INK * dim);
+        const hotT = Math.max(0, Math.min((heat[i] - OUTLINE_HOT_MIN) / (1 - OUTLINE_HOT_MIN), 1));
+        if (hotT > 0) _col.lerp(_outlineHot, hotT);
+        if (stateTint[i]) _col.lerp(stateTint[i][0], stateTint[i][1] * 0.85);
+        outlineCol[i * 3] = _col.r; outlineCol[i * 3 + 1] = _col.g; outlineCol[i * 3 + 2] = _col.b;
+      }
+
       // The halo carries heat as INTENSITY. This is the graduated signal the bloom pass thresholds against.
       // HUE CLAMP (slice 10, QA fix 3b — the olive artifact): the halo's warm-white lerp lands additive
       // in-between hues that DB32 quantizes to olive/mustard swatches at fine grids. _haloHueClamp scales
@@ -628,6 +795,55 @@ export function createGraphView(core, spec, positions, opts = {}) {
     nodeHalo.instanceMatrix.needsUpdate = true;
     if (nodeCore.instanceColor) nodeCore.instanceColor.needsUpdate = true;
     if (nodeHalo.instanceColor) nodeHalo.instanceColor.needsUpdate = true;
+    if (_outlineOn) outlineAttr.needsUpdate = true;
+  }
+
+  /* recomputeHaloCaps (slice 17) — HALO CONTAINMENT, the data half. For each node, cap its halo's
+     world radius at capFrac × the distance to its NEAREST NEIGHBOR, so two crowded nodes stop pooling
+     their glow into one unreadable blob and the hotter one visibly WINS the boundary (max blending is
+     the other half — see setPixelNodeStyle). O(N²) over 70 nodes, called on SETTLE — never per frame
+     (no hot alloc, no hot math; the positions only matter once they've stopped moving). */
+  function recomputeHaloCaps(capFrac = 0.4) {
+    const sizeMul = haloMat.uniforms.uSizeMul.value;
+    const scale = haloMat.uniforms.uScale.value;
+    for (let i = 0; i < N; i++) {
+      let nn = Infinity;
+      const a = pos[i];
+      for (let j = 0; j < N; j++) {
+        if (j === i) continue;
+        const b = pos[j];
+        const dx = a.x - b.x, dz = a.z - b.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < nn) nn = d2;
+      }
+      const haloR = baseScale[i] * sizeMul * scale;              // the UNCAPPED halo world radius
+      const cap = haloR > 0 ? (capFrac * Math.sqrt(nn)) / haloR : 1;
+      // floor: the halo never shrinks INSIDE the core (cap × sizeMul ≥ core × 1.15)
+      haloCap[i] = Math.min(1, Math.max(cap, 1.15 / sizeMul));
+    }
+    haloCapAttr.needsUpdate = true;
+  }
+
+  /* setPixelNodeStyle (slice 17) — the DISTINCTNESS switch, one seam: the selective outline (core),
+     the authored aura rings + MAX blending + NN containment (halo). Max blending is the summing cure:
+     two overlapping halos stop ADDING (which bleaches the valley between nodes into one blob) and take
+     the per-channel MAX instead — the hotter node wins the overlap, the cooler one keeps its boundary.
+     Call with no args to restore the glow defaults (harbor/observatory). MUST be called AFTER
+     setRenderMode in a look switch — setRenderMode also writes haloMat.blending. */
+  function setPixelNodeStyle({ outlinePx = 0, rings = 0, contain = false } = {}) {
+    coreMat.uniforms.uOutlinePx.value = outlinePx;
+    haloMat.uniforms.uRings.value = rings;
+    haloMat.uniforms.uHaloCap.value = contain ? 1 : 0;
+    if (contain) {
+      haloMat.blending = THREE.CustomBlending;
+      haloMat.blendEquation = THREE.MaxEquation;
+      haloMat.blendSrc = THREE.OneFactor;
+      haloMat.blendDst = THREE.OneFactor;
+    } else if (_mode !== 'print') {
+      haloMat.blending = THREE.AdditiveBlending;
+    }
+    haloMat.needsUpdate = true;
+    _outlineOn = outlinePx > 0;
   }
 
   function dispose() {
@@ -641,10 +857,53 @@ export function createGraphView(core, spec, positions, opts = {}) {
     update, setSelected, setHover, setHeat, getHeat, radiusOf,
     syncPositions, setPickScale,
     setNodeScale, setMinEdgeWidth, setTimeQuantize, setEdgeWidthScale, setEdgeRest, setEdgeOpacity,
+    setEdgeCalm, setReveal, revealOf, setSpotlight,
+    get spotlight() { return _spotlight ? [..._spotlight] : null; },   // probe seam (gate BP)
+    spotlightSize,
+    /* probe seam (gates BG-BJ): what is actually on screen right now. */
+    debugVisible: () => nodes.filter((n, i) => !_revealOn || reveal[i] > 0.5).map((n) => n.id),
+    /* probe seam (gate BD): the live aDim values — proves the calm-vs-pop delta reached the GPU rather
+       than "the screenshot looked quieter". */
+    debugEdgeDim: () => {
+      const arr = edgeGeo.getAttribute('aDim').array;
+      let min = Infinity, max = -Infinity, sum = 0;
+      for (let i = 0; i < arr.length; i++) { min = Math.min(min, arr[i]); max = Math.max(max, arr[i]); sum += arr[i]; }
+      return { min, max, mean: sum / arr.length, n: arr.length };
+    },
     setEdgeStyle, getEdgeStyle,
     kindColor: (kind) => _kindColor[kind] || KIND_UNTAGGED[_mode === 'print' ? 'print' : 'glow'],   // ACTIVE map (slice 12) — gate N's third witness must follow the mode
     setState,   // FACE-1 live seam (slice 13)
     setColorFloor: (v) => { _colorFloor = v; }, setHaloHueClamp: (v) => { _haloHueClamp = v; },
+    setPixelNodeStyle, recomputeHaloCaps,
+    /* setBadgeSize(px) — the material pip's on-screen half-size in DEVICE px; 0 hides it. The consumer
+       owns the number because only it knows its virtual-pixel size (pixel look) or its DPR (the rest). */
+    setBadgeSize: (px) => { coreMat.uniforms.uBadgePx.value = px; },
+    get badgeCount() { return badgeCount; },
+    badgedIds: () => nodes.filter((n) => hasMedia(n.media)).map((n) => n.id),
+    /* the legend's anti-drift read (slice 22 audit): the LIVE ops-state tints — the legend was naming
+       kinds and glyphs from the renderer's own constants but STILL hardcoding the state colors, which is
+       exactly the drift the seam exists to prevent. */
+    stateColors: () => {
+      const out = {};
+      for (const [k, v] of Object.entries(STATE_TINT)) out[k] = '#' + v[0].getHexString();
+      return out;
+    },
+    /* the legend's anti-drift read: the glyph a node ACTUALLY wears, and the counts per glyph. */
+    glyphOf: (id) => { const n = nodes.find((x) => x.id === id); return n ? mediaGlyph(n.media) : null; },
+    glyphCounts: () => {
+      const out = {};
+      for (const g of MEDIA_GLYPHS) out[g] = 0;
+      for (const n of nodes) { const g = mediaGlyph(n.media); if (g) out[g]++; }
+      return out;
+    },
+    BADGE_COLOR,   // the authored constant
+    /* activeBadgeColor() — the legend must read the color the RENDERER is currently painting, not the
+       dark-look constant: in studio the pip is ink, and a pale-blue legend line on paper is invisible
+       (found by LOOKING at the studio capture). Same anti-drift seam as activeKindColors. */
+    activeBadgeColor: () => (_mode === 'print' ? BADGE_COLOR_PRINT : BADGE_COLOR),
+    OUTLINE_HOT,   // the legend's anti-drift read: "gold ring = hot" must be THIS gold
+    debugHaloCap: (id) => { const i = idIndex.get(id); return i == null ? null : haloCap[i]; },
+    debugOutline: (id) => { const i = idIndex.get(id); return i == null ? null : [outlineCol[i * 3] * 255, outlineCol[i * 3 + 1] * 255, outlineCol[i * 3 + 2] * 255]; },
     /* setRenderMode (slice 12) — 'glow' | 'print'. THE TRAP this seam exists for: additive halos + bloom
        are INVISIBLE on a light background (additive toward white is a no-op), so STUDIO is a rendering-
        strategy swap, not a palette swap: halo becomes a NORMAL-blended ink drop-shadow (tighter falloff,
@@ -660,6 +919,9 @@ export function createGraphView(core, spec, positions, opts = {}) {
       haloMat.uniforms.uFalloff.value = print ? 10.0 : 5.5;
       haloMat.needsUpdate = true;
       coreMat.uniforms.uPrint.value = print ? 1 : 0;
+      // slice 19: pip as INK on paper (print's own transfer curve — no HDR lift there), HDR-lifted in glow.
+      coreMat.uniforms.uBadgeColor.value.set(print ? BADGE_COLOR_PRINT : BADGE_COLOR);
+      if (!print) coreMat.uniforms.uBadgeColor.value.multiplyScalar(2.4);
       edgeMat.blending = print ? THREE.NormalBlending : THREE.AdditiveBlending;
       edgeMat.needsUpdate = true;
       // Rebuild node base colors + edge gradient colors from the active palette, keeping the floor state.

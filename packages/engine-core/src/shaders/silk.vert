@@ -1,62 +1,66 @@
 /* ============================================================
-   silk.vert — Dusk Silk hero scene (K1).
+   silk.vert — Dusk Silk hero scene (K1) + Lesson SHADOWS (self-shadow receive).
    Vertex displacement for a flowing silk/wave surface.
    ------------------------------------------------------------
-   Three layered displacement fields produce an organic wave surface:
-     L1: long slow swells (primary fabric drape)
-     L2: medium diagonal ripples (crossing weave)
-     L3: smooth value-noise fine detail (silk texture)
+   The displacement now lives in the SHARED include silk-displace.glsl so the shadow-cast
+   depth pass (silk-depth.vert) displaces the wave IDENTICALLY — see that file's header.
 
-   Passes vDisplacement (raw y-offset) to the fragment shader for
-   the ink→gold→cream gradient. No lighting — color is entirely
-   displacement-driven.
+   SHADOW RECEIVE (Lesson SHADOWS): to sample the shadow map in the fragment shader, three
+   needs the per-light shadow COORDINATE computed here — the surface point projected into the
+   sun's shadow-camera clip space. Three's own chunks do exactly that, so we include them
+   rather than hand-roll the projection:
+     • <shadowmap_pars_vertex> declares 'directionalShadowMatrix[]' + the 'vDirectionalShadowCoord[]'
+       varying (guarded by USE_SHADOWMAP / NUM_DIR_LIGHT_SHADOWS, which three #defines when the
+       material has 'lights:true' and a shadow-casting DirectionalLight is in the scene).
+     • <shadowmap_vertex> fills that varying: 'vDirectionalShadowCoord[i] = directionalShadowMatrix[i] * worldPosition'.
+   The chunk reads two things we must provide: a 'worldPosition' (vec4) — computed from the DISPLACED
+   position, not the flat plane, or the shadow lookup uses the wrong point — and (because three DOES
+   define HAS_NORMAL here) a 'transformedNormal', used to offset the occlusion query along the world
+   normal by 'shadowNormalBias'. Our normalBias is 0 (set in createShadowRig), so that offset is a
+   no-op and the plane's up-normal is a fine stand-in; we lean on the ordinary depth 'bias' instead —
+   the acne↔peter-panning tradeoff the frag header teaches. ('normal' + 'normalMatrix' are auto-
+   injected by three, like 'position'.)
 
-   HOUSE CONVENTION (ShaderMaterial): Three auto-injects `position`, `uv`,
-   `projectionMatrix`, `modelViewMatrix`, and the default precision. Declaring
-   them here is a REDEFINITION compile error → black canvas. We declare ONLY
-   our own uniforms/varyings (see fullscreen.vert — the reference).
+   '#include <chunk>' (angle brackets) is left untouched by vite-plugin-glsl and resolved by
+   three at runtime; a QUOTED hash-include of a .glsl file is inlined at build. Both coexist.
+
+   HOUSE CONVENTION (ShaderMaterial): Three auto-injects position, uv, projectionMatrix,
+   modelViewMatrix, modelMatrix, and the default precision. Declaring them here is a
+   REDEFINITION compile error → black canvas. We declare ONLY our own uniforms/varyings.
    ============================================================ */
+#include <common>
+#include <shadowmap_pars_vertex>
+
 uniform float uTime;
 
 varying vec2 vUv;
 varying float vDisplacement;
 
-/* Smooth value noise — 2D hash + bilinear blend. */
-float hash2(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-float noise2(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  /* Quintic smoothstep for C2 continuity (smoother than cubic). */
-  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  return mix(
-    mix(hash2(i),               hash2(i + vec2(1.0, 0.0)), u.x),
-    mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x),
-    u.y
-  );
-}
+#include './silk-displace.glsl';
 
 void main() {
   vUv = uv;
-  float x = position.x;
-  float z = position.z;
-  float t = uTime;
 
-  /* L1 — long slow swells: primary fabric drape (λ ≈ 25 units, T ≈ 18s). */
-  float d1 = sin(x * 0.25 + t * 0.35) * cos(z * 0.18 + t * 0.26) * 1.8;
-
-  /* L2 — medium diagonal ripple (λ ≈ 8 units, T ≈ 11s, 45° bias). */
-  float d2 = sin((x * 0.55 + z * 0.40) + t * 0.57 + 1.2) * 0.9;
-
-  /* L3 — smooth noise detail (fine silk texture). */
-  float d3 = (noise2(vec2(x * 0.70 + t * 0.32, z * 0.70 + t * 0.24)) - 0.5) * 1.0;
-
-  float disp = d1 + d2 + d3;
+  /* The wave height — shared with the depth pass so the cast shadow matches the surface. */
+  float disp = silkDisplacement(position, uTime);
   vDisplacement = disp;
 
-  vec3 displaced = position;
-  displaced.y += disp;
+  /* 'transformed' is the displaced object-space position — the single point everything below
+     (clip position, world position for the shadow coord) is derived from. */
+  vec3 transformed = position;
+  transformed.y += disp;
 
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+  /* World position of the DISPLACED point — three's shadow chunk projects THIS into the sun's
+     shadow camera. Deriving it from the flat plane instead would make the shadow swim. */
+  vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
+
+  vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+
+  /* transformedNormal — required by <shadowmap_vertex> under HAS_NORMAL (which three defines for
+     this material). The plane's up-normal is a fine stand-in: normalBias is 0, so this only has to
+     exist, not be exact. 'normal'/'normalMatrix' are three-injected. */
+  vec3 transformedNormal = normalMatrix * normal;
+
+  #include <shadowmap_vertex>
 }

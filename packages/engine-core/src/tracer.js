@@ -12,7 +12,15 @@
 
    VOCAB (correction 1 — element-addressed, not sort-flavored):
      compare(i,j)      → reads arr, returns boolean (arr[i] < arr[j]), records op
+     compareValues(a,b,refs) → SLICE 21: compares two VALUES the algorithm is already holding, returns
+                       a < b, records a 'compare' op. Why it exists: a MERGE cannot be expressed with
+                       element-addressed compares — by the time it decides which of two runs wins, one
+                       run has been copied out of the array (that copy IS the algorithm). The branch
+                       still consumes the returned boolean, so structural faithfulness holds; `refs`
+                       carries the source indices for the painter.
      get(i)            → reads arr[i], records op
+     set(i,value)      → SLICE 21: WRITES arr[i] (merge sort places values; it does not swap them).
+                       Snapshots after the write, so every painter follows for free.
      swap(i,j)         → swaps arr[i]↔arr[j] in-place, records op
      mark(ref, state)  → generic element/node state label (BFS: 'frontier','visited','done')
      highlight(ref)    → single-element highlight
@@ -50,11 +58,28 @@ export function createTracer(initialArr) {
       return result;
     },
 
+    /* SLICE 21 — compare two VALUES (the merge case; see the vocab note above). Records a 'compare' op
+       like its element-addressed sibling, so the op COUNTER and every complexity curve keep working:
+       a comparison is a comparison no matter where the operands were being held. */
+    compareValues(a, b, refs = {}) {
+      const result = a < b;
+      _record({ type: 'compare', a, b, result, ...refs });
+      return result;
+    },
+
     // Read arr[i] (no array mutation) and record. Return value drives the algorithm.
     get(i) {
       const value = arr[i];
       _record({ type: 'get', i, value });
       return value;
+    },
+
+    /* SLICE 21 — WRITE a value into a slot. Merge sort PLACES elements (it does not exchange them), so
+       without this op the algorithm could not be expressed through the seam at all — and an algorithm
+       that has to go around the tracer is an algorithm whose trace can lie. */
+    set(i, value) {
+      arr[i] = value;
+      _record({ type: 'set', i, value });
     },
 
     // Swap arr[i] ↔ arr[j] in-place; snapshot AFTER the swap.
