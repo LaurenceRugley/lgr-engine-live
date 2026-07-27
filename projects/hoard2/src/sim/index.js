@@ -203,6 +203,8 @@ export function createSim(ctx) {
   const facade = {
     state,
     queryTargets: (seg) => pool.queryTargets(seg),
+    queryCone: (px, pz, dx, dz, cosHalf, range) => pool.queryCone(px, pz, dx, dz, cosHalf, range), // gun aim-assist
+
     trySpendStamina: (cost) => survival.trySpend(cost),
     damagePlayer: (amount, from) => applyPlayerDamage(amount, from || 'unknown'),
     probe: () => {

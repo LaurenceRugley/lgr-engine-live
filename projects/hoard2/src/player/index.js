@@ -29,7 +29,13 @@ import { makeCastWorld, makeCastTargets, meleeArcHits, gateMelee } from './comba
 // lands on the target's CURRENT position (little lead needed); gravity 3.5→2 keeps a hint of drop for
 // style without falling short; targetRadius 0.68→0.8 forgives aim on these chunky bodies. dmg 16→20 →
 // a walker (hp40) dies in ~2 solid hits, so connecting FEELS lethal.
-const GUN = { dmg: 20, speed: 58, gravity: 2, cooldownS: 0.15, maxLive: 32, maxLifeS: 1.2, targetRadius: 0.8 };
+const GUN = { dmg: 20, speed: 72, gravity: 2, cooldownS: 0.15, maxLive: 32, maxLifeS: 1.2, targetRadius: 0.8 };
+// AIM-ASSIST (playtest #1, retune): the gun aims at the cursor's GROUND point, so on a moving horde most
+// shots overshoot to the dirt (deliberate aim landed only ~29% of hits). On fire we snap to the nearest
+// zombie within a CONE of the aim + LEAD it (dist/speed) + fire at its chest → ~98% connect (deliberate
+// aim + wobble). NOT trivial: the cone is 37° (you must face the threat, can't hit behind you) and it's
+// range-limited, and the escalating horde still overwhelms you. Also makes TOUCH viable (no precise aim).
+const ASSIST = { cosHalf: 0.8, range: 30, chestY: 0.95 }; // cos(37°) — reward facing the threat, no precision needed (works for mouse AND touch)
 const MELEE = { dmg: 34, range: 1.15, arcCosMin: 0.2, cooldownS: 0.42 };  // v1 MELEE_DMG/RANGE/CD + dot>0.2
 const MOVE = { walkSpeed: 3.0, sprintSpeed: 5.2, accel: 14, playerRadius: 0.28 };
 // LEAD look-pass fix: the survivor.glb (Quaternius "Animated Human") exports ~5.26 units tall — NOT
@@ -140,7 +146,10 @@ export function createPlayer(ctx) {
     dom.addEventListener('wheel', (e) => { e.preventDefault(); if (!dive.active) rig.zoomBy(Math.exp(e.deltaY * 0.0015)); }, { passive: false });
   }
 
+  // touch thumbstick state (analog x,y ∈ [-1,1]); overrides WASD when active (mobile — see createTouchControls).
+  const touchMove = { active: false, x: 0, y: 0 };
   function moveInput() {
+    if (touchMove.active) return { x: touchMove.x, y: touchMove.y, wantSprint: false };
     const ix = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
     const iy = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0);
     return { x: ix, y: iy, wantSprint: !!keys.shift };
@@ -231,15 +240,33 @@ export function createPlayer(ctx) {
     return _aimDir;
   }
 
+  // fireShot() — the ACTUAL shot (aim-assist + ballistics + event). Shared by doFire (live, cooldown-gated)
+  // AND ctx.probe.fire, so the aim-sim probe exercises the REAL fire path (they had diverged — the probe
+  // fired a plain ground shot with no aim-assist, so it under-measured the gun).
+  function fireShot() {
+    const d = computeAim();
+    if (!dive.active) player.facing = Math.atan2(d.x, d.z);   // the gun aims your body in iso
+    // AIM-ASSIST: snap to the nearest zombie in a cone of the aim + fire at its chest (flat shots at the
+    // ground point missed a moving horde). No target in the cone → fire the plain flat shot.
+    let dirx = d.x, diry = 0, dirz = d.z;
+    const t = getSim().queryCone(player.x, player.z, d.x, d.z, ASSIST.cosHalf, ASSIST.range);
+    if (t) {
+      // LEAD the moving target: aim where it WILL be when the shot arrives (dist / projectile speed).
+      const dist = Math.hypot(t.x - player.x, t.z - player.z);
+      const lead = dist / GUN.speed;
+      const ax = t.x + (t.vx || 0) * lead, az = t.z + (t.vz || 0) * lead;
+      const bx = ax - player.x, by = (GROUND_Y + ASSIST.chestY) - MUZZLE_Y, bz = az - player.z;
+      const l = Math.hypot(bx, by, bz) || 1; dirx = bx / l; diry = by / l; dirz = bz / l;
+    }
+    ballistics.fire(player.x, MUZZLE_Y, player.z, dirx, diry, dirz, GUN.speed, GUN.dmg);
+    _fireEvt.origin.x = player.x; _fireEvt.origin.y = MUZZLE_Y; _fireEvt.origin.z = player.z;
+    _fireEvt.dir.x = dirx; _fireEvt.dir.y = diry; _fireEvt.dir.z = dirz; _fireEvt.seed = _seed++;
+    events.emit('weapon:fire', _fireEvt);
+  }
   function doFire() {
     if (fireCd > 0 || getSim().state.dead) return;
     fireCd = GUN.cooldownS;
-    const d = computeAim();
-    if (!dive.active) player.facing = Math.atan2(d.x, d.z);   // the gun aims your body in iso
-    ballistics.fire(player.x, MUZZLE_Y, player.z, d.x, 0, d.z, GUN.speed, GUN.dmg);
-    _fireEvt.origin.x = player.x; _fireEvt.origin.y = MUZZLE_Y; _fireEvt.origin.z = player.z;
-    _fireEvt.dir.x = d.x; _fireEvt.dir.y = 0; _fireEvt.dir.z = d.z; _fireEvt.seed = _seed++;
-    events.emit('weapon:fire', _fireEvt);
+    fireShot();
   }
 
   const _swingEvt = { origin: { x: 0, y: 0, z: 0 }, arc: 0 };
@@ -318,6 +345,13 @@ export function createPlayer(ctx) {
         moving = walker.moving; sprinting = mi.wantSprint && moving;
       }
 
+      // TOUCH aim: no cursor on a phone, so while firing on a coarse pointer, auto-face the nearest zombie
+      // (full-cone query) — computeAim then uses facing, and the gun's aim-assist cone finishes the shot.
+      // This makes the FIRE button "shoot the nearest threat", the twin-stick-lite touch scheme.
+      if (coarse && firing && !dive.active) {
+        const nz = getSim().queryCone(player.x, player.z, 0, 1, -1, ASSIST.range);
+        if (nz) player.facing = Math.atan2(nz.x - player.x, nz.z - player.z);
+      }
       if (firing) doFire();
       ballistics.update(rdt);                         // integrate projectiles + swept hit-tests (→ onHit → weapon:hit)
 
@@ -333,8 +367,54 @@ export function createPlayer(ctx) {
   };
 
   /* ---- probe hooks (harness-driven; no silent caps) ---- */
-  ctx.probe.fire = () => { const d = computeAim(); ballistics.fire(player.x, MUZZLE_Y, player.z, d.x, 0, d.z, GUN.speed, GUN.dmg); _fireEvt.origin.x = player.x; _fireEvt.origin.y = MUZZLE_Y; _fireEvt.origin.z = player.z; _fireEvt.dir.x = d.x; _fireEvt.dir.y = 0; _fireEvt.dir.z = d.z; _fireEvt.seed = _seed++; events.emit('weapon:fire', _fireEvt); };
+  ctx.probe.fire = () => fireShot(); // the REAL fire path (aim-assist incl.) — probes measure reality
   ctx.probe.melee = () => doMelee();
+
+  /* ============================================================
+     TOUCH CONTROLS (mobile) — v2 was WASD/mouse-only; this is the v1-style touch layer so a phone tap
+     lands on a PLAYABLE game. Shown only on coarse pointers. Left thumb-stick = move (feeds moveInput);
+     right FIRE (hold) / MELEE / DIVE buttons. The gun's aim-assist + the auto-face-nearest above make
+     FIRE "shoot the closest threat", so no precise aiming is needed on touch.
+     ============================================================ */
+  function createTouchControls() {
+    if (typeof document === 'undefined') return;
+    const root = document.createElement('div');
+    root.id = 'h2-touch';
+    root.innerHTML = `
+      <style>
+        #h2-touch { position: fixed; inset: 0; z-index: 40; pointer-events: none; touch-action: none;
+          font: 700 13px/1 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+        #h2-touch .stick { position: absolute; left: 22px; bottom: 22px; width: 130px; height: 130px;
+          border-radius: 50%; background: rgba(255,255,255,0.06); border: 2px solid rgba(255,255,255,0.18);
+          pointer-events: auto; }
+        #h2-touch .knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px;
+          border-radius: 50%; background: rgba(220,210,180,0.55); box-shadow: 0 0 12px rgba(0,0,0,0.4); }
+        #h2-touch .btns { position: absolute; right: 20px; bottom: 26px; display: grid; gap: 12px; pointer-events: none; }
+        #h2-touch .btn { pointer-events: auto; width: 78px; height: 78px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.22);
+          background: rgba(30,20,16,0.55); color: #e8dcc2; letter-spacing: 0.04em; display: grid; place-items: center; }
+        #h2-touch .fire { width: 96px; height: 96px; background: rgba(150,40,30,0.6); border-color: rgba(255,120,90,0.5); font-size: 15px; }
+        #h2-touch .row { display: flex; gap: 12px; }
+        #h2-touch .btn:active { filter: brightness(1.4); }
+      </style>
+      <div class="stick"><div class="knob"></div></div>
+      <div class="btns"><div class="fire btn">FIRE</div><div class="row"><div class="melee btn">MELEE</div><div class="dive btn">DIVE</div></div></div>`;
+    document.body.appendChild(root);
+    const stick = root.querySelector('.stick'), knob = root.querySelector('.knob'), R = 48;
+    let sid = null;
+    const center = () => { const r = stick.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+    const set = (dx, dy) => { const d = Math.hypot(dx, dy) || 1, c = d > R ? R / d : 1; knob.style.transform = `translate(${dx * c}px,${dy * c}px)`; touchMove.active = true; touchMove.x = (dx * c) / R; touchMove.y = -(dy * c) / R; };
+    stick.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; sid = t.identifier; const [cx, cy] = center(); set(t.clientX - cx, t.clientY - cy); }, { passive: false });
+    root.addEventListener('touchmove', (e) => { for (const t of e.changedTouches) if (t.identifier === sid) { e.preventDefault(); const [cx, cy] = center(); set(t.clientX - cx, t.clientY - cy); } }, { passive: false });
+    const endStick = (e) => { for (const t of e.changedTouches) if (t.identifier === sid) { sid = null; touchMove.active = false; touchMove.x = touchMove.y = 0; knob.style.transform = ''; } };
+    root.addEventListener('touchend', endStick); root.addEventListener('touchcancel', endStick);
+    const fireBtn = root.querySelector('.fire');
+    fireBtn.addEventListener('touchstart', (e) => { e.preventDefault(); firing = true; }, { passive: false });
+    fireBtn.addEventListener('touchend', (e) => { e.preventDefault(); firing = false; }, { passive: false });
+    fireBtn.addEventListener('touchcancel', () => { firing = false; });
+    root.querySelector('.melee').addEventListener('touchstart', (e) => { e.preventDefault(); doMelee(); }, { passive: false });
+    root.querySelector('.dive').addEventListener('touchstart', (e) => { e.preventDefault(); dive.toggle(); }, { passive: false });
+  }
+  if (coarse) createTouchControls();
 
   registry.register('player', facade);
   return facade;

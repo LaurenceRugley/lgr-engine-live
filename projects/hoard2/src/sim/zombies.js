@@ -180,8 +180,26 @@ export function createZombiePool(config, srng) {
   function reset() { for (let i = 0; i < MAXZ; i++) zs[i].alive = false; aliveCount = 0; }
   function forEach(cb) { for (let i = 0; i < MAXZ; i++) cb(i, zs[i]); }
 
+  // queryCone — the NEAREST live zombie within a cone (half-angle cosHalf) of the aim direction (dirx,dirz),
+  // out to `range`. The gun's AIM-ASSIST snaps to this so deliberate aim connects without full auto-aim
+  // (you must still face the threat; cone-limited). Returns the body-centre record or null. No allocation
+  // beyond the one result object.
+  function queryCone(px, pz, dirx, dirz, cosHalf, range) {
+    let best = null, bestD = Infinity;
+    const r2 = range * range;
+    for (let i = 0; i < MAXZ; i++) {
+      const z = zs[i]; if (!z.alive) continue;
+      const ex = z.x - px, ez = z.z - pz, d2 = ex * ex + ez * ez;
+      if (d2 > r2 || d2 < 1e-4) continue;
+      const dot = (ex * dirx + ez * dirz) / Math.sqrt(d2); // cos of the angle aim↔zombie
+      if (dot < cosHalf) continue;                          // outside the cone
+      if (d2 < bestD) { bestD = d2; best = z; }             // nearest in cone
+    }
+    return best ? { id: best.id, x: best.x, y: config.GROUND_Y + 0.9, z: best.z, vx: best.vx, vz: best.vz, type: best.type, hp: best.hp } : null;
+  }
+
   return {
-    spawn, step, damage, queryTargets, centroid, reset, forEach,
+    spawn, step, damage, queryTargets, queryCone, centroid, reset, forEach,
     get alive() { return aliveCount; }, get(i) { return zs[i]; }, get max() { return MAXZ; },
   };
 }
