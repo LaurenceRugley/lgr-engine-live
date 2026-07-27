@@ -41,6 +41,14 @@ const app = readAppFlags(window.location.search);
 const CAPTURE = app.capture;
 const seed = (app.q.get('seed') ? Number(app.q.get('seed')) : 0) || config.DEFAULT_SEED;
 window.__seed = seed;
+// iOS-BLACK DIAGNOSTICS (owner's real-iPhone field debug — the phone IS the debugger):
+//  ?debug=gl  → a screenshot-able DOM overlay of the GL stack (renderer, highp-fragment precision,
+//               extensions, context attrs, getError sweep, lights/env, canvas luminance).
+//  ?safe=1    → bypass the post pipeline (render straight to screen) AND force flat UNLIT bright
+//               materials, to bisect pipeline/lighting vs textures/precision. Renders → the former;
+//               still black → the latter (deeper iOS Metal-WebGL issue).
+const DEBUG_GL = app.q.get('debug') === 'gl';
+const SAFE = app.q.get('safe') === '1';
 
 /* ---------- engine boot (frozen pipeline; default city hidden by world) ---------- */
 const container = document.getElementById('app') || document.body;
@@ -140,6 +148,62 @@ scene.traverse((o) => {
   if (o.isSprite && o.position.y > 2 && o.position.y < 11) o.visible = false;
 });
 
+/* ---------- ?safe=1 — pipeline/materials bisect (render bare scene with flat unlit bright mats) ---------- */
+const _safeMat = new THREE.MeshBasicMaterial({ color: 0x66cc66, fog: false }); // unlit · no texture · bright
+const _safeSeen = new WeakSet();
+const _isLit = (m) => m && (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial || m.isMeshPhongMaterial || m.isMeshLambertMaterial);
+function safeRender() {
+  // Swap ONLY lit materials (the ones going black on iOS) → flat unlit bright. LEAVE the engine's
+  // ShaderMaterials (sky/water/celestials — they render fine on iOS, and updateWorld pokes their uTime;
+  // swapping them crashed with 'material.uniforms.uTime undefined'). GLBs get swapped as they appear.
+  scene.traverse((o) => {
+    if (!(o.isMesh || o.isSkinnedMesh) || _safeSeen.has(o)) return;
+    if (Array.isArray(o.material)) { if (o.material.some(_isLit)) { o.material = o.material.map((m) => (_isLit(m) ? _safeMat : m)); _safeSeen.add(o); } }
+    else if (_isLit(o.material)) { o.material = _safeMat; _safeSeen.add(o); }
+  });
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(0x203a55, 1); // a distinct blue clear so "did it even clear?" is obvious
+  renderer.clear(true, true, true);
+  renderer.render(scene, rig.camera);
+}
+
+/* ---------- ?debug=gl — screenshot-able GL-stack overlay ---------- */
+function buildGlDebug() {
+  const gl = renderer.getContext();
+  const de = gl.getExtension('WEBGL_debug_renderer_info');
+  const exts = gl.getSupportedExtensions() || [];
+  const ex = (n) => (exts.includes(n) ? '✓' : '✗');
+  const P = (sh, t) => { const f = gl.getShaderPrecisionFormat(sh, t); return f ? `p${f.precision} [${f.rangeMin},${f.rangeMax}]` : 'null'; };
+  const a = gl.getContextAttributes() || {};
+  const errs = []; for (let i = 0; i < 4; i++) { const e = gl.getError(); if (e) errs.push('0x' + e.toString(16)); }
+  const lines = [
+    `RENDERER ${de ? gl.getParameter(de.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}`,
+    `VENDOR   ${de ? gl.getParameter(de.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)}`,
+    `${gl.getParameter(gl.VERSION)} · WebGL2=${renderer.capabilities.isWebGL2}`,
+    `FRAG highp ${P(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)}  (p0 = NO highp → mediump underflow!)`,
+    `FRAG medp ${P(gl.FRAGMENT_SHADER, gl.MEDIUM_FLOAT)} · VERT highp ${P(gl.VERTEX_SHADER, gl.HIGH_FLOAT)}`,
+    `ext colorBufFloat ${ex('EXT_color_buffer_float')} · halfFloatLinear ${ex('OES_texture_half_float_linear')} · colorBufHalf ${ex('EXT_color_buffer_half_float')}`,
+    `ctx alpha=${a.alpha} depth=${a.depth} stencil=${a.stencil} aa=${a.antialias} preMult=${a.premultipliedAlpha} preserve=${a.preserveDrawingBuffer}`,
+    `getError@boot ${errs.length ? errs.join(',') : 'clean'} · outColorSpace ${renderer.outputColorSpace}`,
+  ];
+  const div = document.createElement('div');
+  div.id = 'h2-gldbg';
+  div.style.cssText = 'position:fixed;left:0;top:0;right:0;z-index:100;background:rgba(0,0,0,0.85);color:#3f6;font:11px/1.35 ui-monospace,monospace;padding:8px;white-space:pre-wrap;word-break:break-word;pointer-events:none;';
+  const live = document.createElement('div'); live.style.color = '#ffdd66';
+  div.textContent = lines.join('\n') + '\n';
+  div.appendChild(live);
+  document.body.appendChild(div);
+  const tick = () => {
+    let v = '?'; try { const c = renderer.domElement, w = 32, h = 32, oc = document.createElement('canvas'); oc.width = w; oc.height = h; const cx = oc.getContext('2d'); cx.drawImage(c, 0, 0, w, h); const d = cx.getImageData(0, 0, w, h).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += (d[i] + d[i + 1] + d[i + 2]) / 3; v = (s / (w * h)).toFixed(1); } catch (e) { v = 'err ' + e.message; }
+    let L = 0, hemi = 0, dirl = 0, pt = 0, amb = 0; scene.traverse((o) => { if (o.isLight) { L++; if (o.isHemisphereLight) hemi++; else if (o.isDirectionalLight) dirl++; else if (o.isPointLight) pt++; else if (o.isAmbientLight) amb++; } });
+    const ge = gl.getError();
+    live.textContent = `LIVE: lum ${v}/255 · lights ${L}(H${hemi} D${dirl} P${pt} A${amb}) · env ${scene.environment ? 'SET' : 'null'} · tone ${renderer.toneMapping}/${(+renderer.toneMappingExposure).toFixed(2)} · err ${ge ? '0x' + ge.toString(16) : 'clean'}${SAFE ? ' · SAFE(flat+nopost)' : ''}`;
+  };
+  setInterval(tick, 500); tick();
+  window.__gldbg = () => lines.join(' | ');
+}
+if (DEBUG_GL) buildGlDebug();
+
 /* ---------- pause + dive are core-executed (owners emit, core acts) ---------- */
 events.on('game:pause', () => time.setPaused(true));
 events.on('game:resume', () => time.setPaused(false));
@@ -163,7 +227,8 @@ function gameStep(dt, t) {
 
   engine.updateWorld(dt, t, { shadowsOn: true, seasonTarget: 0 }); // day/night, ambient, shadows
   curStyle = engine.decideStyle();
-  dive.present(dt); // the single present
+  if (SAFE) safeRender();   // ?safe=1 — bare scene, flat unlit mats, no post (iOS-black bisect)
+  else dive.present(dt);    // the single present
 }
 
 /* ---------- readiness (drop the boot cover once the world is dressed) ---------- */
