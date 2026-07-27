@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>LGR WebGL Engine — live demos</title>
+  <meta name="description" content="Live demos of the LGR WebGL engine — the open city, the Hoard survival game, the dive tech demo, and the office scene.">
+  <link rel="icon" href="data:,">
+  <!-- The public CAPABILITY HUB. Static (no build) — the lgr-engine-live workflow copies this to the site
+       root; each card deep-links a built demo under a stable path (/live/, /hoard/, /office/). Source lives
+       in lgr-webgl-lab/projects/live-hub/ (versioned + leak-checked). Mobile-first — the owner tests on a phone. -->
+  <style>
+    :root {
+      --bg: #0b0e0c; --bg2: #12161230; --ink: #eaf0e2; --muted: #9aa891; --line: #ffffff1a;
+      --accent: #8fd94a; --accent2: #4aa3d9; --accent3: #d98f4a; --accent4: #b06ad9;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      background: radial-gradient(1200px 700px at 50% -10%, #17241a 0%, var(--bg) 55%) no-repeat, var(--bg);
+      color: var(--ink); font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      min-height: 100dvh; padding: clamp(1.2rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 3rem;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: clamp(1.5rem, 5vw, 2.8rem); }
+    .kicker { color: var(--accent); font: 600 0.72rem/1 ui-monospace, monospace; letter-spacing: 0.22em; text-transform: uppercase; }
+    h1 { font-size: clamp(1.7rem, 6vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; margin: 0.5rem 0 0.4rem; }
+    .sub { color: var(--muted); max-width: 40ch; margin: 0 auto; font-size: clamp(0.9rem, 2.5vw, 1rem); }
+    .grid { display: grid; grid-template-columns: 1fr; gap: clamp(0.9rem, 2.5vw, 1.3rem); }
+    @media (min-width: 720px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card {
+      position: relative; display: flex; flex-direction: column; gap: 0.7rem;
+      background: linear-gradient(180deg, #ffffff0a, #ffffff03); border: 1px solid var(--line);
+      border-radius: 16px; padding: clamp(1.1rem, 3.5vw, 1.5rem); overflow: hidden;
+    }
+    .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--edge, var(--accent)); opacity: 0.9; }
+    .card h2 { font-size: 1.2rem; font-weight: 750; letter-spacing: -0.01em; }
+    .tag { color: var(--edge, var(--accent)); font: 600 0.68rem/1 ui-monospace, monospace; letter-spacing: 0.12em; text-transform: uppercase; }
+    .card p { color: var(--muted); font-size: 0.92rem; }
+    .card .controls { color: var(--ink); font-size: 0.84rem; opacity: 0.82; }
+    .card .controls b { color: var(--edge, var(--accent)); font-weight: 700; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: auto; padding-top: 0.4rem; }
+    a.btn {
+      display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none;
+      font: 650 0.9rem/1 ui-sans-serif, system-ui, sans-serif; padding: 0.62rem 0.95rem; border-radius: 10px;
+      background: var(--edge, var(--accent)); color: #08120a; border: 1px solid transparent; transition: transform 0.08s ease, filter 0.12s ease;
+    }
+    a.btn:hover { filter: brightness(1.08); }
+    a.btn:active { transform: translateY(1px); }
+    a.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+    a.btn.ghost:hover { border-color: var(--edge, var(--accent)); color: var(--edge, var(--accent)); }
+    footer { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 2.4rem; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="kicker">LGR WebGL Engine</div>
+      <h1>Live demos &amp; capabilities</h1>
+      <p class="sub">Every public demo of the engine in one place — tap a card and try it. Best on a real GPU; works on phones.</p>
+    </header>
+
+    <div class="grid">
+      <!-- CITY — the engine showcase -->
+      <section class="card" style="--edge: var(--accent2)">
+        <span class="tag">Engine showcase</span>
+        <h2>The Open City</h2>
+        <p>A living procedural city: fly a craft over it, sweep day↔night, roll weather &amp; seasons, switch style tiers (beauty / toon / pixel / vector), and apply colour-grade looks. Dive into an office interior, or flip on survival mode in-city.</p>
+        <div class="controls"><b>Controls:</b> drag / two-finger to orbit · scroll / pinch to zoom · use the on-screen control bar for day-night, weather, tiers &amp; looks.</div>
+        <div class="actions">
+          <a class="btn" href="live/">Open the city →</a>
+          <a class="btn ghost" href="live/?hoard=1">Survival mode (in-city)</a>
+        </div>
+      </section>
+
+      <!-- HOARD — the survival game -->
+      <section class="card" style="--edge: var(--accent)">
+        <span class="tag">Survival game</span>
+        <h2>The Hoard</h2>
+        <p>A top-down wave-survival game showcasing the arena stack: flow-field horde AI, projectile ballistics, GPU particle FX, blood &amp; scorch decals, and a rigged zombie horde. Press <b>F</b> to DIVE into first person and <b>walk</b> the forest arena in the thick of the horde.</p>
+        <div class="controls"><b>Controls:</b> WASD / left stick move · mouse / drag aim · hold click / FIRE to shoot · <b>F</b> = dive to first-person (then WASD walk + mouse-look) · <b>I</b> = bag &amp; crafting.</div>
+        <div class="actions">
+          <a class="btn" href="hoard/">Play the Hoard →</a>
+          <a class="btn ghost" href="hoard/?map=forest">Forest arena (rigged horde)</a>
+        </div>
+      </section>
+
+      <!-- CAVERN — dive tech demo -->
+      <section class="card" style="--edge: var(--accent3)">
+        <span class="tag">Tech demo</span>
+        <h2>Cavern Dive</h2>
+        <p>The iso→first-person "dive" seam as a focused tech demo: drop from a top-down view straight into the survivor's eyes inside a treasure cavern, with time dilation on the descent.</p>
+        <div class="controls"><b>Controls:</b> follow the on-screen prompt to dive · drag to look around in first person.</div>
+        <div class="actions">
+          <a class="btn" href="hoard/cavern.html">Open the cavern →</a>
+        </div>
+      </section>
+
+      <!-- OFFICE — standalone -->
+      <section class="card" style="--edge: var(--accent4)">
+        <span class="tag">Scene</span>
+        <h2>The Office</h2>
+        <p>The standalone office interior — the scene the city's office-dive lands in, on its own: glass-city view through the windows, props, and the seated look-around.</p>
+        <div class="controls"><b>Controls:</b> drag to look around.</div>
+        <div class="actions">
+          <a class="btn" href="office/">Open the office →</a>
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      Built with the first-party LGR WebGL engine (Vite · Three.js · GLSL). ·
+      <a href="live/">city</a> · <a href="hoard/">hoard</a> · <a href="hoard/cavern.html">cavern</a> · <a href="office/">office</a>
+    </footer>
+  </div>
+</body>
+</html>
