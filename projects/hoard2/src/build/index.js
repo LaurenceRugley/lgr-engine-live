@@ -41,9 +41,12 @@ export function createBuild(ctx) {
   const meshes = new Map(); // barrier id -> THREE.Mesh
   let barrierGeo = null, barrierMat = null;
   if (THREE && scene) {
-    // One shared geometry/material; per-barrier meshes are scaled/posed. Stylized decay-wood look.
+    // One shared geometry/material; per-barrier meshes are scaled/posed. FORGE wood-plank material
+    // (Beauty B1) when the world baked it (ctx.surfaces.wood); flat decay-wood fallback otherwise
+    // (node tests / iOS-p0). Engine-first: the barrier just WIRES a core-baked material.
     barrierGeo = new THREE.BoxGeometry(1, 1, 1);
-    barrierMat = new THREE.MeshStandardMaterial({ color: 0x7a5a36, roughness: 0.92, metalness: 0.0, flatShading: true });
+    barrierMat = (ctx.surfaces && ctx.surfaces.wood)
+      || new THREE.MeshStandardMaterial({ color: 0x7a5a36, roughness: 0.92, metalness: 0.0, flatShading: true });
   }
   function spawnMesh(b) {
     if (!barrierGeo) return;

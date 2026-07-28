@@ -208,6 +208,12 @@ export { createDiveController } from './src/createDiveController.js';
 // colliders). Sibling of scatter.js (terrain scatter); this is the flat-arena, gameplay-collider forest.
 export { createForest, placeForest } from './src/createForest.js';
 
+// Beauty B1 GROUND TRUTH — the GPU TEXTURE FORGE: seeded procedural PBR (albedo/ORM/Sobel-normal) baked
+// at boot from periodic-noise family shaders, so a world stops being flat-coloured. Recipes live in
+// forge-recipes.js; a project wires the materials. supported=false on iOS-p0 (bake skipped, flat fallback).
+export { createTextureForge, nyquistFeatureFloor, repeatFor, FORGE_MIN_TEXELS } from './src/createTextureForge.js';
+export { HOARD_SURFACES, forgeHoardMaterials } from './src/forge-recipes.js';
+
 // Lesson M3 — flow-field horde pathing: one grid solve steers a whole crowd around obstacles (a moving
 // target, tree colliders + barriers), each agent paying a single array lookup per step. Pure math (no
 // THREE) + an optional spatial-hash separation helper. The Hoard swaps its straight-line seek for this.

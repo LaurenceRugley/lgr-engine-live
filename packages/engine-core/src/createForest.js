@@ -32,16 +32,19 @@ function bakeColor(geo, hex) {
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return geo;
 }
-/* concat a few non-indexed (position+normal+color) geometries into one — a tiny local merge (the engine
-   doesn't pull in BufferGeometryUtils). Each input must already be non-indexed + colour-baked. */
+/* concat a few non-indexed (position+normal+color+uv) geometries into one — a tiny local merge (the
+   engine doesn't pull in BufferGeometryUtils). Each input must already be non-indexed + colour-baked.
+   UV is carried through additively (Beauty B1): the default vertex-colour material ignores it, so v1
+   stays byte-identical, but a forge BARK material (map/normalMap) can now tile up the trunk. */
 function mergeParts(geos) {
   let n = 0; for (const g of geos) n += g.attributes.position.count;
-  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), uv = new Float32Array(n * 2);
   let o = 0;
   for (const g of geos) {
     pos.set(g.attributes.position.array, o * 3);
     nor.set(g.attributes.normal.array, o * 3);
     col.set(g.attributes.color.array, o * 3);
+    if (g.attributes.uv) uv.set(g.attributes.uv.array, o * 2);   // primitive geos carry uv; keep it
     o += g.attributes.position.count;
     g.dispose();
   }
@@ -49,6 +52,7 @@ function mergeParts(geos) {
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   return out;
 }
 function makeConifer() {   // a pine: short trunk + two stacked cones (origin at base, y=0 = ground)
@@ -109,14 +113,19 @@ export function placeForest({
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _yA = new THREE.Vector3(0, 1, 0), _c = new THREE.Color();
 export function createForest(opts = {}) {
   const { placements, colliders, count } = placeForest(opts);
+  // Beauty B1: an optional per-archetype material override (e.g. a forge BARK material for 'bare'
+  // trunks). When absent the archetype keeps its flat-shaded vertex-colour material (v1 look). A
+  // supplied material should keep vertexColors:true so the per-instance tint still modulates it.
+  const materials = opts.materials || {};
   const group = new THREE.Group();
   group.raycast = () => {};
-  const geos = {};
+  const geos = {}, ownedMats = [];
   for (const key of Object.keys(placements)) {
     const list = placements[key];
     const geo = (ARCHETYPE_GEO[key] || ARCHETYPE_GEO.conifer)();
     geos[key] = geo;
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0.0, flatShading: true });
+    let mat = materials[key];
+    if (!mat) { mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0.0, flatShading: true }); ownedMats.push(mat); }
     const inst = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length));
     inst.count = list.length;
     inst.castShadow = true; inst.receiveShadow = false; inst.frustumCulled = true; inst.raycast = () => {};
@@ -133,6 +142,7 @@ export function createForest(opts = {}) {
   }
   return {
     group, colliders, placements, count,
-    dispose() { for (const k in geos) geos[k].dispose(); group.traverse((o) => { if (o.isInstancedMesh) o.material.dispose(); }); },
+    // dispose forest-OWNED materials only; a caller-supplied material (forge bark) is the caller's to free.
+    dispose() { for (const k in geos) geos[k].dispose(); for (const m of ownedMats) m.dispose(); },
   };
 }

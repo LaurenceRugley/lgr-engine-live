@@ -31,13 +31,14 @@
 import {
   createCity, createForest, createTorchLight,
   generateTerrain, buildTerrainMesh,
+  createTextureForge, forgeHoardMaterials,
 } from '@lgr/engine-core';
 import { buildDecrepitProfile } from './profile.js';
 import { phaseAt, resolveNight, phaseForNight, nightFactorAt } from './daynight.js';
 import { scatterRuins, deriveHarvest } from './scatter.js';
 
 export function createWorld(ctx) {
-  const { THREE, engine, scene, sunRig, config, events, registry, rng, CAM } = ctx;
+  const { THREE, engine, scene, sunRig, config, events, registry, rng, CAM, renderer } = ctx;
   const { GROUND_Y, PLAY_RADIUS, ARENA_EXTENT, SUN, DAY_LENGTH_S } = config;
   const seed = (rng && rng.masterSeed) != null ? rng.masterSeed : config.DEFAULT_SEED;
 
@@ -46,12 +47,33 @@ export function createWorld(ctx) {
   engine.setUrbanVisible?.(false);
   engine.setPostMode?.(2);
 
+  /* ---- TEXTURE FORGE (Beauty B1 GROUND TRUTH): bake seeded procedural PBR (albedo/ORM/Sobel-normal)
+     for every hoard surface at boot, so the decrepit world stops being flat-coloured. Engine-first —
+     the forge + recipes live in core; hoard2 only WIRES the baked materials onto its meshes.
+     forge.supported === false on iOS-p0 (no highp fragment) → every material is the recipe's FLAT
+     fallback colour == today's LOWP look (owner-verified), so the phone never regresses (the LOWP
+     Lambert path keeps its maps=null flats). Baked once here at construction → no mid-play compiles. ---- */
+  // ?forge=0 forces the flat fallback (the before/after A/B toggle for the critic panel + debugging).
+  const forgeOff = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('forge') === '0');
+  const forge = createTextureForge({ renderer, enabled: !forgeOff });
+  const groundExtent = (ARENA_EXTENT + 6) * 2;   // ground disc diameter (m) the 4 m tile repeats across
+  const surfaces = forgeHoardMaterials(forge, {
+    extents: { ground: groundExtent, stone: 3.0, bark: 2.4, wood: 1.2, scrap: 1.0 },
+    // CRITIC R1 FIX (bark read as BLACK VOIDS): the forest bakes a DARK per-vertex archetype colour
+    // (trunk hex) into the geometry; with vertexColors:true it multiplied the already-dark bark map to
+    // near-black. Force vertexColors:FALSE so only the bark MAP shows — the per-instance tint
+    // (instanceColor) still modulates it (three applies instanceColor independent of vertexColors).
+    matOpts: { bark: { vertexColors: false } },
+  });
+  ctx.forge = forge;          // read-only engine capability (like engine/renderer)
+  ctx.surfaces = surfaces;    // build reads ctx.surfaces.wood / .scrap for its barriers
+
   /* ---- flat arena ground (opaque disc; covers the terrain rim's centre → play area reads FLAT) ---- */
-  // Mid grey-brown decrepit dirt: dark enough for gloom, light enough to READ under the low decay sun
-  // (0x3b3a30 crushed to black — the survivor's pale material read but the ground didn't).
+  // FORGE: decrepit forest floor (dead-leaf litter over trodden dirt), tiled ~groundExtent/4 across the
+  // disc. Fallback flat colour 0x5f5a4a (recipe) on iOS-p0. receiveShadow on so the sun grounds actors.
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(ARENA_EXTENT + 6, 64).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: 0x5f5a4a, roughness: 1, metalness: 0 }),
+    surfaces.ground,
   );
   ground.position.y = GROUND_Y; ground.receiveShadow = true;
   scene.add(ground);
@@ -115,8 +137,10 @@ export function createWorld(ctx) {
     const city = createCity({ profile: buildDecrepitProfile(0.7), seed });
     if (city.key) city.group.remove(city.key);
     if (city.fill) city.group.remove(city.fill);
-    const decrepitMat = new THREE.MeshStandardMaterial({ color: 0x36322c, roughness: 1, metalness: 0, flatShading: true });
-    city.group.traverse((o) => { if (o.isMesh) { o.material = decrepitMat; o.castShadow = true; o.receiveShadow = true; } });
+    // FORGE stone (ruin concrete/plaster) — a PLAIN MeshStandardMaterial (no engine reflection patch),
+    // so the beauty reflection pass renders these distant ruins harmlessly (the crash-fix constraint
+    // that required re-materialing off the engine patch still holds; we just swap flat grey → real stone).
+    city.group.traverse((o) => { if (o.isMesh) { o.material = surfaces.stone; o.castShadow = true; o.receiveShadow = true; } });
     // shove the compact (~15u) city out to a corner past the play radius → a distant ruined quarter.
     city.group.position.set(-(PLAY_RADIUS + 6), 0, -(PLAY_RADIUS + 2));
     city.group.scale.setScalar(1.25);
@@ -129,23 +153,24 @@ export function createWorld(ctx) {
     clearings: [{ x: 0, z: 0, r: 6 }],
     archetypes: [{ key: 'bare', weight: 0.72, r: 0.34 }, { key: 'rock', weight: 0.28, r: 0.3 }],
     groundY: GROUND_Y,
+    materials: { bare: surfaces.bark },   // FORGE bark on the dead trunks/branches (rocks keep vertex-colour)
   });
   scene.add(forest.group);
 
   /* ---- INTERACTIVE RUINS: sparse primitive rubble in the play ring (seeded via the WORLD fork) ---- */
   const worldRng = rng.fork('world');
   const ruins = scatterRuins({ rng: worldRng, count: 14, innerR: 8, outerR: PLAY_RADIUS - 2, minSpacing: 3.2 });
-  const ruinMat = new THREE.MeshStandardMaterial({ color: 0x4a453d, roughness: 1, metalness: 0, flatShading: true });
   const ruinGroup = new THREE.Group(); ruinGroup.raycast = () => {};
   for (const rn of ruins) {
-    // a crude broken mass: a low box + a leaning slab. Primitive by design (degraded-tier representation).
+    // a crude broken mass: a low STONE box + a leaning SCRAP-metal slab (salvage). The scrap slab makes
+    // the scrap surface a real second consumer, and matches the fiction (ruins yield scrap to harvest).
     const h = rn.kind === 'husk' ? 2.2 : rn.kind === 'wall' ? 1.4 : 0.6;
-    const box = new THREE.Mesh(new THREE.BoxGeometry(rn.r * 1.8, h, rn.r * 1.6), ruinMat);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(rn.r * 1.8, h, rn.r * 1.6), surfaces.stone);
     box.position.set(rn.x, GROUND_Y + h / 2, rn.z);
     box.rotation.y = rn.yaw; box.castShadow = true; box.receiveShadow = true;
     ruinGroup.add(box);
     if (rn.kind !== 'rubble') {
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(rn.r * 1.4, h * 0.9, 0.18), ruinMat);
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(rn.r * 1.4, h * 0.9, 0.18), surfaces.scrap);
       slab.position.set(rn.x, GROUND_Y + h * 0.45, rn.z + rn.r * 0.7);
       slab.rotation.set(0.22, rn.yaw, 0.12); slab.castShadow = true;
       ruinGroup.add(slab);
