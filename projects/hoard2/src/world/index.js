@@ -129,15 +129,24 @@ export function createWorld(ctx) {
   // don't regress the owner's phone). (C++ anchor: _mobileFloor is a compile-time branch on device class.)
   const _coarse = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   const _mobileFloor = _coarse || (typeof window !== 'undefined' && !!window.__lowp);
-  const _fillBase = _mobileFloor ? 3.2 : 1.0;   // daytime sky-fill (hemisphere)
-  // B2 finding #6 — NIGHT LEGIBILITY: raise the desktop night flat-floor (1.3 → 2.2) so the whole arena is
-  // dimly READABLE at night (you can see shapes/zombies approaching), not blind. Safe: this floor is ×nf
-  // (0 by day, so the sun stays unflattened) and at night there is no sun to flatten (LIGHT-THE-HOARD).
-  const _ambBase  = _mobileFloor ? 1.6 : 2.2;   // NIGHT-only flat floor (see update(): × nightFactor)
+  // LOOK-TUNE (owner playtest): DAY too dark — modest desktop day-fill lift (1.0 → 1.55). Still the
+  // directional-ish hemisphere (sky-over-ground), NOT a flat fill, so the sun keeps shaping + casting.
+  const _fillBase = _mobileFloor ? 3.2 : 1.55;   // daytime sky-fill (hemisphere)
+  // B2 finding #6 — NIGHT LEGIBILITY: the desktop night flat-floor. LOOK-TUNE nudges it 2.2 → 2.5 (a touch)
+  // so zombies read at combat range; the MOON key (below) does the directional read. ×nf → 0 by day.
+  const _ambBase  = _mobileFloor ? 1.6 : 2.5;   // NIGHT-only flat floor (see update(): × nightFactor)
   const fill = new THREE.HemisphereLight(0x9aa7b0, 0x4a4436, _fillBase);
   scene.add(fill);
   const amb = new THREE.AmbientLight(0x9a9482, 0); // intensity driven per-frame to _ambBase × nightFactor
   scene.add(amb);
+  // LOOK-TUNE — a real MOON KEY at night (owner: "some moonlight so zombies are seen"). A COOL directional
+  // (not warm daylight) that ramps in with nightFactor and rakes the arena from a high side angle, giving
+  // zombies a lit silhouette-edge at combat range — SEEN but scary, the dread stays (the lantern remains the
+  // warm anchor). No shadow map (the sun owns shadows; a 2nd caster is costly). Intensity driven in update().
+  const moon = new THREE.DirectionalLight(0x7f95c4, 0);   // cool moonlight; intensity = _moonBase × nightFactor
+  moon.position.set(-14, 20, 10); moon.target.position.set(0, 0, 0);
+  scene.add(moon); scene.add(moon.target);
+  const _moonBase = _mobileFloor ? 0.6 : 1.1;   // enough to rake an APPROACHING zombie's silhouette at mid-range
 
   // FOG is ENGINE-OWNED: updateWorld writes scene.fog.density (from weather) + scene.fog.color (from the
   // sun horizon) EVERY frame (createCityWorld:958-960). The one-shot's project-local fog writes ran
@@ -197,6 +206,9 @@ export function createWorld(ctx) {
     ],
     groundY: GROUND_Y,
     materials: { bare: surfaces.bark, conifer: surfaces.barkLive },
+    // LOOK-TUNE (owner): trees run ~1.5–2× the TANK zombie (tank ≈ 1.28 u tall). Y-only 1.8× → bare ≈ 2.0 u,
+    // conifer ≈ 2.4 u (rocks exempt); colliders (horizontal, from placeForest) stay correct with no change.
+    heightScale: 1.8,
   });
   scene.add(forest.group);
 
@@ -319,6 +331,9 @@ export function createWorld(ctx) {
       // tonemap that crushes the arena to black — the phone needs the daytime lift (owner-verified, kept).
       // Night is still HARDER via the sim (speed×1.4, count×1.5); this is legibility, not a mood-killer.
       amb.intensity = _ambBase * (_mobileFloor ? (0.55 + 0.45 * _nf) : _nf);
+      // LOOK-TUNE: the cool moon key ramps in with night (0 by day → _moonBase at deep night) so zombies get
+      // a directional read at combat range without daylighting the arena (modest + cool; the mood holds).
+      moon.intensity = _moonBase * _nf;
 
       // torches gutter every frame; near-OFF by day (0.04) so they don't warm-wash the daylight arena,
       // rising to full at deep night — that's when the torch pools become the legibility (dark-but-playable).

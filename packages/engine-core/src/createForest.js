@@ -113,6 +113,10 @@ export function placeForest({
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _yA = new THREE.Vector3(0, 1, 0), _c = new THREE.Color();
 export function createForest(opts = {}) {
   const { placements, colliders, count } = placeForest(opts);
+  // LOOK-TUNE: heightScale grows trees TALLER (Y-only) without widening the trunk — so the horizontal
+  // COLLIDER (from placeForest, x/z-based) stays correct with no change. Rocks are exempt (a stretched
+  // boulder looks wrong). Default 1 → v1 forest byte-identical.
+  const heightScale = opts.heightScale != null ? opts.heightScale : 1;
   // Beauty B1: an optional per-archetype material override (e.g. a forge BARK material for 'bare'
   // trunks). When absent the archetype keeps its flat-shaded vertex-colour material (v1 look). A
   // supplied material should keep vertexColors:true so the per-instance tint still modulates it.
@@ -130,9 +134,10 @@ export function createForest(opts = {}) {
     inst.count = list.length;
     inst.castShadow = true; inst.receiveShadow = false; inst.frustumCulled = true; inst.raycast = () => {};
     inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, list.length) * 3), 3);
+    const hs = key === 'rock' ? 1 : heightScale;   // trees grow taller; boulders stay proportioned
     for (let k = 0; k < list.length; k++) {
       const pl = list[k];
-      _p.set(pl.x, pl.y, pl.z); _q.setFromAxisAngle(_yA, pl.r); _s.setScalar(pl.s);
+      _p.set(pl.x, pl.y, pl.z); _q.setFromAxisAngle(_yA, pl.r); _s.set(pl.s, pl.s * hs, pl.s);
       inst.setMatrixAt(k, _m.compose(_p, _q, _s));
       inst.setColorAt(k, _c.setScalar(pl.t));
     }
