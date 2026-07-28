@@ -17,16 +17,20 @@
        + scrap harvest nodes). Seeded ONLY via rng.fork('world') → never perturbs the sim trace.
      • generateTerrain + buildTerrainMesh — a hill rim BACKDROP for a bowl silhouette (play area FLAT,
        covered by the opaque ground disc; the rim only shows past the arena).
-     • createCelestials (sun+moon+stars+constellations) · createWeatherRig (fog-only, cheap) ·
-       createCloudField · createTorchLight ×N — the night atmosphere (dark-but-legible).
+     • the SUN / SKY / CELESTIALS (sun+moon+stars+constellations) / CLOUDS / WEATHER / FOG are all
+       INHERITED from the engine (createCityWorld builds + drives them in updateWorld; setUrbanVisible
+       keeps the sky) — hoard2 only sets the day/night PHASE via sunRig.goTo. LIGHT-THE-HOARD removed the
+       one-shot's project-local duplicates.
+     • createTorchLight ×N + a survivor lantern — the only project-local lights: warm point pools for
+       night legibility (dark-but-playable), like the city's street-lights. Plus a mobile-only fill floor.
 
    Determinism: all seeded rolls come from the master seed (createForest/createCity) or rng.fork('world')
    (ruins) — NEVER Math.random (weather-rig's internal cosmetic Math.random is engine-owned + un-probed).
    No per-frame allocation in update() (scratch hoisted; the daynight payload is reused).
    ============================================================ */
 import {
-  createCity, createForest, createCelestials, createTorchLight,
-  createWeatherRig, createCloudField, generateTerrain, buildTerrainMesh,
+  createCity, createForest, createTorchLight,
+  generateTerrain, buildTerrainMesh,
 } from '@lgr/engine-core';
 import { buildDecrepitProfile } from './profile.js';
 import { phaseAt, resolveNight, phaseForNight, nightFactorAt } from './daynight.js';
@@ -52,25 +56,36 @@ export function createWorld(ctx) {
   ground.position.y = GROUND_Y; ground.receiveShadow = true;
   scene.add(ground);
 
-  // LEAD look-pass FILL: a low hemisphere fill so the decrepit arena reads instead of crushing to black.
-  // The engine's own hemi (~0.65) + the low decay sun weren't enough to lift the dark ground/trees; this
-  // is a game-layer lift (hoard2 is its own project — no byte-identical tier constraint). Cool sky over a
-  // dead-earth ground, kept modest so night still goes dark (it's scaled down by nightFactor in update).
-  // WEBKIT/iOS FIX (owner phone playtest — iso "completely dark"): the beauty tonemap crushed the arena
-  // to ~16/255 mean, invisible on-device. Boosted the fill + a flat ambient so the arena reads on any
-  // GPU; even MORE on COARSE (touch) pointers, where the device tonemap runs darkest. Night still darkens
-  // (both are scaled by nightFactor in update). Desktop keeps mood; mobile gets legibility.
+  // LIGHT-THE-HOARD (2026-07-27): the engine's SunRig already drives a DIRECTIONAL sun key (city.key) +
+  // a hemisphere fill (city.fill) every frame via updateWorld — hoard2 INHERITS the real sun stack. The
+  // one-shot had stacked a big project-local HemisphereLight (2.0) + a full-strength AmbientLight (0.8)
+  // that ran MAX BY DAY — a flat wash competing head-on with the sun (ratio ~1.2:1), so the directional
+  // shaping + cast shadows vanished into an even floor ("the sun isn't acting like a sun").
+  // FIX — two moves that keep the sun dominant by day yet the arena playable at night:
+  //  (1) DAY: only a MODEST hemisphere sky-fill (skylight, directional-ish — it does NOT flatten like a
+  //      pure AmbientLight). Engine hemi (~0.46) + this (~1.0) vs the sun (~3.9) ≈ a 2.7:1 key ratio, so
+  //      shadows + lit/shadow sides read while the decrepit arena still legible. Fades toward night.
+  //  (2) NIGHT: the flat AmbientLight is now NIGHT-ONLY (×nightFactor) — 0 by day so it never flattens the
+  //      sun, rising past dusk to a dim floor so the arena CENTRE isn't pitch black (the perimeter torch
+  //      ring at r≈23 can't reach the middle; that floor was the one-shot's real job). At night there is
+  //      no sun to flatten, so a flat floor is the right tool.
+  // The mobile PRECISION-SAFE path (coarse pointer OR iOS-p0 LOWP, owner-verified) renders DIRECT (Lambert,
+  // no beauty tonemap) and gets a STRONGER floor so the phone never goes dark (brief: keep the mobile path,
+  // don't regress the owner's phone). (C++ anchor: _mobileFloor is a compile-time branch on device class.)
   const _coarse = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  const _fillBase = _coarse ? 3.2 : 2.0;
-  const _ambBase = _coarse ? 1.4 : 0.8;
+  const _mobileFloor = _coarse || (typeof window !== 'undefined' && !!window.__lowp);
+  const _fillBase = _mobileFloor ? 3.2 : 1.0;   // daytime sky-fill (hemisphere)
+  const _ambBase  = _mobileFloor ? 1.6 : 1.3;   // NIGHT-only flat floor (see update(): × nightFactor)
   const fill = new THREE.HemisphereLight(0x9aa7b0, 0x4a4436, _fillBase);
   scene.add(fill);
-  const amb = new THREE.AmbientLight(0x9a9482, _ambBase);
+  const amb = new THREE.AmbientLight(0x9a9482, 0); // intensity driven per-frame to _ambBase × nightFactor
   scene.add(amb);
 
-  // Ensure a distance fog exists so night + weather read (density is driven per-frame in update()). Only
-  // created if the engine didn't already supply one — never stomp an engine-owned fog.
-  if (!scene.fog) scene.fog = new THREE.FogExp2(0x2a2c26, 0.012);
+  // FOG is ENGINE-OWNED: updateWorld writes scene.fog.density (from weather) + scene.fog.color (from the
+  // sun horizon) EVERY frame (createCityWorld:958-960). The one-shot's project-local fog writes ran
+  // BEFORE updateWorld and were overwritten every frame — dead code, removed. hoard2 inherits the engine
+  // fog. (A cooler decrepit fog TINT, if DESIGN wants it, is a grade/keyframe follow-up — flagged, not a
+  // project-local stomp.) The engine already created scene.fog, so there is nothing to create here.
 
   /* ---- terrain HILL RIM (bowl backdrop; sunk below the flat disc so only the far hills show) ---- */
   // LOOK-PASS (art critic): the 'valley' biome rim rendered LUSH GREEN — jarring against the decrepit
@@ -150,20 +165,16 @@ export function createWorld(ctx) {
   }
   const _harvest = deriveHarvest(treeNodes, ruins, { woodAmount: 6, scrapAmount: 8 });
 
-  /* ---- CELESTIALS (sun+moon+stars+constellations) · WEATHER (fog-only) · CLOUDS ---- */
-  const celestials = createCelestials({});
-  scene.add(celestials.group);
-  const weather = createWeatherRig({ extent: ARENA_EXTENT });
-  weather.setKind('fog');                    // DEGRADED-tier fog-only (cheap; ratified degrade ladder)
-  scene.add(weather.group);
-  const clouds = createCloudField({ extent: ARENA_EXTENT, count: 12 });
-  scene.add(clouds.group);
-  // LOOK-PASS (both critics): the weather/cloud rigs render ADDITIVE ground-level motes that read as
-  // fuzzy orange/blue blobs across the FPS eyeline (the dive's worst artifact). We drive the distance
-  // FOG ourselves (scene.fog, per-frame), so the mote VISUALS add nothing — hide both group meshes.
-  // (Their .update() still runs, harmless.) Celestials (sky stars/moon) stay visible.
-  weather.group.visible = false;
-  clouds.group.visible = false;
+  /* ---- CELESTIALS · SKY · CLOUDS · WEATHER — INHERITED from the engine (not project-local) ----
+     LIGHT-THE-HOARD: createCityWorld already builds celestials (sun/moon/stars/constellations), the
+     Preetham sky, the cloud field, and the weather rig, and DRIVES them every frame inside updateWorld
+     (celestials.update with the live camera + tier; clouds/weather/fog). setUrbanVisible(false) hides the
+     CITY buildings but KEEPS the sky (createCityWorld:1049 — "hide the whole city for a non-city map
+     (keeps the sky)"). The one-shot built PROJECT-LOCAL duplicates — a second createCelestials plus a
+     hidden weather+cloud rig it drove itself — a shadow copy of the core stack. Per the inheritance
+     manifest they are REMOVED: hoard2 now inherits ONE real sky stack. Night stars/constellations come
+     from the engine celestials; the additive ground-mote weather/cloud sprites are simply not created,
+     so they can't fuzz the FP eyeline. */
 
   /* ---- TORCHES: a ring of guttering warm pools so night is DARK-BUT-LEGIBLE ---- */
   const torches = [];
@@ -178,10 +189,9 @@ export function createWorld(ctx) {
     torches.push(t);
   }
 
-  // Hoisted colours for the per-frame fog + fill lerps (no per-frame alloc, engine-invariants #7).
-  const _nightHaze = new THREE.Color(0x0c0f12);
-  const _moonFill = new THREE.Color(0x5a6b86);   // cold moonlit sky fill at deep night
-  const _moonGround = new THREE.Color(0x23262b); // cold dead-earth bounce at deep night
+  // Hoisted colours for the per-frame mobile-floor fill lerps (no per-frame alloc, engine-invariants #7).
+  const _moonFill = new THREE.Color(0x5a6b86);   // cold moonlit sky fill at deep night (mobile floor only)
+  const _moonGround = new THREE.Color(0x23262b); // cold dead-earth bounce at deep night (mobile floor only)
 
   // PLAYER LANTERN: a warm light that RIDES the survivor so their fighting area is always legible — the
   // perimeter torch ring (r≈23, dist 15) never reaches the arena centre, so in deep night the survivor
@@ -201,7 +211,6 @@ export function createWorld(ctx) {
   let _override = null;                        // probe.setNight override (null → clock-driven)
   let _nf = resolveNight(_override, _phase, SUN);
   const _phasePayload = { t: _phase, night: false };
-  const _baseFog = scene.fog && 'density' in scene.fog ? scene.fog.density : 0.012;
 
   const facade = {
     groundAt: (_x, _z) => GROUND_Y,            // FLAT play area (ratified #8)
@@ -226,13 +235,18 @@ export function createWorld(ctx) {
       }
       lantern.intensity = 1.2 + 3.3 * _nf;   // legible key at night, subtle warmth by day
 
-      // the fill hemisphere lifts the day arena and KEEPS a moonlit floor at night: the torch ring (r≈23,
-      // distance 15) can't reach the arena centre, so without this floor the survivor stands in pitch black.
-      // Night stays HARDER via the sim (speed×1.4, count×1.5) — the darkness is mood, not a legibility wall.
-      fill.intensity = _fillBase * (1 - 0.55 * _nf);
+      // DAY sky-fill: a modest hemisphere that lifts the arena so the decrepit palette reads under the sun,
+      // fading toward night as the sky darkens. Directional-ish (sky-over-ground), so the sun's shaping and
+      // cast shadows survive (unlike the one-shot's big flat fill). Colour cools to moonlight at night.
+      fill.intensity = _fillBase * (1 - 0.5 * _nf);
       fill.color.setHex(0x9aa7b0).lerp(_moonFill, _nf);        // warm-cool sky fill → cold moonlight at night
       fill.groundColor.setHex(0x4a4436).lerp(_moonGround, _nf);
-      amb.intensity = _ambBase * (1 - 0.6 * _nf);              // flat legibility lift, fades toward night
+      // Flat floor. DESKTOP: NIGHT-only (× nf) — 0 by day so the sun stays unflattened, rising past dusk so
+      // the arena centre (past the perimeter torch ring) isn't pitch black. MOBILE precision-safe path: a
+      // constant DAY floor too (0.55 → 1.0 × _ambBase), because that path renders direct through the iOS
+      // tonemap that crushes the arena to black — the phone needs the daytime lift (owner-verified, kept).
+      // Night is still HARDER via the sim (speed×1.4, count×1.5); this is legibility, not a mood-killer.
+      amb.intensity = _ambBase * (_mobileFloor ? (0.55 + 0.45 * _nf) : _nf);
 
       // torches gutter every frame; near-OFF by day (0.04) so they don't warm-wash the daylight arena,
       // rising to full at deep night — that's when the torch pools become the legibility (dark-but-playable).
@@ -242,20 +256,9 @@ export function createWorld(ctx) {
         torches[i].light.intensity *= torchGain;
       }
 
-      // NOTE (lead integration fix): createCelestials.update's LAST arg is the CAMERA (it calls
-      // cam.getWorldPosition to place the sky bodies), NOT the camera-mode enum. The owner passed
-      // ctx.CAM (the {DIMETRIC,PERSPECTIVE,…} constants) here → getWorldPosition-not-a-function on frame 1.
-      celestials.update(dt, _elapsed, sunRig, weather, 'realistic', ctx.rig?.camera || null);
-      clouds.update(dt, _elapsed, sunRig, weather);
-      weather.update(dt, _elapsed);
-
-      // fog thickens at night + with weather (kept cheap: one density write). COLOR is overridden to a
-      // DESAT decrepit-forest haze (grey-green by day → cold near-black at night), so the engine's warm
-      // low-sun sky-fog doesn't read as a fire-lit dusk — this is the world "gone wrong", not golden hour.
-      if (scene.fog && 'density' in scene.fog) {
-        scene.fog.density = _baseFog + 0.02 * _nf + 0.03 * (weather.fog || 0);
-        scene.fog.color.setHex(0x8a8f80).lerp(_nightHaze, _nf); // grey-green → cold gloom
-      }
+      // CELESTIALS · SKY · CLOUDS · WEATHER · FOG are all driven by the engine's updateWorld (called from
+      // the composition root AFTER world.update each frame) — hoard2 sets only the sun PHASE (goTo above)
+      // and inherits the rest. No project-local sky/fog stepping here anymore (LIGHT-THE-HOARD).
 
       _phasePayload.t = _phase;
       _phasePayload.night = _nf > 0.5;
