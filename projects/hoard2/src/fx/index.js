@@ -4,8 +4,9 @@
    OWNS: GPU impact particles (createParticles) + projected decals (createDecals) + the CORPSE POOL (a
    SECOND createCharacterHorde over createCharacterRig({url:'models/zombie.glb'}), slots pinned to the death
    state, fed by `zombie:death` — HOARD-CONTRACT §Game-layer builds; DONE #5: corpses persist ≥ CORPSE_TTL_S
-   / to CORPSE_CAP, never vanish) + combat SFX (createCombatSfx over createAudioBus) + the dread ambient bed
-   (createAmbientBed). Everything is EVENT-DRIVEN and COSMETIC — fx never perturbs the sim (its only rolls
+   / to CORPSE_CAP, never vanish) + the synthesized game voice (B5: createSfxKit over createAudioBus —
+   layered gunshot + all event classes + positional zombie vocals) + the night/wave-keyed dread ambient bed
+   (createAmbientBed.setDread) + a positional-groan scheduler ("hear them flanking"). Everything is EVENT-DRIVEN and COSMETIC — fx never perturbs the sim (its only rolls
    come off the decorrelated `rng.fork('fx')` stream, in fx-graph.js).
 
    This file is only WIRING: it builds the THREE-touching adapters from the frozen engine factories and hands
@@ -25,10 +26,9 @@
    ============================================================ */
 import {
   createParticles, createDecals, createCharacterRig, createCharacterHorde,
-  createAudioBus, createAmbientBed,
+  createAudioBus, createAmbientBed, createSfxKit,
 } from '@lgr/engine-core';
 import { createFxCore } from './fx-graph.js';
-import { createCombatSfx } from './combat-sfx.js';
 
 const ZBASE = 0.9;   // world scale for the Quaternius zombie (~1.8 tall → ~1.6 in-game) — matches v1 main.js:74
 
@@ -97,8 +97,22 @@ export function createFx(ctx) {
 
   /* ---------- AUDIO: bus + procedural combat SFX + the dread ambient bed (all gesture-gated) ---------- */
   const bus = createAudioBus();                          // null headless / no Web Audio → sfx stays null
-  const sfx = createCombatSfx(bus);                      // 2-D one-shots (positional gap flagged in report)
+  const sfx = createSfxKit(bus);                         // B5: synthesized game voice (layered gunshot, all events, positional vocals)
   const ambient = bus ? createAmbientBed(bus, { preset: 3 }) : null;   // preset 3 DEEP DRIFT — Lusion-lean dread
+
+  // B5 — the LISTENER for positional vocals: the FP eye when dived, else the iso survivor pose. Hoisted
+  // scratch (getListener is called on death events + the groan scheduler, not per-frame-hot).
+  const _lis = { x: 0, z: 0, fx: 0, fz: 1 }, _fwd = new THREE.Vector3();
+  function getListener() {
+    if (ctx.dive && ctx.dive.active && ctx.rig && ctx.rig.camera) {
+      const c = ctx.rig.camera; _fwd.set(0, 0, -1).applyQuaternion(c.quaternion);
+      const l = Math.hypot(_fwd.x, _fwd.z) || 1;
+      _lis.x = c.position.x; _lis.z = c.position.z; _lis.fx = _fwd.x / l; _lis.fz = _fwd.z / l;
+    } else if (registry.has('player')) {
+      const p = registry.get('player').player; _lis.x = p.x; _lis.z = p.z; _lis.fx = Math.sin(p.facing); _lis.fz = Math.cos(p.facing);
+    }
+    return _lis;
+  }
   if (bus) {
     // AUTOPLAY LAW (audio-bus.js): unlock() MUST run inside a real user gesture. Unlock + rise the bed once.
     const unlock = () => {
@@ -116,8 +130,36 @@ export function createFx(ctx) {
   /* ---------- the pure orchestrator (owns the corpse pool + all event handlers) ---------- */
   const core = createFxCore({
     events: ctx.events, rng: ctx.rng, time: ctx.time, config, groundY: GROUND_Y,
-    particles, decals, sfx, sink,
+    particles, decals, sfx, sink, getListener,
   });
+
+  // B5 CONTINUOUS AUDIO — the dread keying + the positional-groan scheduler run here (glue with registry
+  // access), not in the pure graph. Both no-op headless (bus locked pre-gesture) so determinism is untouched.
+  let _dreadClock = 0, _groanClock = 1.5;
+  function stepAudio(dt) {
+    // DREAD: swell/crawl the bed with night + wave pressure (day = quiet-uneasy, deep-night swarm = crawl).
+    _dreadClock += dt;
+    if (ambient && _dreadClock > 0.4) {
+      _dreadClock = 0;
+      const world = registry.has('world') ? registry.get('world') : null;
+      const sim = registry.has('sim') ? registry.get('sim') : null;
+      const nf = world ? world.nightFactor() : 0;
+      const wavePressure = sim ? Math.min(1, sim.state.alive / 18) : 0;
+      ambient.setDread(Math.min(1, nf * 0.65 + wavePressure * 0.5));
+    }
+    // POSITIONAL GROANS: an ambient moan from a nearby LIVE zombie, paced by density (faster when swarmed).
+    // Only when the audio context is actually running (sfx.ready) — so it never fires (or allocs) headless.
+    if (sfx && sfx.ready) {
+      _groanClock -= dt;
+      if (_groanClock <= 0) {
+        const sim = registry.has('sim') ? registry.get('sim') : null;
+        const zs = sim ? sim.audioSample(8) : [];
+        if (zs.length) sfx.groan({ pos: zs[(Math.random() * zs.length) | 0], listener: getListener() });
+        const density = Math.min(1, zs.length / 8);
+        _groanClock = 2.4 - 1.5 * density + Math.random() * 0.8;   // ~0.9–3.2 s, faster in a swarm
+      }
+    }
+  }
 
   // Build the horde once the GLB is ready, then catch up any corpses that already died during the load.
   corpseRig.ready.then(() => {
@@ -132,11 +174,15 @@ export function createFx(ctx) {
       // The corpse horde's mixers are stepped by sink.step (inside core.update) — LOD-throttled and on
       // wall-clock. We deliberately do NOT also call corpseRig.update (that would double-step every mixer).
       core.update(dt);
+      stepAudio(dt);   // B5: dread keying + positional-groan scheduler (wall-clock; no-op headless/pre-unlock)
     },
     counts() { return core.counts(); },
     dispose() { core.dispose(); if (ambient) ambient.stop(); if (gpu) gpu.dispose(); dec.dispose(); if (horde) horde.dispose(); corpseRig.dispose(); },
   };
   registry.register('fx', facade);
   ctx.probe.counts = () => core.counts();   // DONE #5: the harness reads counts() for corpse persistence
+  // B5 AUDIO probe handle — the measured-sanity harness unlocks + taps the bus, fires each voice, reads
+  // levels (headless audio can't be HEARD, so the owner's ears are the exit gate — this proves it's WIRED).
+  ctx.probe.audio = { get bus() { return bus; }, get sfx() { return sfx; }, get ambient() { return ambient; } };
   return facade;
 }

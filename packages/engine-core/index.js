@@ -193,6 +193,10 @@ export {
 // L-audio-sketch — the engine's one AudioContext owner + ambient-bed presets (no external assets).
 export { createAudioBus } from './src/audio-bus.js';
 export { createAmbientBed } from './src/ambient-bed.js';
+
+// Beauty B5 AUDIO DREAD — the synthesized game voice: a bank of Web-Audio one-shot recipes per event class
+// (layered gunshot, impacts, melee, positional zombie vocals, barrier, UI, death sting). Zero asset files.
+export { createSfxKit } from './src/createSfxKit.js';
 // L-audio-full-layer-slice1 — positional audio field + helicopter rotor synth.
 export { createPositionalField } from './src/positional-field.js';
 export { createRotor } from './src/rotor.js';

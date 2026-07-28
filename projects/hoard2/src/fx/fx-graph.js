@@ -41,6 +41,7 @@ export function createFxCore(deps) {
   const particles = deps.particles || null;
   const decals = deps.decals || null;
   const sfx = deps.sfx || null;
+  const getListener = deps.getListener || null;   // B5: () => {x,z,fx,fz} for positional vocals (pan/distance)
   const sink = deps.sink;   // corpse horde glue (always provided; sink.ready() gates the visual half)
 
   const fxRng = rng.fork('fx');   // determinism: fx rolls come off the DECORRELATED 'fx' stream (never 'sim')
@@ -78,8 +79,11 @@ export function createFxCore(deps) {
   off.push(events.on('melee:hit', (p) => {
     const t = posOf(p && p.target);
     if (particles && t) particles.burst(t.x, (t.y || groundY) + 0.4, t.z, 0, 1, 0);
-    if (sfx) sfx.melee(t);
+    if (sfx) sfx.meleeConnect();
   }));
+
+  // MELEE SWING — a whoosh on the wind-up (was silent feel-wise; B5 gives the swing a voice).
+  off.push(events.on('melee:swing', () => { if (sfx) sfx.meleeWhoosh(); }));
 
   // DEATH — the money event (DONE #5): a blood pool + burst AND a persistent corpse. Never vanishes: the
   // corpse enters the pool (persists ≥ CORPSE_TTL_S / to CORPSE_CAP) and the horde renders it in the death
@@ -91,12 +95,19 @@ export function createFxCore(deps) {
     const yaw = fxRng.range(0, TWO_PI);
     const r = pool.spawn({ x: pos.x, y: groundY, z: pos.z, yaw, type: p && p.type }, corpseClock);
     if (sink && sink.ready()) sink.apply(r.index, pool.get(r.index));   // r.evicted (if any) is reused in place
-    if (sfx) sfx.death(pos);
+    if (sfx) sfx.zombieDeath({ pos, listener: getListener && getListener() });   // B5: POSITIONAL death growl
   }));
 
-  // BARRIER — a wood/scrap thud on damage, a heavier crack on breach (audio only; build owns the visuals).
+  // BARRIER — a wood/scrap thud on damage, a heavier crack on breach, a light knock on repair.
   off.push(events.on('barrier:damage', () => { if (sfx) sfx.barrier('damage'); }));
   off.push(events.on('barrier:breach', () => { if (sfx) sfx.barrier('breach'); }));
+  off.push(events.on('barrier:repair', () => { if (sfx) sfx.barrier('repair'); }));
+
+  // UI TICKS — harvest / craft / pickup confirmations; and the death-screen STING.
+  off.push(events.on('harvest:gain', () => { if (sfx) sfx.ui('harvest'); }));
+  off.push(events.on('craft', (p) => { if (sfx) sfx.ui((p && p.recipe) || 'craft'); }));
+  off.push(events.on('item:pickup', () => { if (sfx) sfx.ui('pickup'); }));
+  off.push(events.on('player:death', () => { if (sfx) sfx.sting(); }));
 
   /* syncActive(): catch-up when the corpse horde finishes loading AFTER some deaths already landed — apply
      every already-active pool slot to the (now-ready) sink so no corpse is silently missing. */

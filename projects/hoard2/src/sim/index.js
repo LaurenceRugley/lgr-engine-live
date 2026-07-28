@@ -220,6 +220,9 @@ export function createSim(ctx) {
   const facade = {
     state,
     queryTargets: (seg) => pool.queryTargets(seg),
+    // B5 AUDIO: sample up to `max` LIVE zombie positions for the positional-groan scheduler (fx-audio owns
+    // the pacing/panning). Read-only snapshot of {x,z}; never a sim roll (audio is decorrelated cosmetics).
+    audioSample(max = 8) { const out = []; for (let i = 0; i < pool.max && out.length < max; i++) { const z = pool.get(i); if (z.alive) out.push({ x: z.x, z: z.z }); } return out; },
     queryCone: (px, pz, dx, dz, cosHalf, range) => pool.queryCone(px, pz, dx, dz, cosHalf, range), // gun aim-assist
 
     trySpendStamina: (cost) => survival.trySpend(cost),

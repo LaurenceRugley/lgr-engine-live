@@ -73,6 +73,28 @@ export function createAudioBus() {
       return { stop() { try { src.stop(); } catch (_) {} } };
     },
 
+    /* B5 AUDIO DREAD — the POSITIONAL ONE-SHOT seam (fills the gap createPositionalField couldn't: it only
+       ranks persistent looping emitters, so it can't voice a transient at a world point). Returns a GainNode
+       pre-wired with distance rolloff + facing-relative stereo pan, connected to master — a synth voice
+       connects HERE instead of master to be heard AT `pos` from the listener's ears (a walker groaning
+       behind-left pans left + softens). listener = {x,z,fx,fz} (position + forward unit vector).
+       C++ anchor: a tiny per-voice send bus — one gain + one panner, freed when the voice's source ends. */
+    positionalDest(pos, listener, { refDist = 3, maxDist = 34, panScale = 0.9, gain = 1 } = {}) {
+      if (!ctx) return null;
+      const dx = pos.x - listener.x, dz = pos.z - listener.z;
+      const dist = Math.hypot(dx, dz) || 0.0001;
+      const roll = refDist / Math.max(refDist, dist);          // inverse-distance rolloff, clamped at refDist
+      const g = ctx.createGain();
+      g.gain.value = (dist > maxDist ? 0 : roll) * gain;
+      // pan by the offset along the listener's RIGHT vector (right = perpendicular to forward), so pan is
+      // relative to where you FACE — the point of "hear them flanking". Front/back can't be stereo-panned.
+      const rx = (listener.fz != null ? listener.fz : 1), rz = -(listener.fx != null ? listener.fx : 0);
+      const pan = Math.max(-1, Math.min(1, ((dx * rx + dz * rz) / dist) * panScale));
+      if (ctx.createStereoPanner) { const sp = ctx.createStereoPanner(); sp.pan.value = pan; g.connect(sp); sp.connect(master); }
+      else g.connect(master);
+      return g;
+    },
+
     /* Synthesis nodes route here (the master GainNode that feeds ctx.destination). */
     get destination() { return master; },
 

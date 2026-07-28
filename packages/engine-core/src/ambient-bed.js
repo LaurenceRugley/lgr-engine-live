@@ -25,6 +25,15 @@
 
 export function createAmbientBed(bus, { preset = 1 } = {}) {
   let _teardown = null;
+  // B5 AUDIO DREAD — a keyable gain between the bed and the master. Default 1.0 → byte-identical for every
+  // consumer that never calls setDread; hoard2 drives it from nightFactor + wave state so the bed swells
+  // and CRAWLS at night/high-wave (day = quiet-uneasy at ~0.7×, deep dread ≈ 1.3×). level ∈ [0,1].
+  let _dreadGain = null;
+  function setDread(level) {
+    const ctx = bus && bus.context; if (!_dreadGain || !ctx) return;
+    const g = 0.7 + 0.6 * Math.max(0, Math.min(1, level));
+    _dreadGain.gain.setTargetAtTime(g, ctx.currentTime, 0.8);
+  }
 
   /* ── PRESET BUILDERS ─────────────────────────────────────────────────────────── */
 
@@ -150,8 +159,11 @@ export function createAmbientBed(bus, { preset = 1 } = {}) {
     if (_teardown) return;                             // already running
     const ctx = bus && bus.context; if (!ctx) return;  // bus must be unlocked first
 
-    /* `output` fades 0→1 over ~4 s so the bed rises silently (no autoplay startle). */
-    const output = ctx.createGain(); output.gain.value = 0; output.connect(bus.destination);
+    /* `output` fades 0→1 over ~4 s so the bed rises silently (no autoplay startle). B5: routed through a
+       dread gain (default 1.0 → byte-identical) so setDread can swell/crawl the bed for hoard2. */
+    const output = ctx.createGain(); output.gain.value = 0;
+    _dreadGain = ctx.createGain(); _dreadGain.gain.value = 1.0;
+    output.connect(_dreadGain); _dreadGain.connect(bus.destination);
 
     const builders = { 1: _buildDawnCalm, 2: _buildOpenAir, 3: _buildDeepDrift };
     const build = builders[preset] || _buildDawnCalm;
@@ -169,8 +181,8 @@ export function createAmbientBed(bus, { preset = 1 } = {}) {
 
   function stop() {
     if (!_teardown) return;
-    _teardown(); _teardown = null;
+    _teardown(); _teardown = null; _dreadGain = null;
   }
 
-  return { start, stop };
+  return { start, stop, setDread };
 }

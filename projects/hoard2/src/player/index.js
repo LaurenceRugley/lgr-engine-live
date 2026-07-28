@@ -96,12 +96,7 @@ export function createPlayer(ctx) {
   const muzzleFlash = new THREE.PointLight(0xffcf8a, 0, 4.5, 2);
   scene.add(muzzleFlash);
   let flashT = 0;
-  const _muzWP = new THREE.Vector3();
-  function pulseMuzzle() {
-    const g = dive.active ? fpGun : isoGun;
-    if (!g) return;
-    g.muzzle.getWorldPosition(_muzWP); muzzleFlash.position.copy(_muzWP); flashT = 1;
-  }
+  const _muzWP = new THREE.Vector3();   // active gun's muzzle world pos (filled in fireShot; drives flash + fx origin)
   function placeViewmodel(rdt, eyePos, eyeDir, moving, sprint) {
     fpGun.group.visible = true;
     _vmFwd.copy(eyeDir).normalize();
@@ -314,12 +309,17 @@ export function createPlayer(ctx) {
       const l = Math.hypot(bx, by, bz) || 1; dirx = bx / l; diry = by / l; dirz = bz / l;
     }
     ballistics.fire(player.x, MUZZLE_Y, player.z, dirx, diry, dirz, GUN.speed, GUN.dmg);
-    _fireEvt.origin.x = player.x; _fireEvt.origin.y = MUZZLE_Y; _fireEvt.origin.z = player.z;
+    // B4 RIDER: the muzzle FX origin follows the ACTIVE gun's muzzle (iso hand-gun OR FP viewmodel) so the
+    // particles + flash fire FROM THE GUN, not the survivor's feet. _muzWP is filled by pulseMuzzle below;
+    // set it first so the weapon:fire event (→ fx muzzle particles) uses it.
+    const _g = dive.active ? fpGun : isoGun;
+    if (_g) { _g.muzzle.getWorldPosition(_muzWP); _fireEvt.origin.x = _muzWP.x; _fireEvt.origin.y = _muzWP.y; _fireEvt.origin.z = _muzWP.z; }
+    else { _fireEvt.origin.x = player.x; _fireEvt.origin.y = MUZZLE_Y; _fireEvt.origin.z = player.z; }
     _fireEvt.dir.x = dirx; _fireEvt.dir.y = diry; _fireEvt.dir.z = dirz; _fireEvt.seed = _seed++;
     events.emit('weapon:fire', _fireEvt);
     if (survivor) survivor.recoil();          // B4: iso gun-arm recoil snap on the B3 layer seam
     fpRecoil = 1;                             // B4: kick the FP viewmodel (spring-recovers in update)
-    pulseMuzzle();                            // B4: muzzle-flash light pulse at the active gun's muzzle
+    muzzleFlash.position.copy(_muzWP); flashT = 1;   // B4: flash light at the same muzzle (was pulseMuzzle)
   }
   function doFire() {
     if (fireCd > 0 || getSim().state.dead) return;
