@@ -21,6 +21,7 @@ import forgeGroundFrag from './shaders/forge-ground.frag';
 import forgeBarkFrag from './shaders/forge-bark.frag';
 import forgeStoneFrag from './shaders/forge-stone.frag';
 import forgeWoodscrapFrag from './shaders/forge-woodscrap.frag';
+import forgeGunmetalFrag from './shaders/forge-gunmetal.frag';
 
 export const HOARD_SURFACES = {
   ground: { frag: forgeGroundFrag, size: 1024, worldSize: 6.0, relief: 0.05, seed: 0x6d, roughness: 1.0, metalness: 0.0, fallbackColor: 0x5f5a4a },
@@ -30,6 +31,13 @@ export const HOARD_SURFACES = {
   stone:  { frag: forgeStoneFrag,  size: 1024, worldSize: 2.4, relief: 0.08, seed: 0x51, roughness: 0.9, metalness: 0.0, fallbackColor: 0x36322c },
   wood:   { frag: forgeWoodscrapFrag, size: 512, worldSize: 1.2, relief: 0.06, seed: 0x1f, roughness: 0.92, metalness: 0.0, fallbackColor: 0x7a5a36, uniforms: { uMetalMix: { value: 0.0 } } },
   scrap:  { frag: forgeWoodscrapFrag, size: 512, worldSize: 1.0, relief: 0.05, seed: 0x8c, roughness: 0.55, metalness: 0.85, fallbackColor: 0x4a453d, uniforms: { uMetalMix: { value: 1.0 } } },
+};
+
+// B4 WEAPON SKINS — forge bake-param sets on the gunmetal shader (skins at zero asset cost; a small tile
+// since a pistol is ~0.2 m). fresh vs worn are the two side-by-side variants for the critic.
+export const WEAPON_SKINS = {
+  gunmetal:      { frag: forgeGunmetalFrag, size: 512, worldSize: 0.35, relief: 0.015, seed: 0x33, roughness: 0.42, metalness: 1.0, fallbackColor: 0x24262d, uniforms: { uWear: { value: 0.35 } } },
+  gunmetal_worn: { frag: forgeGunmetalFrag, size: 512, worldSize: 0.35, relief: 0.025, seed: 0x77, roughness: 0.55, metalness: 0.95, fallbackColor: 0x2e2f28, uniforms: { uWear: { value: 1.0 } } },
 };
 
 // sensible default world extents (metres) each surface tile repeats across — the wiring may override.

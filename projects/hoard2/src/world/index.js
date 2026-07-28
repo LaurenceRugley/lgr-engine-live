@@ -31,7 +31,7 @@
 import {
   createCity, createForest, createTorchLight,
   generateTerrain, buildTerrainMesh,
-  createTextureForge, forgeHoardMaterials,
+  createTextureForge, forgeHoardMaterials, WEAPON_SKINS,
 } from '@lgr/engine-core';
 import { buildDecrepitProfile } from './profile.js';
 import { phaseAt, resolveNight, phaseForNight, nightFactorAt } from './daynight.js';
@@ -94,6 +94,12 @@ export function createWorld(ctx) {
   if (surfaces.barkLive && surfaces.barkLive.map) { surfaces.barkLive.map = null; surfaces.barkLive.needsUpdate = true; }
   ctx.forge = forge;          // read-only engine capability (like engine/renderer)
   ctx.surfaces = surfaces;    // build reads ctx.surfaces.wood / .scrap for its barriers
+  // B4 COMBAT FEEL — bake the WEAPON SKINS (forge gunmetal, fresh + worn variants). player wires the gun kit
+  // onto the survivor's hand + the FP viewmodel with these. Flat fallback on iOS-p0 (makeMaterial handles it).
+  ctx.weaponSkins = {
+    gunmetal: forge.makeMaterial(WEAPON_SKINS.gunmetal),
+    gunmetal_worn: forge.makeMaterial(WEAPON_SKINS.gunmetal_worn),
+  };
 
   /* ---- flat arena ground (opaque disc; covers the terrain rim's centre → play area reads FLAT) ---- */
   // FORGE: decrepit forest floor (dead-leaf litter over trodden dirt), tiled ~groundExtent/4 across the

@@ -47,6 +47,8 @@ import { damp } from './math.js';
 // head and a local-X twist bends the spine). Module-level scratch — _applyLayers runs synchronously per
 // handle, never re-entrant, so one shared set is safe + alloc-free (engine-invariants #7).
 const _q = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _v3 = new THREE.Vector3(), _v3b = new THREE.Vector3();
 const _eu = new THREE.Euler(0, 0, 0, 'YXZ');
 const _AX_Y = new THREE.Vector3(0, 1, 0);
 const _AX_X = new THREE.Vector3(1, 0, 0);
@@ -55,6 +57,8 @@ const _AX_Z = new THREE.Vector3(0, 0, 1);
 export const LAYER_DEFAULTS = {
   headLook: { cone: 1.2, speed: 6, weight: 1 },      // cone rad · damp rate · how much of the turn to apply
   hitReact: { amp: 1, dur: 0.4, lean: 0.5, arm: 0.7 }, // impulse gain · seconds · spine lean rad · arm fling rad
+  recoil:   { amp: 1, dur: 0.16, arm: 0.5 },          // B4 fire kick: a sharp gun-arm snap-back + slight torso
+  swing:    { amp: 1, dur: 0.42, arm: 1.7 },          // B4 melee: the gun-arm swings a forward arc then back
 };
 
 export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
@@ -104,7 +108,11 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
     let lookTarget = null;             // {x,y,z} or null (null = no head-look → layer idle, zero cost)
     let headYaw = 0;                   // the smoothed applied head-turn (rad), eased toward the desired
     let flinchT = -1, flinchSign = 0;  // hit-react timer (-1 = inactive) + which side the hit came from
-    const lp = { headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact } };
+    let recoilT = -1, swingT = -1;     // B4 fire-recoil + melee-swing impulse timers (-1 = inactive)
+    const lp = {
+      headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact },
+      recoil: { ...LAYER_DEFAULTS.recoil }, swing: { ...LAYER_DEFAULTS.swing },
+    };
 
     const handle = {
       object,
@@ -119,7 +127,26 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
         const cy = _eu.y, side = Math.cos(cy) * dx - Math.sin(cy) * dz;  // >0 = hit came from the right
         flinchSign = side >= 0 ? 1 : -1;
       },
-      setLayerParams(p = {}) { if (p.headLook) Object.assign(lp.headLook, p.headLook); if (p.hitReact) Object.assign(lp.hitReact, p.hitReact); },
+      setLayerParams(p = {}) { if (p.headLook) Object.assign(lp.headLook, p.headLook); if (p.hitReact) Object.assign(lp.hitReact, p.hitReact); if (p.recoil) Object.assign(lp.recoil, p.recoil); if (p.swing) Object.assign(lp.swing, p.swing); },
+      recoil() { recoilT = 0; },        // B4: fire kick (gun-arm snap-back)
+      meleeSwing() { swingT = 0; },     // B4: melee arc (gun-arm forward swing)
+      // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
+      // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
+      // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
+      // (tune to seat it in the palm). Returns false if the bone is absent (caller can fall back).
+      findBone(name) { return object.getObjectByName(name) || null; },
+      attachToBone(boneName, obj, { worldScale = 1, pos = [0, 0, 0], rot = [0, 0, 0] } = {}) {
+        const bone = object.getObjectByName(boneName);
+        if (!bone) return false;
+        object.updateWorldMatrix(true, true);
+        bone.matrixWorld.decompose(_v3, _q2, _v3b);   // _v3b = the bone's world scale
+        const bs = (_v3b.x + _v3b.y + _v3b.z) / 3 || 1;
+        obj.scale.setScalar(worldScale / bs);
+        obj.position.set(pos[0], pos[1], pos[2]);
+        obj.rotation.set(rot[0], rot[1], rot[2]);
+        bone.add(obj);
+        return true;
+      },
       // Run AFTER a mixer step (the mixer reset the bones to the clip pose, so we multiply ONE fresh offset
       // — never accumulating). The caller (rig.update / horde.update) only calls this when the mixer stepped.
       _applyLayers(dt) {
@@ -141,6 +168,22 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
             if (boneArmL) { _q.setFromAxisAngle(_AX_Z, env * lp.hitReact.arm); boneArmL.quaternion.multiply(_q); }
             if (boneArmR) { _q.setFromAxisAngle(_AX_Z, -env * lp.hitReact.arm); boneArmR.quaternion.multiply(_q); }
           }
+        }
+        // B4 RECOIL — a sharp gun-arm snap-back on the RIGHT arm (+ a slight torso kick), decaying fast.
+        if (recoilT >= 0 && boneArmR) {
+          recoilT += dt; const u = recoilT / lp.recoil.dur;
+          if (u >= 1) { recoilT = -1; }
+          else {
+            const e = flinchEnvelope(u) * lp.recoil.amp;
+            _q.setFromAxisAngle(_AX_X, -e * lp.recoil.arm); boneArmR.quaternion.multiply(_q);
+            if (boneSpine) { _q.setFromAxisAngle(_AX_X, -e * lp.recoil.arm * 0.3); boneSpine.quaternion.multiply(_q); }
+          }
+        }
+        // B4 MELEE SWING — the gun-arm swings a forward arc (sin peak mid-swing) then returns.
+        if (swingT >= 0 && boneArmR) {
+          swingT += dt; const u = swingT / lp.swing.dur;
+          if (u >= 1) { swingT = -1; }
+          else { const e = Math.sin(Math.PI * u) * lp.swing.amp; _q.setFromAxisAngle(_AX_X, e * lp.swing.arm); boneArmR.quaternion.multiply(_q); }
         }
       },
       setState(name, opts = {}) {

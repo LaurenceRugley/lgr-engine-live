@@ -19,7 +19,7 @@
    The pure maths (movement clamp / push-out / aim / ballistics adapters / melee gate) live in movement.js +
    combat.js and are unit-tested THREE-free.
    ============================================================ */
-import { createCharacterRig, createFirstPersonWalker, createBallistics } from '@lgr/engine-core';
+import { createCharacterRig, createFirstPersonWalker, createBallistics, createWeaponKit } from '@lgr/engine-core';
 import { clampToRadius, resolveCircles, resolveAabbs, aimFacing, isoStep } from './movement.js';
 import { makeCastWorld, makeCastTargets, meleeArcHits, gateMelee } from './combat.js';
 
@@ -54,7 +54,7 @@ export function createPlayer(ctx) {
   const player = { x: 0, z: 0, facing: 0, vx: 0, vz: 0 };
 
   /* ---- the rigged survivor (async; a stand-in nothing until the GLB lands) ---- */
-  let survivor = null;
+  let survivor = null, isoGun = null;
   const charRig = createCharacterRig({ url: 'models/survivor.glb' });
   charRig.ready.then(() => {
     survivor = charRig.spawn({ castShadow: true });
@@ -62,12 +62,61 @@ export function createPlayer(ctx) {
     survivor.object.position.set(player.x, GROUND_Y, player.z);
     scene.add(survivor.object);
     survivor.setState('idle');
+    // B4: put the forge-skinned gun in the survivor's RIGHT HAND (the bone lives in unscaled object space,
+    // so the kit is scaled up to read at the 0.32 body scale; pose tuned to sit in the palm pointing fwd).
+    isoGun = createWeaponKit({ material: ctx.weaponSkins ? ctx.weaponSkins.gunmetal : null });
+    // worldScale normalises the ~100x armature scale so the gun is ~0.18 units (a real pistol next to the
+    // 1.68-unit survivor); rot seats it pointing out of the palm. Falls back to a hidden scene add if no hand.
+    // worldScale 1.5 = a touch OVERSIZED (game convention — a real-scale pistol is ~8 px at iso; oversizing
+    // keeps it readable in the survivor's hand without dominating).
+    if (!survivor.attachToBone('RightHand', isoGun.group, { worldScale: 1.5, pos: [0, 0, 0], rot: [-Math.PI / 2, 0, 0] })) {
+      isoGun.group.visible = false; scene.add(isoGun.group);
+    }
   }).catch((e) => console.warn('[player] survivor.glb failed to load', e));
 
   // B3 HIT-REACT — the survivor finally reacts to being mauled (survivor.glb has NO HitReact clip, so this
   // procedural spine/arm flinch IS its hit reaction). Fired on the sim's player:damage; a generic recoil
   // (the layer leans the torso back + throws the arms) — enough to sell "you got hit" without a clip.
   events.on('player:damage', () => { if (survivor) survivor.hitReact(0, 0); });
+
+  // B4 FP VIEWMODEL — the gun the player SEES in the dive (positioned in front of the FP eye each dived
+  // frame; hidden in iso). Uses the WORN skin (so iso=gunmetal + FP=worn read as skin variants side-by-side).
+  let fpRecoil = 0;   // 0..1 fire kick; spring-decays in update()
+  const fpGun = createWeaponKit({ material: ctx.weaponSkins ? ctx.weaponSkins.gunmetal_worn : null });
+  fpGun.group.visible = false; fpGun.group.renderOrder = 20;
+  fpGun.mesh.frustumCulled = false;
+  scene.add(fpGun.group);
+  const _vmFwd = new THREE.Vector3(), _vmRight = new THREE.Vector3(), _vmUp = new THREE.Vector3(), _vmBasis = new THREE.Matrix4();
+  const _WORLD_UP = new THREE.Vector3(0, 1, 0);
+  let _vmBob = 0;
+
+  // B4 UNIFIED SHOT — the MUZZLE FLASH light pulse (the muzzle particles + tracer + impact decal are the fx
+  // owner's, already on weapon:fire/weapon:hit; the events are the named SFX hooks B5 will listen to). A
+  // single pooled warm PointLight snapped to the ACTIVE gun's muzzle on fire, decaying over ~2 frames.
+  const muzzleFlash = new THREE.PointLight(0xffcf8a, 0, 4.5, 2);
+  scene.add(muzzleFlash);
+  let flashT = 0;
+  const _muzWP = new THREE.Vector3();
+  function pulseMuzzle() {
+    const g = dive.active ? fpGun : isoGun;
+    if (!g) return;
+    g.muzzle.getWorldPosition(_muzWP); muzzleFlash.position.copy(_muzWP); flashT = 1;
+  }
+  function placeViewmodel(rdt, eyePos, eyeDir, moving, sprint) {
+    fpGun.group.visible = true;
+    _vmFwd.copy(eyeDir).normalize();
+    _vmRight.crossVectors(_vmFwd, _WORLD_UP).normalize();
+    _vmUp.crossVectors(_vmRight, _vmFwd);
+    _vmBasis.makeBasis(_vmRight, _vmUp, _vmFwd);   // gun +Z → look direction, +Y up, +X right (upright)
+    fpGun.group.quaternion.setFromRotationMatrix(_vmBasis);
+    _vmBob += rdt * (moving ? (sprint ? 15 : 9) : 2.2);
+    const bob = Math.sin(_vmBob) * (moving ? 0.010 : 0.0035);
+    const kick = fpRecoil * 0.07;                  // recoil pulls the gun back + up
+    fpGun.group.position.copy(eyePos)
+      .addScaledVector(_vmFwd, 0.30 - kick)
+      .addScaledVector(_vmRight, 0.11)
+      .addScaledVector(_vmUp, -0.15 + bob + kick * 0.6);
+  }
 
   /* ---- iso follow-cam framed on the survivor (v1 enterHoard pattern) ---- */
   // LOOK-PASS (both critics): zoom 3.2 framed a ~6-unit window — too tight to SEE the horde close in
@@ -198,6 +247,7 @@ export function createPlayer(ctx) {
     player.x = walker.x; player.z = walker.z; player.facing = walker.yaw;   // write the pose back (SIM targets the walker)
     walker.eyePosition(_eyePos); walker.eyeDirection(_eyeDir);
     rig.setEye(_eyePos, _eyeDir);
+    placeViewmodel(rdt, _eyePos, _eyeDir, mi.x !== 0 || mi.y !== 0, sprint);  // B4 FP viewmodel
   });
 
   function tryPointerLock() {
@@ -267,6 +317,9 @@ export function createPlayer(ctx) {
     _fireEvt.origin.x = player.x; _fireEvt.origin.y = MUZZLE_Y; _fireEvt.origin.z = player.z;
     _fireEvt.dir.x = dirx; _fireEvt.dir.y = diry; _fireEvt.dir.z = dirz; _fireEvt.seed = _seed++;
     events.emit('weapon:fire', _fireEvt);
+    if (survivor) survivor.recoil();          // B4: iso gun-arm recoil snap on the B3 layer seam
+    fpRecoil = 1;                             // B4: kick the FP viewmodel (spring-recovers in update)
+    pulseMuzzle();                            // B4: muzzle-flash light pulse at the active gun's muzzle
   }
   function doFire() {
     if (fireCd > 0 || getSim().state.dead) return;
@@ -286,6 +339,7 @@ export function createPlayer(ctx) {
     _swingEvt.origin.x = player.x; _swingEvt.origin.y = GROUND_Y + 0.5; _swingEvt.origin.z = player.z;
     _swingEvt.arc = player.facing;
     events.emit('melee:swing', _swingEvt);
+    if (survivor) survivor.meleeSwing();      // B4: visible melee arc on the survivor's arm (was invisible)
     // broadphase a short forward segment, then keep only what's inside the arc.
     _meleeSeg.o.x = player.x; _meleeSeg.o.y = GROUND_Y + 0.5; _meleeSeg.o.z = player.z;
     _meleeSeg.e.x = player.x + fx * MELEE.range; _meleeSeg.e.y = GROUND_Y + 0.5; _meleeSeg.e.z = player.z + fz * MELEE.range;
@@ -317,6 +371,10 @@ export function createPlayer(ctx) {
       fireCd = Math.max(0, fireCd - rdt);
       meleeCd = Math.max(0, meleeCd - rdt);
       attackLock = Math.max(0, attackLock - rdt);
+      fpRecoil = fpRecoil > 0 ? Math.max(0, fpRecoil - rdt * 7) : 0;   // B4 FP recoil spring-decay
+      if (!dive.active) fpGun.group.visible = false;                   // viewmodel is dive-only (placed in the eye source)
+      flashT = flashT > 0 ? Math.max(0, flashT - rdt * 16) : 0;        // B4 muzzle-flash decay (~2 frames)
+      muzzleFlash.intensity = flashT * flashT * 16;
       if (collidersDirty) rebuildColliders();
       const dead = getSim().state.dead;
 
@@ -360,8 +418,11 @@ export function createPlayer(ctx) {
       if (firing) doFire();
       ballistics.update(rdt);                         // integrate projectiles + swept hit-tests (→ onHit → weapon:hit)
 
-      // place + orient the survivor mesh at the pose (both modes; body is behind the FP eye when dived).
+      // place + orient the survivor mesh at the pose. B4: HIDE the whole body in the dive — the FP eye sits
+      // inside its head, so the mesh rendered in front of the camera (you saw your own body, and the muzzle
+      // flash lit it). The FP viewmodel is the gun you see; the iso hand-gun hides with the body.
       if (survivor) {
+        survivor.object.visible = !dive.active;
         survivor.object.position.set(player.x, GROUND_Y, player.z); survivor.object.rotation.y = player.facing;
         // B3 head-look: the survivor turns its head toward where you're aiming (the cursor ground point),
         // so it glances off its travel line toward the threat you're firing at. Redundant→no-op when the

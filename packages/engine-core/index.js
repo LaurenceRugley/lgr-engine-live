@@ -212,7 +212,12 @@ export { createForest, placeForest } from './src/createForest.js';
 // at boot from periodic-noise family shaders, so a world stops being flat-coloured. Recipes live in
 // forge-recipes.js; a project wires the materials. supported=false on iOS-p0 (bake skipped, flat fallback).
 export { createTextureForge, nyquistFeatureFloor, repeatFor, FORGE_MIN_TEXELS } from './src/createTextureForge.js';
-export { HOARD_SURFACES, forgeHoardMaterials } from './src/forge-recipes.js';
+export { HOARD_SURFACES, forgeHoardMaterials, WEAPON_SKINS } from './src/forge-recipes.js';
+
+// Beauty B4 COMBAT FEEL — the weapon kit: a chamfered-primitive hard-surface gun (NO fingers), merged to a
+// handful of draw calls, skinned by a forge gunmetal material. The wielder (hand bone / FP viewmodel) + the
+// recoil layer + the unified shot event give it FEEL; this builds the ART.
+export { createWeaponKit } from './src/createWeaponKit.js';
 
 // Lesson M3 — flow-field horde pathing: one grid solve steers a whole crowd around obstacles (a moving
 // target, tree colliders + barriers), each agent paying a single array lookup per step. Pure math (no
