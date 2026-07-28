@@ -1085,6 +1085,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     setCloudsEnabled: (on) => clouds.setEnabled(on),   // B2 CLOUD-SCALE LIFT: false → no head-height puffs in a small arena
     get cloudsEnabled() { return clouds.enabled; },
     setChromaScale,    // B2: scale the beauty chromatic-aberration (1 = city default; hoard2 dials down)
-    setGradeCool,      // B2: warm→cool grade candidate (0 = city warm default; hoard2 ?gradecool for the owner A/B)
+    setGradeCool,      // B2: warm→cool grade candidate (0 = city warm default; hoard2 baked cool per owner ruling)
+    get gradeCool() { return _gradeCool; },
   };
 }

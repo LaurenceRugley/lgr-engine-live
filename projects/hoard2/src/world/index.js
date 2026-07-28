@@ -59,11 +59,11 @@ export function createWorld(ctx) {
   // B2 finding #6 — dial the beauty chromatic-aberration WAY down (the loud rainbow fringing on thin tree
   // trunks both B1 critics flagged). 0.3 keeps a filmic hint without the rainbow. City CA untouched (1.0).
   engine.setChromaScale?.(0.3);
-  // B2 finding #5 — grade warm→cool "rot" A/B (OWNER decides taste). Default 0 = the current WARM grade
-  // (candidate A); ?gradecool=1 renders the COOL/desaturated candidate B. Shipped as a toggle so the owner
-  // picks; whichever he chooses becomes the baked default next.
+  // B2 finding #5 — grade warm→cool "rot". OWNER RULING (2026-07-28): the COOL cold-rot look WINS → it is
+  // now the BAKED DEFAULT (1). ?gradecool=0 is the WARM escape hatch kept for A/B; ?gradecool=<0..1> still
+  // sets any blend. (City default stays 0/warm — the seam defaults to the city value; this is hoard2's wire.)
   const _gradeCool = ctx.flags && ctx.flags.q && ctx.flags.q.get('gradecool') != null
-    ? Math.min(1, Math.max(0, Number(ctx.flags.q.get('gradecool')) || 0)) : 0;
+    ? Math.min(1, Math.max(0, Number(ctx.flags.q.get('gradecool')) || 0)) : 1;
   engine.setGradeCool?.(_gradeCool);
   engine.setPostMode?.(2);
 
