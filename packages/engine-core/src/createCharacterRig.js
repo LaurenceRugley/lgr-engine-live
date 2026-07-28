@@ -38,7 +38,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './character-anim.js';
-import { flinchEnvelope, headYawDelta } from './character-layers.js';
+import { flinchEnvelope, headYawDelta, wrapPi } from './character-layers.js';
 import { damp } from './math.js';
 
 // Beauty B3 — PROCEDURAL MOTION LAYERS. Additive rotations applied to named bones AFTER the mixer poses
@@ -48,7 +48,9 @@ import { damp } from './math.js';
 // handle, never re-entrant, so one shared set is safe + alloc-free (engine-invariants #7).
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
+const _qA = new THREE.Quaternion();
 const _v3 = new THREE.Vector3(), _v3b = new THREE.Vector3();
+const _UPY = new THREE.Vector3(0, 1, 0);   // A1 aim-IK: a mixamo bone's local +Y runs down-bone (toward its child)
 const _eu = new THREE.Euler(0, 0, 0, 'YXZ');
 const _AX_Y = new THREE.Vector3(0, 1, 0);
 const _AX_X = new THREE.Vector3(1, 0, 0);
@@ -109,6 +111,15 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
     let headYaw = 0;                   // the smoothed applied head-turn (rad), eased toward the desired
     let flinchT = -1, flinchSign = 0;  // hit-react timer (-1 = inactive) + which side the hit came from
     let recoilT = -1, swingT = -1;     // B4 fire-recoil + melee-swing impulse timers (-1 = inactive)
+    // A1 LOCOMOTION BLEND — idle/walk/run play SIMULTANEOUSLY, weights from a speed param (not state snaps);
+    // one-shot actions (attack/hit/death) fade OVER the blend and restore it when the clip clamps. Legs keep
+    // walking under the aim layer. All the per-frame weight work lives in _applyLayers (one place, gets dt).
+    const locoActions = {};            // 'idle'/'walk'/'run' → AnimationAction (built lazily on first setLocomotion)
+    let _locoOn = false, _locoSpeed = 0;                       // speed01 ∈ [0,1] (0 idle · ~0.5 walk · 1 run)
+    let _actAction = null, _actClip = null, _actActive = false, _actW = 0;   // the one-shot overlay
+    let _headingTarget = null;         // A1: smoothed body yaw (rad) or null (caller sets the yaw directly)
+    const boneArmForeR = bones.RightForeArm || null;          // A1 aim-IK: the forearm (gun end of the chain)
+    let aimTarget = null, aimW = 0, _aimActive = false;       // A1 aim-IK: {x,y,z} to track + a blend weight
     const lp = {
       headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact },
       recoil: { ...LAYER_DEFAULTS.recoil }, swing: { ...LAYER_DEFAULTS.swing },
@@ -130,6 +141,41 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
       setLayerParams(p = {}) { if (p.headLook) Object.assign(lp.headLook, p.headLook); if (p.hitReact) Object.assign(lp.hitReact, p.hitReact); if (p.recoil) Object.assign(lp.recoil, p.recoil); if (p.swing) Object.assign(lp.swing, p.swing); },
       recoil() { recoilT = 0; },        // B4: fire kick (gun-arm snap-back)
       meleeSwing() { swingT = 0; },     // B4: melee arc (gun-arm forward swing)
+      // A1 LOCOMOTION: drive idle/walk/run by a continuous speed (0..1). Builds the 3 actions once (all
+      // playing at weight 0; the per-frame blend is in _applyLayers). Supersedes setState for locomotion.
+      setLocomotion(speed01) {
+        _locoSpeed = speed01 < 0 ? 0 : speed01 > 1 ? 1 : speed01;
+        if (!_locoOn) {
+          for (const key of ['idle', 'walk', 'run']) {
+            const clip = findClip(STATES[key]); if (!clip) continue;
+            const a = mixer.clipAction(clip); a.setLoop(THREE.LoopRepeat, Infinity); a.enabled = true; a.reset().setEffectiveWeight(0).play();
+            locoActions[key] = a;
+          }
+          if (current) { current.fadeOut(0.2); current = null; }  // release any prior single-clip state
+          sm.reset();
+          _locoOn = true;
+        }
+      },
+      // A1: play a one-shot (attack/hit/death) OVER the locomotion blend; it fades in, plays once, and the
+      // blend restores when it clamps. Use this instead of setState once setLocomotion is driving the legs.
+      playAction(name) {
+        const clip = findClip(STATES[name]); if (!clip) return;
+        const a = mixer.clipAction(clip);
+        a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
+        a.reset().setEffectiveTimeScale(1).setEffectiveWeight(_actW).play();
+        _actAction = a; _actClip = clip; _actActive = true;
+      },
+      // A1: a SMOOTHED body heading (slerped in _applyLayers) — the caller passes the target yaw instead of
+      // snapping object.rotation.y, so turns read smooth. Pass null to go back to caller-driven yaw.
+      setHeading(yaw) { _headingTarget = yaw; },
+      // A1 AIM-IK: the world point the gun should track (iso: the aim/target). null → the arm relaxes back to
+      // the clip pose (aimW eases to 0). Distant characters: the caller clears this (skip the solver).
+      setAim(t) { if (t == null) { _aimActive = false; return; } if (!aimTarget) aimTarget = { x: 0, y: 0, z: 0 }; aimTarget.x = t.x; aimTarget.y = t.y; aimTarget.z = t.z; _aimActive = true; },
+      // A1: clear the anim state so a RECYCLED pool slot re-arms cleanly. The horde's setActive(i,false) calls
+      // mixer.stopAllAction() (stops the loco actions) but the handle is reused — without this reset _locoOn
+      // stays true and the next setLocomotion just sets weights on STOPPED actions → the respawn freezes in
+      // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
+      resetAnim() { _locoOn = false; _actActive = false; _actAction = null; _actClip = null; _actW = 0; aimW = 0; _aimActive = false; _headingTarget = null; },
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
@@ -150,6 +196,47 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
       // Run AFTER a mixer step (the mixer reset the bones to the clip pose, so we multiply ONE fresh offset
       // — never accumulating). The caller (rig.update / horde.update) only calls this when the mixer stepped.
       _applyLayers(dt) {
+        // ── A1 LOCOMOTION BLEND — set the idle/walk/run weights from speed, dimmed by any one-shot action.
+        if (_locoOn) {
+          if (_actActive && _actClip && _actAction.time >= _actClip.duration - 0.02) _actActive = false;  // clip clamped → release
+          _actW = damp(_actW, _actActive ? 1 : 0, _actActive ? 20 : 9, dt);
+          if (_actAction) { _actAction.setEffectiveWeight(_actW); if (_actW < 0.02 && !_actActive) { _actAction.stop(); _actAction = null; _actClip = null; } }
+          const s = _locoSpeed, base = 1 - _actW;                 // the action steals weight from the legs' blend
+          let wi = 0, ww = 0, wr = 0;
+          if (s < 0.5) { wi = 1 - s * 2; ww = s * 2; } else { ww = 2 - s * 2; wr = s * 2 - 1; }
+          if (locoActions.idle) locoActions.idle.setEffectiveWeight(wi * base);
+          if (locoActions.walk) { locoActions.walk.setEffectiveWeight(ww * base); locoActions.walk.setEffectiveTimeScale(0.85 + 0.5 * s); }  // match stride to speed → less foot-slide
+          if (locoActions.run) locoActions.run.setEffectiveWeight(wr * base);
+        }
+        // ── A1 HEADING — slerp the body toward the target yaw (smooth turns instead of snapping).
+        if (_headingTarget != null) {
+          _eu.setFromQuaternion(object.quaternion, 'YXZ');
+          _eu.y += wrapPi(_headingTarget - _eu.y) * Math.min(1, dt * 11);   // ~11/s turn
+          object.quaternion.setFromEuler(_eu);
+        }
+        // ── A1 AIM-IK (the upper-body MASK: this owns the gun arm + a chest twist; the legs keep the
+        // locomotion, and the recoil/swing impulses below compose ON TOP of the aimed arm). A directional
+        // 2-bone aim: point the upper-arm bone-axis at the target, twist the chest to lead, bend the elbow a
+        // touch. ~1 updateWorldMatrix + a handful of quats per AIMING character (the caller skips distant ones).
+        if (_aimActive && boneArmR && aimTarget) {
+          aimW = damp(aimW, 1, 14, dt);
+          boneArmR.updateWorldMatrix(true, false);              // refresh the parent chain (world quat is stale post-mixer)
+          boneArmR.getWorldPosition(_v3);                       // the shoulder joint (upper-arm origin)
+          _v3b.set(aimTarget.x - _v3.x, aimTarget.y - _v3.y, aimTarget.z - _v3.z);
+          if (_v3b.lengthSq() > 1e-6) {
+            _v3b.normalize();
+            boneArmR.parent.getWorldQuaternion(_q2);            // parent world orientation
+            _qA.setFromUnitVectors(_UPY, _v3b);                 // world: bone +Y (down-arm) → the aim dir
+            _q2.invert().multiply(_qA);                         // → the bone-LOCAL target
+            boneArmR.quaternion.slerp(_q2, aimW);               // blend the arm from the clip pose to the aim
+            if (boneArmForeR) { _q.setFromAxisAngle(_AX_X, -0.4 * aimW); boneArmForeR.quaternion.multiply(_q); }  // slight elbow bend
+            if (boneSpine) {
+              _eu.setFromQuaternion(object.quaternion, 'YXZ');
+              const rel = wrapPi(Math.atan2(aimTarget.x - object.position.x, aimTarget.z - object.position.z) - _eu.y);
+              _q.setFromAxisAngle(_AX_Y, rel * 0.3 * aimW); boneSpine.quaternion.multiply(_q);   // chest leads the aim
+            }
+          }
+        } else if (aimW > 0.01) { aimW = damp(aimW, 0, 8, dt); }
         if (boneHead && lookTarget) {
           _eu.setFromQuaternion(object.quaternion, 'YXZ');
           const dx = lookTarget.x - object.position.x, dz = lookTarget.z - object.position.z;

@@ -351,11 +351,14 @@ export function createPlayer(ctx) {
 
   /* ---- animation state from motion/action (idle/walk/run/attack/death). 'hit' is intentionally unused
      (no clip in the survivor GLB → graceful no-op). ---- */
-  function driveAnim(moving, sprinting, dead) {
+  // A1: continuous locomotion blend (idle↔walk↔run from actual speed) + a one-shot death action on the edge.
+  // Melee fires its own 'attack' one-shot in doMelee; fire uses the B4 recoil layer.
+  let _wasDead = false;
+  function driveAnim(speed01, dead) {
     if (!survivor) return;
-    if (dead) { survivor.setState('death'); return; }
-    if (attackLock > 0) { survivor.setState('attack'); return; }
-    survivor.setState(moving ? (sprinting ? 'run' : 'walk') : 'idle');
+    if (dead) { if (!_wasDead) { survivor.playAction('death'); _wasDead = true; } return; }
+    _wasDead = false;
+    survivor.setLocomotion(speed01);
   }
 
   /* ---- scratch for the iso step result (hoisted; no per-frame alloc) ---- */
@@ -423,14 +426,22 @@ export function createPlayer(ctx) {
       // flash lit it). The FP viewmodel is the gun you see; the iso hand-gun hides with the body.
       if (survivor) {
         survivor.object.visible = !dive.active;
-        survivor.object.position.set(player.x, GROUND_Y, player.z); survivor.object.rotation.y = player.facing;
-        // B3 head-look: the survivor turns its head toward where you're aiming (the cursor ground point),
-        // so it glances off its travel line toward the threat you're firing at. Redundant→no-op when the
-        // body already faces the aim; reads when you strafe (move one way, aim another).
+        survivor.object.position.set(player.x, GROUND_Y, player.z);
+        survivor.setHeading(player.facing);   // A1: SMOOTH body turn (slerped in the rig), not a snap
+        // B3 head-look: the survivor turns its head toward where you're aiming (the cursor ground point).
         if (aimValid) survivor.setLookTarget(_aimPt.x, EYE_Y, _aimPt.z);
+        // A1 AIM-IK: the gun visibly TRACKS what it would shoot — the nearest zombie in the assist cone
+        // (the same target fireShot picks); when none is in the cone, the arm relaxes back to the walk. iso
+        // only (the survivor is hidden in the dive; the viewmodel already follows the camera there).
+        if (!dive.active && !dead) {
+          const ad = computeAim();
+          const tgt = getSim().queryCone(player.x, player.z, ad.x, ad.z, ASSIST.cosHalf, ASSIST.range);
+          survivor.setAim(tgt ? { x: tgt.x, y: GROUND_Y + ASSIST.chestY, z: tgt.z } : null);
+        } else survivor.setAim(null);
       }
+      const _sp = Math.hypot(player.vx || 0, player.vz || 0);
       charRig.update(rdt);
-      driveAnim(moving, sprinting, dead);
+      driveAnim(Math.min(1, _sp / MOVE.sprintSpeed), dead);   // A1: blend weights from ACTUAL velocity
       rig.update(dt);                                 // rig eases on the real frame dt (matches main's present)
     },
     // handles for critics / debug

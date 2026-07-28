@@ -58,7 +58,7 @@ export function createCharacterHorde(rig, opts = {}) {
     setActive(i, on) {
       const s = slots[i]; if (s.active === !!on) return;
       s.active = !!on; s.handle.object.visible = !!on; s.acc = 0;
-      if (!on) s.handle.mixer.stopAllAction();
+      if (!on) { s.handle.mixer.stopAllAction(); s.handle.resetAnim(); }   // A1: re-arm the loco blend on recycle (see resetAnim)
       activeCount += on ? 1 : -1;
     },
     setType(i, { scale, material } = {}) {
@@ -95,6 +95,8 @@ export function createCharacterHorde(rig, opts = {}) {
     clearLookTargets() { for (let i = 0; i < size; i++) slots[i].handle.clearLookTarget(); },
     hitReact(i, dx, dz) { slots[i].handle.hitReact(dx, dz); },
     setLayerParams(i, params) { slots[i].handle.setLayerParams(params); },
+    setLocomotion(i, speed01) { slots[i].handle.setLocomotion(speed01); },   // A1: velocity-driven idle/walk/run blend
+    playAction(i, name) { slots[i].handle.playAction(name); },               // A1: one-shot (hit/attack) over the blend
     dispose() { for (const s of slots) s.handle.dispose(); },
   };
 }
