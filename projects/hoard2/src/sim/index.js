@@ -40,6 +40,15 @@ export function createSim(ctx) {
   let horde = null, zRig = null;
   const _zType = new Array(pool.max).fill(null);       // last type mirrored per slot (avoid redundant setType)
   const _typeMat = { walker: null, runner: null, tank: null };
+  const _zPrevFlash = new Float32Array(pool.max);      // B3: prev-frame flash per slot → hit-react on the rising edge
+  // B3 per-TYPE motion personality (cheap character): runner TWITCHY (fast wide head-look, sharp flinch),
+  // tank PONDEROUS (slow narrow head-look, heavy slow flinch). Zombie flinch amp is modest — they also play
+  // the HitReact CLIP on flash; the layer adds a DIRECTIONAL recoil the clip lacks.
+  const ZLAYER = {
+    walker: { headLook: { cone: 1.3, speed: 5 },   hitReact: { amp: 0.6, dur: 0.4 } },
+    runner: { headLook: { cone: 1.6, speed: 11 },  hitReact: { amp: 0.7, dur: 0.26 } },
+    tank:   { headLook: { cone: 1.0, speed: 2.5 }, hitReact: { amp: 0.8, dur: 0.6, lean: 0.6 } },
+  };
 
   // ---- read-only game snapshot other owners + the HUD read (mutated in place; never reallocated) ----
   const state = {
@@ -174,7 +183,7 @@ export function createSim(ctx) {
       const z = pool.get(i);
       if (!z.alive) { if (_zType[i] !== null) { horde.setActive(i, false); _zType[i] = null; } continue; }
       horde.setActive(i, true);
-      if (_zType[i] !== z.type) { _zType[i] = z.type; horde.setType(i, { scale: config.ZTYPE[z.type].scale, material: _typeMat[z.type] || undefined }); }
+      if (_zType[i] !== z.type) { _zType[i] = z.type; horde.setType(i, { scale: config.ZTYPE[z.type].scale, material: _typeMat[z.type] || undefined }); horde.setLayerParams(i, ZLAYER[z.type] || ZLAYER.walker); }
       const dx = p.x - z.x, dz = p.z - z.z, d = Math.hypot(dx, dz), sp = Math.hypot(z.vx, z.vz);
       let stt;
       if (z.flash > 0.06) stt = 'hit';
@@ -183,8 +192,16 @@ export function createSim(ctx) {
       else if (sp > 0.15) stt = 'walk';
       else stt = 'idle';
       horde.setState(i, stt);
-      horde.setTransform(i, z.x, config.GROUND_Y, z.z, Math.atan2(dx, dz)); // face the survivor
+      // B3: the body faces where it's MOVING (velocity) when in motion, else the survivor — so a walker
+      // flanking around a ruin turns its BODY along its path while its HEAD cranes toward you (the dread
+      // read). A directional flinch fires on the rising edge of the hit flash (recoil AWAY from the shot).
+      const yaw = sp > 0.5 ? Math.atan2(z.vx, z.vz) : Math.atan2(dx, dz);
+      horde.setTransform(i, z.x, config.GROUND_Y, z.z, yaw);
+      if (z.flash > 0.06 && _zPrevFlash[i] <= 0.06) horde.hitReact(i, z.x - p.x, z.z - p.z);
+      _zPrevFlash[i] = z.flash;
     }
+    // every live head tracks the survivor within its cone (the "walkers turn to look at you" dread layer).
+    horde.setLookTarget(p.x, config.EYE_Y, p.z);
     const cp = (rig && rig.camera && rig.camera.position) || null;
     horde.update(sdt, cp ? cp.x : p.x, cp ? cp.y : 2, cp ? cp.z : p.z);
   }

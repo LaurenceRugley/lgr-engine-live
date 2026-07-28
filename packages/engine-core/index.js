@@ -249,6 +249,11 @@ export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/c
 // Hoard swaps its instanced-capsule zombies for these, same sim).
 export { createCharacterHorde } from './src/createCharacterHorde.js';
 
+// Beauty B3 CHARACTERS ALIVE — the corpse pool as a core ability (the dead persist, never blink out): a
+// pure fixed-slot allocator (TTL floor + oldest-first cap eviction). Node-safe deep-import at
+// '@lgr/engine-core/src/corpse-pool.js' (barrel-free) for a project's node-tested fx orchestration.
+export { createCorpsePool } from './src/corpse-pool.js';
+
 // HERO abilities in the MAIN barrel (were -lib-only) so workspace projects inherit them, not just the
 // no-build /live/ bundles. The Hoard's cavern is the first workspace consumer (assembly + self-shadow +
 // the shared beauty present). Tree-shaken out of any project that doesn't import them (sideEffects:false).

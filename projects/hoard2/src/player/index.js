@@ -64,6 +64,11 @@ export function createPlayer(ctx) {
     survivor.setState('idle');
   }).catch((e) => console.warn('[player] survivor.glb failed to load', e));
 
+  // B3 HIT-REACT — the survivor finally reacts to being mauled (survivor.glb has NO HitReact clip, so this
+  // procedural spine/arm flinch IS its hit reaction). Fired on the sim's player:damage; a generic recoil
+  // (the layer leans the torso back + throws the arms) — enough to sell "you got hit" without a clip.
+  events.on('player:damage', () => { if (survivor) survivor.hitReact(0, 0); });
+
   /* ---- iso follow-cam framed on the survivor (v1 enterHoard pattern) ---- */
   // LOOK-PASS (both critics): zoom 3.2 framed a ~6-unit window — too tight to SEE the horde close in
   // (they spawn at the rim); a wave-survival read needs the approach visible. 6.0 keeps the survivor
@@ -356,7 +361,13 @@ export function createPlayer(ctx) {
       ballistics.update(rdt);                         // integrate projectiles + swept hit-tests (→ onHit → weapon:hit)
 
       // place + orient the survivor mesh at the pose (both modes; body is behind the FP eye when dived).
-      if (survivor) { survivor.object.position.set(player.x, GROUND_Y, player.z); survivor.object.rotation.y = player.facing; }
+      if (survivor) {
+        survivor.object.position.set(player.x, GROUND_Y, player.z); survivor.object.rotation.y = player.facing;
+        // B3 head-look: the survivor turns its head toward where you're aiming (the cursor ground point),
+        // so it glances off its travel line toward the threat you're firing at. Redundant→no-op when the
+        // body already faces the aim; reads when you strafe (move one way, aim another).
+        if (aimValid) survivor.setLookTarget(_aimPt.x, EYE_Y, _aimPt.z);
+      }
       charRig.update(rdt);
       driveAnim(moving, sprinting, dead);
       rig.update(dt);                                 // rig eases on the real frame dt (matches main's present)

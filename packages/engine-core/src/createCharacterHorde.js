@@ -72,7 +72,9 @@ export function createCharacterHorde(rig, opts = {}) {
       h.position.set(x, y, z);
       _e.set(0, yaw, 0); h.quaternion.setFromEuler(_e);
     },
-    // Step active mixers with a distance LOD (far → lodHz, accumulated). Zero alloc.
+    // Step active mixers with a distance LOD (far → lodHz, accumulated). Zero alloc. B3: the procedural
+    // layer pass (_applyLayers) runs right after each real mixer step, at the SAME dt, so far characters
+    // get their head-look/flinch throttled with their mixer (and offsets never accumulate across skips).
     update(dt, camX, camY, camZ) {
       for (let i = 0; i < size; i++) {
         const s = slots[i]; if (!s.active) continue;
@@ -80,13 +82,19 @@ export function createCharacterHorde(rig, opts = {}) {
         const d2 = (p.x - camX) * (p.x - camX) + (p.y - camY) * (p.y - camY) + (p.z - camZ) * (p.z - camZ);
         if (d2 > lod2) {
           s.acc += dt; const iv = 1 / lodHz;
-          if (s.acc >= iv) { s.handle.mixer.update(s.acc); s.acc = 0; }
+          if (s.acc >= iv) { s.handle.mixer.update(s.acc); s.handle._applyLayers(s.acc); s.acc = 0; }
         } else {
           if (s.acc > 0) { s.handle.mixer.update(s.acc); s.acc = 0; }
           s.handle.mixer.update(dt);
+          s.handle._applyLayers(dt);
         }
       }
     },
+    // ---- B3 procedural-layer forwarding (the game drives these; a rig without the bones no-ops) ----
+    setLookTarget(x, y, z) { for (let i = 0; i < size; i++) if (slots[i].active) slots[i].handle.setLookTarget(x, y, z); },
+    clearLookTargets() { for (let i = 0; i < size; i++) slots[i].handle.clearLookTarget(); },
+    hitReact(i, dx, dz) { slots[i].handle.hitReact(dx, dz); },
+    setLayerParams(i, params) { slots[i].handle.setLayerParams(params); },
     dispose() { for (const s of slots) s.handle.dispose(); },
   };
 }

@@ -38,6 +38,24 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './character-anim.js';
+import { flinchEnvelope, headYawDelta } from './character-layers.js';
+import { damp } from './math.js';
+
+// Beauty B3 — PROCEDURAL MOTION LAYERS. Additive rotations applied to named bones AFTER the mixer poses
+// them from the clip, turning the clip-PLAYER into a motion SYSTEM. The bone names are the Quaternius /
+// mixamo family (Head, Spine1/2, LeftArm/RightArm — local Y runs UP each bone, so a local-Y twist yaws the
+// head and a local-X twist bends the spine). Module-level scratch — _applyLayers runs synchronously per
+// handle, never re-entrant, so one shared set is safe + alloc-free (engine-invariants #7).
+const _q = new THREE.Quaternion();
+const _eu = new THREE.Euler(0, 0, 0, 'YXZ');
+const _AX_Y = new THREE.Vector3(0, 1, 0);
+const _AX_X = new THREE.Vector3(1, 0, 0);
+const _AX_Z = new THREE.Vector3(0, 0, 1);
+// Default per-type layer personality. Consumers override via handle.setLayerParams / horde.setLayerParams.
+export const LAYER_DEFAULTS = {
+  headLook: { cone: 1.2, speed: 6, weight: 1 },      // cone rad · damp rate · how much of the turn to apply
+  hitReact: { amp: 1, dur: 0.4, lean: 0.5, arm: 0.7 }, // impulse gain · seconds · spine lean rad · arm fling rad
+};
 
 export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
   const STATES = states || ZOMBIE_STATES;
@@ -73,12 +91,58 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
       return a;
     }
     let current = null;
-    const rec = { mixer, rate: 0, acc: 0 };                 // rate 0 = every frame (M1b sets a LOD rate)
+    const rec = { mixer, rate: 0, acc: 0, applyLayers: null };  // rate 0 = every frame (M1b sets a LOD rate)
     recs.push(rec);
+
+    // ---- procedural layer bones + state (resolved from the cloned skeleton by name; missing bones just
+    // make the corresponding layer a no-op — a non-Quaternius rig degrades gracefully) ----
+    const bones = {};
+    object.traverse((n) => { if (n.isBone && !bones[n.name]) bones[n.name] = n; });
+    const boneHead = bones.Head || null, boneNeck = bones.Neck || null;
+    const boneSpine = bones.Spine2 || bones.Spine1 || bones.Spine || null;
+    const boneArmL = bones.LeftArm || null, boneArmR = bones.RightArm || null;
+    let lookTarget = null;             // {x,y,z} or null (null = no head-look → layer idle, zero cost)
+    let headYaw = 0;                   // the smoothed applied head-turn (rad), eased toward the desired
+    let flinchT = -1, flinchSign = 0;  // hit-react timer (-1 = inactive) + which side the hit came from
+    const lp = { headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact } };
+
     const handle = {
       object,
       position: object.position, quaternion: object.quaternion, scale: object.scale,
       get state() { return sm.current; },
+      // ---- B3 procedural-layer API (all opt-in; unused → the layer pass is a no-op) ----
+      setLookTarget(x, y, z) { if (!lookTarget) lookTarget = { x: 0, y: 0, z: 0 }; lookTarget.x = x; lookTarget.y = y; lookTarget.z = z; },
+      clearLookTarget() { lookTarget = null; },
+      hitReact(dx = 0, dz = 0) {
+        flinchT = 0;                                    // (re)start the impulse
+        _eu.setFromQuaternion(object.quaternion, 'YXZ');
+        const cy = _eu.y, side = Math.cos(cy) * dx - Math.sin(cy) * dz;  // >0 = hit came from the right
+        flinchSign = side >= 0 ? 1 : -1;
+      },
+      setLayerParams(p = {}) { if (p.headLook) Object.assign(lp.headLook, p.headLook); if (p.hitReact) Object.assign(lp.hitReact, p.hitReact); },
+      // Run AFTER a mixer step (the mixer reset the bones to the clip pose, so we multiply ONE fresh offset
+      // — never accumulating). The caller (rig.update / horde.update) only calls this when the mixer stepped.
+      _applyLayers(dt) {
+        if (boneHead && lookTarget) {
+          _eu.setFromQuaternion(object.quaternion, 'YXZ');
+          const dx = lookTarget.x - object.position.x, dz = lookTarget.z - object.position.z;
+          const want = headYawDelta(_eu.y, dx, dz, lp.headLook.cone) * lp.headLook.weight;
+          headYaw = damp(headYaw, want, lp.headLook.speed, dt);
+          if (boneNeck) { _q.setFromAxisAngle(_AX_Y, headYaw * 0.4); boneNeck.quaternion.multiply(_q); _q.setFromAxisAngle(_AX_Y, headYaw * 0.6); boneHead.quaternion.multiply(_q); }
+          else { _q.setFromAxisAngle(_AX_Y, headYaw); boneHead.quaternion.multiply(_q); }
+        }
+        if (flinchT >= 0) {
+          flinchT += dt;
+          const u = flinchT / lp.hitReact.dur;
+          if (u >= 1) { flinchT = -1; }
+          else {
+            const env = flinchEnvelope(u) * lp.hitReact.amp;
+            if (boneSpine) { _q.setFromAxisAngle(_AX_X, -env * lp.hitReact.lean); boneSpine.quaternion.multiply(_q); _q.setFromAxisAngle(_AX_Y, env * lp.hitReact.lean * 0.5 * flinchSign); boneSpine.quaternion.multiply(_q); }
+            if (boneArmL) { _q.setFromAxisAngle(_AX_Z, env * lp.hitReact.arm); boneArmL.quaternion.multiply(_q); }
+            if (boneArmR) { _q.setFromAxisAngle(_AX_Z, -env * lp.hitReact.arm); boneArmR.quaternion.multiply(_q); }
+          }
+        }
+      },
       setState(name, opts = {}) {
         const t = sm.to(name);
         if (!t.changed) return;                             // unknown or same state → no re-fade (no pop)
@@ -99,6 +163,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
         // geometry + material are SHARED with the source (SkeletonUtils clone) — never disposed per-handle.
       },
     };
+    rec.applyLayers = handle._applyLayers;   // so rig.update() runs the layer pass right after its mixer step
     return handle;
   }
 
@@ -107,10 +172,12 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
   function update(dt) {
     for (let i = 0; i < recs.length; i++) {
       const r = recs[i];
-      if (r.rate <= 0) { r.mixer.update(dt); continue; }
+      // The layer pass runs ONLY right after an actual mixer step (with the SAME dt), so its additive
+      // offsets never accumulate across skipped LOD ticks (it always follows a fresh clip pose).
+      if (r.rate <= 0) { r.mixer.update(dt); if (r.applyLayers) r.applyLayers(dt); continue; }
       r.acc += dt;
       const interval = 1 / r.rate;
-      if (r.acc >= interval) { r.mixer.update(r.acc); r.acc = 0; }
+      if (r.acc >= interval) { const a = r.acc; r.mixer.update(a); if (r.applyLayers) r.applyLayers(a); r.acc = 0; }
     }
   }
 

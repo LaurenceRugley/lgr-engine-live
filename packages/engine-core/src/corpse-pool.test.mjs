@@ -1,13 +1,8 @@
 /* ============================================================
-   hoard2 · src/fx/corpse-pool.test.mjs — DONE #5 corpse-persistence bookkeeping (Rule 9: intent, not "runs").
-   ------------------------------------------------------------
-   These tests encode WHY the corpse pool exists: "kills leave corpses that persist ≥10s or to pool cap — no
-   vanishing" (docs/hoard-oneshot-prompt DONE #5). They pin the two behaviours the DONE rests on and would
-   FAIL if either regressed:
-     · the TTL FLOOR — a corpse is guaranteed alive for at least CORPSE_TTL_S (it never vanishes on death).
-     · the CAP CEILING — at CORPSE_CAP the pool recycles the OLDEST corpse (deterministic, oldest-first) and
-       never grows past the cap.
-   Pure math + a fake clock — no THREE, no engine barrel (which dies under `node --test`).
+   corpse-pool.test.mjs — createCorpsePool bookkeeping (Rule 9: intent, not "runs"). Lifted to core with the
+   module (Beauty B3). Pins WHY the pool exists: "kills leave corpses that persist ≥10s or to pool cap — no
+   vanishing" — the TTL floor + the deterministic oldest-first cap eviction, both of which would FAIL if
+   regressed. Pure math + a fake clock — no THREE, no engine barrel (which dies under `node --test`).
    ============================================================ */
 import test from 'node:test';
 import assert from 'node:assert/strict';

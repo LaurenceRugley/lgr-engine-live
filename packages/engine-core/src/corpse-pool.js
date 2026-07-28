@@ -1,21 +1,22 @@
 /* ============================================================
-   hoard2 · src/fx/corpse-pool.js — the CORPSE POOL bookkeeping (PURE, no THREE, node-tested).
+   @lgr/engine-core — createCorpsePool (Beauty B3: CHARACTERS ALIVE — corpse pool as a CORE ability).
    ------------------------------------------------------------
-   DONE #5: "hits leave decals; kills leave corpses that persist ≥10s or to pool cap — no vanishing."
-   HOARD-CONTRACT §Game-layer builds pins the corpse pool as a SECOND small createCharacterHorde over the
-   zombie rig, slots pinned to the death state, fed by `zombie:death`. This file is the *math* half of that
-   — a fixed-size slot pool with two recycle rules — kept free of THREE so it is node-testable in CI (the
-   engine barrel pulls shaders and dies under `node --test`; the THREE glue lives in index.js).
+   The PURE bookkeeping half of "the dead persist, they do not blink out": a fixed-size slot pool with two
+   recycle rules, deliberately THREE-free so it is node-testable in CI (the engine barrel pulls shaders and
+   dies under `node --test`) and reusable by any project. The visual half — a second createCharacterHorde
+   over the character rig, its slots pinned to the death state and fed by a `death` event — is the project's
+   glue; this module is the deterministic slot allocator underneath it. Lifted from hoard2 (the one-shot's
+   flagged follow-up) so every future project inherits corpse persistence for free (second-consumer test).
 
    TWO RECYCLE RULES (both are "no vanishing" — a corpse never blinks out the instant it dies):
-     1. AGE floor — a corpse persists AT LEAST `ttl` seconds (CORPSE_TTL_S ≥ 10). update(now) frees a slot
-        only once `now - born >= ttl`. So a corpse is guaranteed on-screen for the whole floor window.
-     2. CAP ceiling — when all `cap` slots are active (CORPSE_CAP) and a new death arrives, the OLDEST
-        corpse's slot is recycled to make room (oldest = smallest spawn sequence). The pool never grows
-        past `cap`, and eviction is deterministic oldest-first (not random, not newest).
+     1. AGE floor — a corpse persists AT LEAST `ttl` seconds (>= ~10). update(now) frees a slot only once
+        `now - born >= ttl`. So a corpse is guaranteed on-screen for the whole floor window.
+     2. CAP ceiling — when all `cap` slots are active and a new death arrives, the OLDEST corpse's slot is
+        recycled to make room (oldest = smallest spawn sequence). The pool never grows past `cap`, and
+        eviction is deterministic oldest-first (not random, not newest).
 
-   `seq` is a monotonic spawn counter — since it only ever increases, the smallest live `seq` is exactly
-   the oldest live corpse, so eviction ordering is unambiguous even when several deaths share one frame's
+   `seq` is a monotonic spawn counter — since it only ever increases, the smallest live `seq` is exactly the
+   oldest live corpse, so eviction ordering is unambiguous even when several deaths share one frame's
    timestamp. `born` (wall-clock seconds) drives the TTL floor; `seq` drives eviction order.
 
    C++ anchor: a fixed object pool of POD structs — allocate `cap` up front, hand out slots by index, and

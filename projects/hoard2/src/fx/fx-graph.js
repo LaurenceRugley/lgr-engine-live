@@ -24,7 +24,7 @@
      sfx       | null : { fire(pos), hit(pos,isBody), melee(pos), death(pos), barrier(kind) }
      sink            : { ready()->bool, apply(i, slot), recycle(i), step(dt) }   // the corpse horde glue
    ============================================================ */
-import { createCorpsePool } from './corpse-pool.js';
+import { createCorpsePool } from '@lgr/engine-core/src/corpse-pool.js';   // B3: lifted to core (deep-import = node-safe, barrel-free)
 
 const TWO_PI = Math.PI * 2;
 
