@@ -68,9 +68,13 @@ export const NIGHT = {
 export const DAY_LENGTH_S = 540; // 9 min real per full day→night→day cycle
 // Phase t ∈ [0,1] over the cycle maps to sunRig.goTo(t). night = t in the dark arc; nightFactor is a
 // smooth ramp across dusk→midnight→dawn so combat difficulty eases in, not a hard switch.
-// startT is a READABLE mid-morning (sun well up) so the opening arena is legible; the cycle then
-// descends through dusk (duskT) into night across DAY_LENGTH_S, so a run still crosses a full night.
-export const SUN = { dawnT: 0.22, duskT: 0.72, startT: 0.42 };
+// B2 finding #2 (owner: "the sun isn't moving in a run"): the cycle was never pinned — the play-length
+// probe measured a full 98° arc over DAY_LENGTH_S — but startT 0.42 opened MID-MORNING where the sun
+// climbs to noon and hangs HIGH (28-49°) for ~2 min, so its movement reads as static and dusk was ~3 min
+// out (past a short run). Fix: open JUST PAST NOON (0.52) so the sun DESCENDS visibly from the first frame
+// (shadows lengthen immediately) and sunset/night land ~1.8 min in — visible in any run — while the
+// opening is still readable daylight (sun ~48°) and the full day→night→day cycle stays 9 min (the spec).
+export const SUN = { dawnT: 0.22, duskT: 0.72, startT: 0.52 };
 
 /* ---- DIVE (iso ↔ first-person — ratified dilation ~0.5) ---- */
 export const DIVE_TIMESCALE = 0.5; // world clock while dived; the walker moves at real dt (matrix stride)

@@ -45,6 +45,26 @@ export function createWorld(ctx) {
   // Hide the default baked city — the decrepit world takes its place. BEAUTY tier; the lead's coupled-
   // look pass tunes the grade on top.
   engine.setUrbanVisible?.(false);
+  // B2 WORLD-TRUTH (owner's phantom-water bug): the decrepit forest arena has NO water body. The engine's
+  // city bay-water plane + ripple sim was being re-shown under the map every frame by renderCityPipeline's
+  // refraction grab; setWaterEnabled(false) is the contextual-water seam that keeps it off (city stays true).
+  // ?water=1 forces it back ON — the before/after A/B toggle for the water-edge proof + debugging.
+  const _waterOn = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('water') === '1');
+  engine.setWaterEnabled?.(_waterOn);
+  // B2 CLOUD-SCALE LIFT (owner's B1 "white puffs" flag): the engine cloud field's altitude band (hiY
+  // 4-6.8) is CITY-scale → head-height sprites in this small arena. The decrepit forest reads better
+  // BARE (a grim empty sky), so disable the field here (engine seam, city clouds untouched). The stray
+  // low-sprite hide in main.js becomes redundant but harmless.
+  engine.setCloudsEnabled?.(false);
+  // B2 finding #6 — dial the beauty chromatic-aberration WAY down (the loud rainbow fringing on thin tree
+  // trunks both B1 critics flagged). 0.3 keeps a filmic hint without the rainbow. City CA untouched (1.0).
+  engine.setChromaScale?.(0.3);
+  // B2 finding #5 — grade warm→cool "rot" A/B (OWNER decides taste). Default 0 = the current WARM grade
+  // (candidate A); ?gradecool=1 renders the COOL/desaturated candidate B. Shipped as a toggle so the owner
+  // picks; whichever he chooses becomes the baked default next.
+  const _gradeCool = ctx.flags && ctx.flags.q && ctx.flags.q.get('gradecool') != null
+    ? Math.min(1, Math.max(0, Number(ctx.flags.q.get('gradecool')) || 0)) : 0;
+  engine.setGradeCool?.(_gradeCool);
   engine.setPostMode?.(2);
 
   /* ---- TEXTURE FORGE (Beauty B1 GROUND TRUTH): bake seeded procedural PBR (albedo/ORM/Sobel-normal)
@@ -58,13 +78,20 @@ export function createWorld(ctx) {
   const forge = createTextureForge({ renderer, enabled: !forgeOff });
   const groundExtent = (ARENA_EXTENT + 6) * 2;   // ground disc diameter (m) the 4 m tile repeats across
   const surfaces = forgeHoardMaterials(forge, {
-    extents: { ground: groundExtent, stone: 3.0, bark: 2.4, wood: 1.2, scrap: 1.0 },
-    // CRITIC R1 FIX (bark read as BLACK VOIDS): the forest bakes a DARK per-vertex archetype colour
+    extents: { ground: groundExtent, stone: 3.0, bark: 2.4, barkLive: 2.4, wood: 1.2, scrap: 1.0 },
+    // CRITIC R1 FIX (dead bark read as BLACK VOIDS): the forest bakes a DARK per-vertex archetype colour
     // (trunk hex) into the geometry; with vertexColors:true it multiplied the already-dark bark map to
     // near-black. Force vertexColors:FALSE so only the bark MAP shows — the per-instance tint
     // (instanceColor) still modulates it (three applies instanceColor independent of vertexColors).
-    matOpts: { bark: { vertexColors: false } },
+    // B2: barkLive KEEPS vertexColors so the conifer's GREEN CANOPY vertex colour survives; the healthy
+    // bark map textures the whole live tree (green cones read as textured foliage, trunk as warm bark).
+    matOpts: { bark: { vertexColors: false }, barkLive: { vertexColors: true } },
   });
+  // B2 live trees: the conifer's GREEN CANOPY + warm trunk come from its baked VERTEX COLOURS; the forge
+  // bark ALBEDO map would multiply the green down to dark olive, so DROP the albedo map but KEEP the forge
+  // NORMAL + ROUGHNESS ("healthier bark tint via the forge" = forge RELIEF over a healthy vertex tint).
+  // Guarded: the flat fallback path (iOS-p0) has no map to clear.
+  if (surfaces.barkLive && surfaces.barkLive.map) { surfaces.barkLive.map = null; surfaces.barkLive.needsUpdate = true; }
   ctx.forge = forge;          // read-only engine capability (like engine/renderer)
   ctx.surfaces = surfaces;    // build reads ctx.surfaces.wood / .scrap for its barriers
 
@@ -97,7 +124,10 @@ export function createWorld(ctx) {
   const _coarse = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   const _mobileFloor = _coarse || (typeof window !== 'undefined' && !!window.__lowp);
   const _fillBase = _mobileFloor ? 3.2 : 1.0;   // daytime sky-fill (hemisphere)
-  const _ambBase  = _mobileFloor ? 1.6 : 1.3;   // NIGHT-only flat floor (see update(): × nightFactor)
+  // B2 finding #6 — NIGHT LEGIBILITY: raise the desktop night flat-floor (1.3 → 2.2) so the whole arena is
+  // dimly READABLE at night (you can see shapes/zombies approaching), not blind. Safe: this floor is ×nf
+  // (0 by day, so the sun stays unflattened) and at night there is no sun to flatten (LIGHT-THE-HOARD).
+  const _ambBase  = _mobileFloor ? 1.6 : 2.2;   // NIGHT-only flat floor (see update(): × nightFactor)
   const fill = new THREE.HemisphereLight(0x9aa7b0, 0x4a4436, _fillBase);
   scene.add(fill);
   const amb = new THREE.AmbientLight(0x9a9482, 0); // intensity driven per-frame to _ambBase × nightFactor
@@ -148,12 +178,19 @@ export function createWorld(ctx) {
   } catch (e) { console.warn('[world] decrepit city skipped:', e && e.message); }
 
   /* ---- DEAD FOREST: bare trees + rocks (no green conifers), central clearing open ---- */
+  // B2 finding #3 — LIVE TREES among the dead ("dying, not dead"): a FEW green conifers (weight 0.14 = the
+  // mix ratio) seeded through the many dead trunks, their trunks + canopy textured by the HEALTHY forge
+  // bark (barkLive, warm + lichen). rocks keep vertex-colour; dead 'bare' keep the weathered forge bark.
   const forest = createForest({
     seed, radius: ARENA_EXTENT - 2, arenaR: PLAY_RADIUS, count: 96, minSpacing: 1.9,
     clearings: [{ x: 0, z: 0, r: 6 }],
-    archetypes: [{ key: 'bare', weight: 0.72, r: 0.34 }, { key: 'rock', weight: 0.28, r: 0.3 }],
+    archetypes: [
+      { key: 'bare', weight: 0.62, r: 0.34 },
+      { key: 'rock', weight: 0.24, r: 0.3 },
+      { key: 'conifer', weight: 0.14, r: 0.38 },   // the live minority
+    ],
     groundY: GROUND_Y,
-    materials: { bare: surfaces.bark },   // FORGE bark on the dead trunks/branches (rocks keep vertex-colour)
+    materials: { bare: surfaces.bark, conifer: surfaces.barkLive },
   });
   scene.add(forest.group);
 
@@ -221,7 +258,11 @@ export function createWorld(ctx) {
   // PLAYER LANTERN: a warm light that RIDES the survivor so their fighting area is always legible — the
   // perimeter torch ring (r≈23, dist 15) never reaches the arena centre, so in deep night the survivor
   // would otherwise stand in pitch black. Modest by day, full at night. Positioned per-frame in update().
-  const lantern = new THREE.PointLight(0xffb877, 2.0, 13, 2);
+  // B2 finding #6 — FP NIGHT LEGIBILITY (owner: "dive at night is blind"). The lantern is the survivor's
+  // key light in the dive; range 13/night-4.5 wasn't enough to read the immediate fighting area against
+  // the ACES night grade. Wider range + a much stronger night term so night is DARK-BUT-PLAYABLE (a warm
+  // pool travels with the survivor); the arena beyond stays grim-dark. Per-frame intensity set in update().
+  const lantern = new THREE.PointLight(0xffb877, 2.0, 19, 2);
   lantern.position.set(0, GROUND_Y + 1.6, 0);
   scene.add(lantern);
 
@@ -258,7 +299,7 @@ export function createWorld(ctx) {
         const pp = registry.get('player').player;
         if (pp) lantern.position.set(pp.x, GROUND_Y + 1.6, pp.z);
       }
-      lantern.intensity = 1.2 + 3.3 * _nf;   // legible key at night, subtle warmth by day
+      lantern.intensity = 1.3 + 4.6 * _nf;   // B2: warm night key pool (dive legibility) over the night floor
 
       // DAY sky-fill: a modest hemisphere that lifts the arena so the decrepit palette reads under the sun,
       // fading toward night as the sky darkens. Directional-ish (sky-over-ground), so the sun's shaping and

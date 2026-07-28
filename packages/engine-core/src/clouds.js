@@ -56,9 +56,15 @@ function makeCloudTexture() {
   return tex;
 }
 
-export function createCloudField({ extent = 8, count = 16 } = {}) {
+export function createCloudField({ extent = 8, count = 16, enabled = true } = {}) {
   const group = new THREE.Group();
   group.raycast = () => {};
+  // B2 CLOUD-SCALE LIFT: `enabled` gates the whole field. The city hiY band (4.0-6.8) is sized for the
+  // dimetric CITY frame; in a small forest arena those sprites sit at HEAD HEIGHT (the owner's "white
+  // puffs"). A small-arena consumer disables the field (or a future altitude param lifts it). Default
+  // true → city byte-identical (never disabled there). setEnabled(false) hides the group + skips update.
+  let _enabled = enabled;
+  group.visible = _enabled;
 
   let texture = makeCloudTexture();
   const SPAN = extent + 6;                 // half-width of the drift band (covers + overhangs the city)
@@ -88,6 +94,7 @@ export function createCloudField({ extent = 8, count = 16 } = {}) {
   const DARK = new THREE.Color('#5b626e');   // rain greys the clouds toward this
 
   function update(dt, elapsed, sunRig, weatherRig) {
+    if (!_enabled) return;                             // B2: disabled field does no work + stays hidden
     const rain = weatherRig ? weatherRig.cloud : 0;   // heavy cover driver (rain/snow), 0 in clear/fog
     const fog  = weatherRig ? weatherRig.fog : 0;     // mist driver
     // how much of the pool is visible: a sparse baseline always, fuller in rain, broad low veil in fog.
@@ -138,7 +145,8 @@ export function createCloudField({ extent = 8, count = 16 } = {}) {
   }));
   function getFollowables() { return followables; }
 
-  return { group, update, setTexture, getFollowables, get count() { return clouds.length; } };
+  function setEnabled(on) { _enabled = !!on; group.visible = _enabled; }
+  return { group, update, setTexture, getFollowables, setEnabled, get enabled() { return _enabled; }, get count() { return clouds.length; } };
 }
 
 function smooth(v, a, b) { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); }

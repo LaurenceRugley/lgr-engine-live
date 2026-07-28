@@ -24,14 +24,16 @@ import forgeWoodscrapFrag from './shaders/forge-woodscrap.frag';
 
 export const HOARD_SURFACES = {
   ground: { frag: forgeGroundFrag, size: 1024, worldSize: 6.0, relief: 0.05, seed: 0x6d, roughness: 1.0, metalness: 0.0, fallbackColor: 0x5f5a4a },
-  bark:   { frag: forgeBarkFrag,   size: 512,  worldSize: 0.9, relief: 0.11, seed: 0x2b, roughness: 0.95, metalness: 0.0, fallbackColor: 0x4b3c2c },
+  bark:   { frag: forgeBarkFrag,   size: 512,  worldSize: 0.9, relief: 0.11, seed: 0x2b, roughness: 0.95, metalness: 0.0, fallbackColor: 0x4b3c2c, uniforms: { uHealth: { value: 0.0 } } },
+  // B2: healthy living-tree bark (warm brown + lichen) for the few live trees among the dead.
+  barkLive: { frag: forgeBarkFrag, size: 512, worldSize: 0.9, relief: 0.10, seed: 0x2b, roughness: 0.9, metalness: 0.0, fallbackColor: 0x5a4a2e, uniforms: { uHealth: { value: 1.0 } } },
   stone:  { frag: forgeStoneFrag,  size: 1024, worldSize: 2.4, relief: 0.08, seed: 0x51, roughness: 0.9, metalness: 0.0, fallbackColor: 0x36322c },
   wood:   { frag: forgeWoodscrapFrag, size: 512, worldSize: 1.2, relief: 0.06, seed: 0x1f, roughness: 0.92, metalness: 0.0, fallbackColor: 0x7a5a36, uniforms: { uMetalMix: { value: 0.0 } } },
   scrap:  { frag: forgeWoodscrapFrag, size: 512, worldSize: 1.0, relief: 0.05, seed: 0x8c, roughness: 0.55, metalness: 0.85, fallbackColor: 0x4a453d, uniforms: { uMetalMix: { value: 1.0 } } },
 };
 
 // sensible default world extents (metres) each surface tile repeats across — the wiring may override.
-const DEFAULT_EXTENTS = { ground: 52, bark: 2.4, stone: 3.0, wood: 1.2, scrap: 1.2 };
+const DEFAULT_EXTENTS = { ground: 52, bark: 2.4, barkLive: 2.4, stone: 3.0, wood: 1.2, scrap: 1.2 };
 
 /* Bake every hoard surface and return ready MeshStandardMaterials, repeats pre-set from the extents.
    forge.supported === false => every material is the recipe's flat fallback (LOWP phone path). */

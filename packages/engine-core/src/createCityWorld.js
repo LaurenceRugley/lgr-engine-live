@@ -323,6 +323,37 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     water.visible = on; backdrop.visible = on;
   };
 
+  /* B2 WORLD-TRUTH — WATER IS CONTEXTUAL (the parameterized enable seam). The bay water plane + its
+     ripple sim belong to the CITY; a non-city map (hoard2's forest arena) has no water body and must
+     not render one. Before this, setUrbanVisible(false) set water.visible=false but the per-frame
+     refraction-grab in renderCityPipeline RESTORED it (`water.visible = !_editing`), so the square
+     rippling sim plane re-appeared under the map every frame (owner's phantom-water bug). `_waterOn`
+     (DEFAULT true → city byte-identical, never called there) gates every per-frame water-visibility
+     restore; setWaterEnabled(false) is the world's declaration of "no water body here".
+     FUTURE LIFT (owner's manifest, "for now" = not this arc): contextual ponds/lakes/shorelines placed
+     ON TOP of a world's ground via a region seam — this enable flag is its foundation. */
+  let _waterOn = true;
+  const setWaterEnabled = (on) => {
+    _waterOn = !!on;
+    water.visible = _waterOn;
+    if (!_waterOn) { waterFlow.group.visible = false; if (lakeGroup) lakeGroup.visible = false; }
+  };
+
+  /* B2 finding #6 — POST chromatic aberration. The beauty grade adds a screen-space CA (uChroma×CA_STRENGTH,
+     strongest at frame edges); on hoard2's bright thin dead/live tree trunks it read as loud rainbow
+     fringing (both B1 critics flagged it). `_chromaScale` (DEFAULT 1 → city beauty byte-identical, never
+     changed there; each project owns its engine instance) scales the beauty uChroma so a consumer can
+     dial the fringing down. hoard2 sets ~0.3 (a filmic hint, not a rainbow). Stylized tiers keep uChroma=0. */
+  let _chromaScale = 1.0;
+  const setChromaScale = (s) => { _chromaScale = Math.max(0, s); };
+
+  /* B2 finding #5 — GRADE warm→cool "rot" candidate (owner decides taste; this is the knob for the A/B).
+     _gradeCool (0 = the keyframed WARM grade, city default, byte-identical; 1 = full cool/grim) pulls the
+     beauty white-balance OFF warm (→ the cooler sky-IBL cast reads) and desaturates toward a rotting mood.
+     Scoped per-consumer (each project owns its engine); hoard2 exposes it as ?gradecool for the owner A/B. */
+  let _gradeCool = 0.0;
+  const setGradeCool = (a) => { _gradeCool = Math.min(1, Math.max(0, a)); };
+
   function worldHeightAt(wx, wz) {
     if (!worldData) return 0;
     const { size, height, sea, relief } = worldData;
@@ -630,7 +661,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     exit() { _editing = false; worldActive = false; setWorldVisible(false); placedLife.group.visible = false; waterFlow.group.visible = false; dust.group.visible = false; for (const g of URBAN()) g.visible = true; if (window.__world) window.__world.active = false; },
     setEditing(on) {
       _editing = !!on;
-      water.visible = worldActive && !_editing;
+      water.visible = _waterOn && worldActive && !_editing;
       if (lakeGroup) lakeGroup.visible = worldActive && !_editing;
       waterFlow.group.visible = worldActive && !_editing;
       if (!_editing && worldActive) repoolWater();
@@ -741,7 +772,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     water.visible = false;
     renderer.setRenderTarget(grabRT);
     renderer.render(scene, cam);
-    water.visible = true;
+    water.visible = _waterOn;   // B2: respect the contextual-water seam (was unconditional true)
     renderer.setRenderTarget(beautyRT);
     renderer.render(scene, cam);
     bloomPass(beautyRT);
@@ -799,7 +830,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     city.fill.intensity = beauty ? _baseFill * (1 - 0.60 * midK - 0.35 * lw) + 0.35 * sd * nightFillGate(sunRig.sunArc.y) : _baseFill;
     windowRecess.value = beauty ? midK : 0;
     if (beauty) {
-      filmicMaterial.uniforms.uWarmBal.value = 0.90 * midK;
+      filmicMaterial.uniforms.uWarmBal.value = 0.90 * midK * (1 - _gradeCool);   // B2: cool candidate kills the warm balance
       scene.environmentIntensity = _baseEnvI * (1 - 0.66 * midK - 0.58 * lw);
       filmicMaterial.uniforms.uBeautyExp.value = 1.0 - 0.12 * midK - 0.17 * lw;
       city.fill.color.lerp(NOON_NEUTRAL, 0.45 * midK);
@@ -819,7 +850,9 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     water.visible = false;
     renderer.setRenderTarget(grabRT);
     renderer.render(scene, rig.camera);
-    water.visible = !_editing;
+    water.visible = _waterOn && !_editing;   // B2: the phantom-water fix — was `!_editing`, re-showed the
+    // bay sim plane under hoard2's map every frame despite setUrbanVisible(false). _waterOn defaults true
+    // (city byte-identical); hoard2 calls setWaterEnabled(false).
 
     if (mode === 1 && !beauty) {
       renderer.setRenderTarget(finalDest);
@@ -848,7 +881,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
         filmicMaterial.uniforms.uAces.value = beauty ? 1.0 : 0.0;
         filmicMaterial.uniforms.uGrade.value = beauty ? 1.0 : 0.0;
         filmicMaterial.uniforms.uGrain.value = 1.0;
-        filmicMaterial.uniforms.uChroma.value = 1.0;
+        filmicMaterial.uniforms.uChroma.value = 1.0 * _chromaScale;   // B2: scaled (hoard2 dials CA down)
         filmicMaterial.uniforms.uDither.value = beauty ? 1.0 : 0.0;
         runPass(filmicMaterial, finalDest);
         window.__style = beauty ? 'beauty' : 'raw';  // F1: label truth — mode-2 beauty or raw (vector)
@@ -914,7 +947,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
       sp.mieG      = Math.max(0.50, sp.mieG - 0.25 * _lw);
     }
     skyAtmo.setSun(sunRig.sunArc); skyAtmo.setParams(sunRig.skyParams);
-    filmicMaterial.uniforms.uGradeSat.value = sunRig.grade.sat;
+    filmicMaterial.uniforms.uGradeSat.value = sunRig.grade.sat * (1 - 0.4 * _gradeCool);   // B2: cool candidate desaturates toward rot
     filmicMaterial.uniforms.uGradeContrast.value = sunRig.grade.contrast;
     scene.environmentIntensity = 0.34 * (1 - 0.6 * THREE.MathUtils.clamp(sunRig.sunArc.y * 1.5, 0, 1));
     _baseEnvI = scene.environmentIntensity;
@@ -1047,5 +1080,11 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     setPilotWaterSampler, setPilotGroundSampler, collider,
     fitShadowFrustum, SHADOW_DIST,
     setUrbanVisible,   // L HOARD-3: hide the whole city for a non-city map (keeps the sky)
+    setWaterEnabled,   // B2 WORLD-TRUTH: contextual-water enable seam (false → no bay water body; city default true)
+    get waterEnabled() { return _waterOn; },
+    setCloudsEnabled: (on) => clouds.setEnabled(on),   // B2 CLOUD-SCALE LIFT: false → no head-height puffs in a small arena
+    get cloudsEnabled() { return clouds.enabled; },
+    setChromaScale,    // B2: scale the beauty chromatic-aberration (1 = city default; hoard2 dials down)
+    setGradeCool,      // B2: warm→cool grade candidate (0 = city warm default; hoard2 ?gradecool for the owner A/B)
   };
 }
