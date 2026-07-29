@@ -24,7 +24,7 @@
    C++ anchor: the factory closes over its state like a class instance; the returned facade is its
    vtable of public methods, and probe.* are friend hooks the test harness reaches in through.
    ============================================================ */
-import { createBarrierField, canAfford, BARRIER_COST, HARVEST } from './barrier-core.js';
+import { createBarrierField, canAfford, BARRIER_COST, HARVEST, WALL } from './barrier-core.js';
 import * as config from '../core/config.js';
 
 export function createBuild(ctx) {
@@ -105,9 +105,25 @@ export function createBuild(ctx) {
     const pose = placementPose();
     // Drop the wall ~2.2m ahead of the survivor, broadside to facing (facing 0 = +z → wall runs x).
     const ahead = 2.2;
-    const cx = pose.x + Math.sin(pose.facing) * ahead;
-    const cz = pose.z + Math.cos(pose.facing) * ahead;
+    let cx = pose.x + Math.sin(pose.facing) * ahead;
+    let cz = pose.z + Math.cos(pose.facing) * ahead;
     const dir = Math.abs(Math.sin(pose.facing)) > Math.abs(Math.cos(pose.facing)) ? 'z' : 'x';
+    // A3 PLACEMENT FIX (owner: "fix kinda the placements"). REPRODUCED: a stationary survivor crafts every
+    // barrier at the identical 2.2 m-ahead spot, so repeated placements STACK into one z-fighting block of
+    // overlapping planks instead of a wall — you can't build a line. Fix (clear ergonomic defect, no taste
+    // call): if the target overlaps an existing wall, slide the new segment along the wall's RUN axis to the
+    // next free slot (alternating sides), so successive crafts EXTEND the wall into a defensive line. Stay
+    // inside the play disc; if no clear slot is found, fall back to the on-spot placement (never lose a craft).
+    const runX = dir === 'x' ? 1 : 0, runZ = dir === 'z' ? 1 : 0;
+    const occupied = (x, z) => field.barriers.some((bb) => bb.alive && Math.hypot(bb.cx - x, bb.cz - z) < WALL.length * 0.85);
+    if (occupied(cx, cz)) {
+      outer: for (let i = 1; i <= 6; i++) {
+        for (const s of [1, -1]) {
+          const x = cx + runX * WALL.length * i * s, z = cz + runZ * WALL.length * i * s;
+          if (!occupied(x, z) && Math.hypot(x, z) < config.PLAY_RADIUS - 1) { cx = x; cz = z; break outer; }
+        }
+      }
+    }
     const b = field.place(cx, cz, dir);
     spawnMesh(b);
     emitBarrier('barrier:place', b);

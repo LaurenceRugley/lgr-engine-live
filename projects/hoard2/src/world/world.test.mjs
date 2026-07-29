@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { PROFILES } from '../../../../packages/engine-core/src/citygen.js';
 import { createRng } from '../core/rng.js';
 import * as config from '../core/config.js';
-import { buildDecrepitProfile } from './profile.js';
+import { buildDecrepitProfile, buildIntactProfile } from './profile.js';
 import { nightFactorAt, resolveNight, phaseAt, phaseForNight, smoothstep } from './daynight.js';
 import { scatterRuins, deriveHarvest } from './scatter.js';
 
@@ -58,6 +58,15 @@ test('buildDecrepitProfile is pure: coast.base drives the extent knob, same args
   assert.equal(buildDecrepitProfile(3.0).coast.base, 3.0, 'coast.base is the passed value (→ createCity extent)');
   assert.notEqual(buildDecrepitProfile(3.0).coast.base, buildDecrepitProfile(0.7).coast.base);
   assert.deepEqual(buildDecrepitProfile(0.7), buildDecrepitProfile(0.7), 'deterministic');
+});
+
+test('A3 building variety: the INTACT profile reads as still-standing (taller + roofed) vs the decrepit ruins', () => {
+  const d = buildDecrepitProfile(0.7), i = buildIntactProfile(0.7);
+  assert.ok(i.hMax > d.hMax, `intact must be TALLER (${i.hMax}) than the collapsed ruins (${d.hMax}) — buildings still up`);
+  assert.ok(i.roofRate > d.roofRate, `intact roofs mostly SURVIVE (${i.roofRate}) vs collapsed (${d.roofRate})`);
+  assert.ok(i.nightLit > d.nightLit, 'intact keeps a few lit windows (holdouts) vs the abandoned dark');
+  assert.deepEqual(i.towers, d.towers, 'SAME grim palette — one dying settlement at different stages, not a fresh suburb');
+  assert.deepEqual(buildIntactProfile(0.7), buildIntactProfile(0.7), 'deterministic (seeded world-gen)');
 });
 
 /* ------------------------------------------------------------------ DAY/NIGHT curve */

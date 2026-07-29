@@ -85,7 +85,12 @@ export function createEngineCore(opts = {}) {
     throw err;
   }
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  // A3 SHADOW CEILING (core ability, city byte-identical): the shadow filter type is now a per-project option.
+  // Default PCFShadowMap keeps every existing consumer (the city) byte-for-byte identical; a project that
+  // wants softer, more realistic shadow edges on desktop opts into 'soft' (PCFSoftShadowMap — the same filter
+  // the product-stage already uses). 'basic'/'pcf'/'soft' → the three THREE constants; unknown → PCF.
+  const _SHADOW_TYPES = { basic: THREE.BasicShadowMap, pcf: THREE.PCFShadowMap, soft: THREE.PCFSoftShadowMap };
+  renderer.shadowMap.type = _SHADOW_TYPES[opts.shadowType] || THREE.PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
   const _coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);

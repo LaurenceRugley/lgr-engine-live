@@ -33,7 +33,7 @@ import {
   generateTerrain, buildTerrainMesh,
   createTextureForge, forgeHoardMaterials, WEAPON_SKINS,
 } from '@lgr/engine-core';
-import { buildDecrepitProfile } from './profile.js';
+import { buildDecrepitProfile, buildIntactProfile } from './profile.js';
 import { phaseAt, resolveNight, phaseForNight, nightFactorAt } from './daynight.js';
 import { scatterRuins, deriveHarvest } from './scatter.js';
 
@@ -192,6 +192,20 @@ export function createWorld(ctx) {
     scene.add(city.group);
   } catch (e) { console.warn('[world] decrepit city skipped:', e && e.message); }
 
+  /* ---- A3 BUILDING VARIETY: a SECOND cluster of INTACT structures (taller, roofed, a few lit windows) at
+     the OPPOSITE corner, so the skyline reads "dying, not uniformly destroyed" — some buildings still stand
+     among the collapsed stumps (same doctrine as the live trees among the dead). Seeded off (seed+1) so it's
+     deterministic and DIFFERENT from the ruined cluster. Same crash-safe re-material + light-strip as above. */
+  try {
+    const intact = createCity({ profile: buildIntactProfile(0.7), seed: (seed + 1) >>> 0 });
+    if (intact.key) intact.group.remove(intact.key);
+    if (intact.fill) intact.group.remove(intact.fill);
+    intact.group.traverse((o) => { if (o.isMesh) { o.material = surfaces.stone; o.castShadow = true; o.receiveShadow = true; } });
+    intact.group.position.set(PLAY_RADIUS + 5, 0, -(PLAY_RADIUS + 4));   // opposite corner from the ruins
+    intact.group.scale.setScalar(1.25);
+    scene.add(intact.group);
+  } catch (e) { console.warn('[world] intact city skipped:', e && e.message); }
+
   /* ---- DEAD FOREST: bare trees + rocks (no green conifers), central clearing open ---- */
   // B2 finding #3 — LIVE TREES among the dead ("dying, not dead"): a FEW green conifers (weight 0.14 = the
   // mix ratio) seeded through the many dead trunks, their trunks + canopy textured by the HEALTHY forge
@@ -206,9 +220,10 @@ export function createWorld(ctx) {
     ],
     groundY: GROUND_Y,
     materials: { bare: surfaces.bark, conifer: surfaces.barkLive },
-    // LOOK-TUNE (owner): trees run ~1.5–2× the TANK zombie (tank ≈ 1.28 u tall). Y-only 1.8× → bare ≈ 2.0 u,
-    // conifer ≈ 2.4 u (rocks exempt); colliders (horizontal, from placeForest) stay correct with no change.
-    heightScale: 1.8,
+    // A3 (owner: 1.8× still reads low): trees toward ~2.5× the TANK zombie (tank ≈ 1.28 u). Y-only 2.5× →
+    // bare ≈ 2.8 u, conifer ≈ 3.3 u (≈2.2–2.6× the tank; rocks exempt) — a real canopy over the fight.
+    // Colliders (horizontal, from placeForest) are footprint-only, so a Y-scale leaves them correct.
+    heightScale: 2.5,
   });
   scene.add(forest.group);
 

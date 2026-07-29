@@ -54,3 +54,23 @@ export function buildDecrepitProfile(coastBase = 0.7) {
     landmarks: [],   // no icons — this place has no monuments left standing
   };
 }
+
+/** buildIntactProfile(coastBase) → a MORE-INTACT variant of the same decrepit place (A3 building variety).
+ *  The doctrine is "dying, not uniformly destroyed" (same as the live trees among the dead): a SECOND city
+ *  cluster built from this reads as structures still STANDING — taller, roofed, a few windows still lit —
+ *  set against the collapsed stumps of the decrepit cluster. Same low-sat grim palette (it's the same dead
+ *  world, not a fresh suburb), so the two read as ONE settlement at different stages of ruin. Pure; seeded.
+ *  The INTACT markers (vs decrepit): hMax HIGHER (towers still up), roofRate HIGHER (roofs intact), nightLit
+ *  UP (some life/embers behind glass), sigma tighter (a denser standing core). */
+export function buildIntactProfile(coastBase = 0.7) {
+  const d = buildDecrepitProfile(coastBase);
+  return {
+    ...d,
+    key: 'intact', name: 'Intact',
+    hMax: 4.6,        // still-standing multi-storey blocks (vs the decrepit 1.8 stumps)
+    sigma: 0.5,       // a denser standing core (vs 0.75 spread-thin rubble)
+    roofRate: 0.62,   // roofs mostly INTACT (vs 0.06 collapsed)
+    pSplit: 0.5,      // larger, whole masses (vs 0.8 fragmented)
+    nightLit: 0.3,    // some windows still glow — a few holdouts (vs 0.05 abandoned)
+  };
+}

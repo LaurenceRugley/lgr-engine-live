@@ -52,7 +52,10 @@ const SAFE = app.q.get('safe') === '1';
 
 /* ---------- engine boot (frozen pipeline; default city hidden by world) ---------- */
 const container = document.getElementById('app') || document.body;
-const engine = createEngine({ demo: app.demo, citySeed: seed, profileIndex: 0, container });
+// A3: opt into SOFT shadows (PCFSoftShadowMap) — softer, more realistic shadow edges than the engine's
+// default hard PCF. The city stays byte-identical (it never passes shadowType). The governor still drops
+// shadows on weak GPUs, so mobile is untouched in practice (WebKit lane verifies).
+const engine = createEngine({ demo: app.demo, citySeed: seed, profileIndex: 0, container, shadowType: 'soft' });
 const { renderer, scene, rig, sunRig } = engine;
 const shell = createAppShell(engine, { name: 'hoard2', flags: app });
 

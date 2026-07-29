@@ -32,10 +32,22 @@ test('yaw-relative move: W goes where you FACE', () => {
   w = createFirstPersonWalker({ moveSpeed: 4, accel: 1e6, yaw: Math.PI / 2 });
   for (let s = 0; s < 30; s++) w.update(1 / 60, { x: 0, y: 1 });
   assert.ok(w.x > 0.3 && Math.abs(w.z) < 1e-6, `yaw90 forward should be +x, got (${w.x.toFixed(3)},${w.z.toFixed(3)})`);
-  // strafe at yaw 0 → +x (right)
+  // A3 STRAFE POLARITY (owner: "if I press right I go right"). D must go the CAMERA'S RIGHT, at ANY yaw —
+  // a sign error here hides until the yaw changes, so we assert at yaw 0 AND after a 90° turn (the class).
+  // Camera-right (forward=(sin,cos), up=+y, three.js right-handed) = cross(up,-forward) = (-cos yaw, sin yaw).
+  const camRight = (yaw) => ({ x: -Math.cos(yaw), z: Math.sin(yaw) });
+  // yaw 0 → forward +z, so camera-right is -x. Strafe-right (x:1) must move toward -x (NOT +x — that was the bug).
   w = createFirstPersonWalker({ moveSpeed: 4, accel: 1e6 });
   for (let s = 0; s < 30; s++) w.update(1 / 60, { x: 1, y: 0 });
-  assert.ok(w.x > 0.3, `strafe-right at yaw0 should be +x, got x=${w.x.toFixed(3)}`);
+  let r = camRight(0);
+  assert.ok(w.x * r.x + w.z * r.z > 0.3, `strafe-right at yaw0 must go camera-right (-x); got (${w.x.toFixed(3)},${w.z.toFixed(3)})`);
+  assert.ok(w.x < -0.3, `and that is -x specifically (the fix inverts the old +x bug), got x=${w.x.toFixed(3)}`);
+  // yaw 90° → forward +x, so camera-right is +z. The SAME +x input must now move toward +z, not -z.
+  w = createFirstPersonWalker({ moveSpeed: 4, accel: 1e6, yaw: Math.PI / 2 });
+  for (let s = 0; s < 30; s++) w.update(1 / 60, { x: 1, y: 0 });
+  r = camRight(Math.PI / 2);
+  assert.ok(w.x * r.x + w.z * r.z > 0.3, `strafe-right at yaw90 must go camera-right (+z); got (${w.x.toFixed(3)},${w.z.toFixed(3)})`);
+  assert.ok(w.z > 0.3, `and that is +z specifically (proves the fix holds after a yaw change), got z=${w.z.toFixed(3)}`);
 });
 
 test('collision: a tree trunk blocks you — you never end up inside it', () => {

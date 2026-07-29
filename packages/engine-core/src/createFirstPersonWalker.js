@@ -101,7 +101,11 @@ export function createFirstPersonWalker(opts = {}) {
     const nx = il > 1 ? ix / il : ix, ny = il > 1 ? iy / il : iy;   // clamp diagonal to unit
     moving = il > 0.05;
     // yaw-relative basis: forward = (sin yaw, cos yaw) in xz (the game's facing convention); strafe ⟂.
-    const fx = Math.sin(yaw), fz = Math.cos(yaw), sx = Math.cos(yaw), sz = -Math.sin(yaw);
+    // A3 BUG FIX (owner: "if I press right I go right"): strafe = the camera's RIGHT vector. With forward =
+    // (sin,cos) and up = +y, the camera (looking along forward, three.js right-handed) has right =
+    // cross(up, -forward) = (-cos yaw, sin yaw). The old basis (cos, -sin) was the NEGATION → D strafed LEFT.
+    // Fixed at the source (not by flipping the input) so every consumer's D = camera-right, at any yaw.
+    const fx = Math.sin(yaw), fz = Math.cos(yaw), sx = -Math.cos(yaw), sz = Math.sin(yaw);
     const sp = input.sprint ? sprintSpeed : moveSpeed;
     const desVx = (fx * ny + sx * nx) * sp, desVz = (fz * ny + sz * nx) * sp;
     const k = 1 - Math.exp(-accel * dt);
