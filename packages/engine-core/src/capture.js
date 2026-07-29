@@ -26,74 +26,26 @@
      different containers — like an algorithm vs the file format that wraps its output.
    ============================================================ */
 
-/* Candidate recording formats, best-first. We feature-detect because support varies by browser:
-   Chrome 126+ can emit MP4/H.264 (universally playable); everything modern does WebM/VP9. */
-const VIDEO_TYPES = [
-  'video/mp4;codecs=avc1.42E01E',   // H.264 in MP4 — most portable (newer Chrome)
-  'video/mp4',
-  'video/webm;codecs=vp9',
-  'video/webm',
-];
+// P1: the generic still/video recorder is now its own engine seam; capture.js is its FIRST consumer,
+// wiring the lab's lesson/clock/style filename into `name` (byte-identical to the inline version it replaced).
+import { createRecorder } from './createRecorder.js';
 
 export function createCapture({ renderer, rig, sunRig, poke, getState, office = {}, world = null, sequences = false }) {
   const canvas = renderer.domElement;
   const params = new URLSearchParams(window.location.search);
 
-  /* filename from live state: lgr-<lesson>-<clock>-<style>.<ext> (e.g. lgr-15-1830-vec-pixel.mp4). */
-  const fname = (ext) => {
-    const s = getState();
-    return `lgr-${s.lesson}-${String(s.clock || '').replace(':', '')}-${s.style}.${ext}`;
-  };
-  /* Blob → download: wrap the bytes in an object URL, click a hidden <a>, then revoke the URL
-     (an object URL pins the Blob in memory until revoked — a manual free, like delete[]). */
-  const download = (blob, name) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  /* ---- STILL (S) — canvas → PNG -------------------------------------------------
-     `toBlob` reads the drawing buffer. WebGL normally CLEARS it after compositing, so a naive
-     read returns black; two fixes (we use the first): (a) `preserveDrawingBuffer: true` on the
-     renderer keeps the last frame readable anytime — tiny always-on cost, dead simple; (b) zero
-     cost: re-render one frame synchronously and `toBlob` in the SAME task before the browser
-     composites. We chose (a) so a still always matches exactly what's on screen. */
-  function still() {
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      download(blob, fname('png'));
-      window.__lastStill = blob.size;             // exposed for the verify harness
-    }, 'image/png');
-  }
-
-  /* ---- VIDEO (R toggles) — captureStream → MediaRecorder ------------------------ */
-  const pickType = () => VIDEO_TYPES.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
-  const indicator = makeIndicator();
-  let recorder = null, chunks = [], recording = false, streamFps = 60;
-
-  function startRec() {
-    if (recording) return;
-    const mimeType = pickType();
-    const stream = canvas.captureStream(streamFps);   // the canvas as a live video track
-    recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 12_000_000 } : {});
-    chunks = [];
-    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: recorder.mimeType });
-      download(blob, fname(recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'));
-      window.__lastVideo = blob.size;
-    };
-    recorder.start();
-    recording = true; window.__recording = true; indicator.show();
-  }
-  function stopRec() {
-    if (!recording) return;
-    recorder.stop();                              // flushes → onstop → download
-    recording = false; window.__recording = false; indicator.hide();
-  }
-  const toggleRec = () => (recording ? stopRec() : startRec());
+  /* ---- STILL (S) + VIDEO (R) — delegated to the generic createRecorder seam (P1 extraction). ----
+     capture.js supplies only the lab-specific filename base — `lgr-<lesson>-<clock>-<style>` from live
+     state — so `S` still downloads `lgr-15-1830-vec-pixel.png` and `R` an .mp4/.webm, byte-identical to
+     the inline recorder this replaced (same download names, MediaRecorder config, and __lastStill /
+     __lastVideo / __recording harness globals — now owned by createRecorder). The WebGL still needs
+     `preserveDrawingBuffer:true` on the renderer (unchanged, the consumer's setting). */
+  const rec = createRecorder({
+    canvas,
+    name: () => { const s = getState(); return `lgr-${s.lesson}-${String(s.clock || '').replace(':', '')}-${s.style}`; },
+    fps: 60,
+  });
+  const still = rec.still, startRec = rec.startRec, stopRec = rec.stopRec, toggleRec = rec.toggleRec;
 
   /* ---- DIRECTOR — a declarative shot list ---------------------------------------
      Each step is data: { keys, zoom, orbit, timeTo, ripple, waitMs }. We DON'T re-implement
@@ -289,15 +241,4 @@ export function createCapture({ renderer, rig, sunRig, poke, getState, office = 
 
   window.__capture = { still, toggleRec, run, sequences: Object.keys(SEQUENCES) };
   return window.__capture;
-}
-
-/* a tiny DOM "● REC" badge — top-right, NOT on the canvas, so it never appears in a recording
-   (that's the whole lesson). */
-function makeIndicator() {
-  const el = document.createElement('div');
-  el.textContent = '● REC';
-  el.style.cssText = 'position:fixed;top:14px;right:16px;z-index:2;font:bold 12px ui-monospace,monospace;'
-    + 'color:#ff3b30;letter-spacing:.12em;text-shadow:0 1px 3px #000;display:none;';
-  document.body.appendChild(el);
-  return { show: () => { el.style.display = 'block'; }, hide: () => { el.style.display = 'none'; } };
 }

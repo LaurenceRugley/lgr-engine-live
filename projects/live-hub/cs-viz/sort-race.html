@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sort Race — insertion vs merge vs quicksort · LGR curriculum</title>
+<link rel="icon" href="data:,"><!-- self-contained: suppress the default favicon request (no external resources) -->
+<!--
+  ============================================================================
+  SORT RACE — three sorting algorithms animating side-by-side on the SAME array.
+  ----------------------------------------------------------------------------
+  The point of the page: you can READ the difference between O(n²) and O(n log n)
+  off the comparison counters. Insertion sort's counter blows up quadratically as
+  you grow the array; merge and quicksort crawl up. The bars are the theatre; the
+  numbers are the lesson.
+
+  How it works (the one idea worth understanding):
+    Each algorithm is written as a GENERATOR — a function that PAUSES. Instead of
+    running to completion, it `yield`s one "operation" at a time: a comparison, a
+    write, a swap. That turns a sort into a step-through you can single-step. (In
+    C++ this is exactly a coroutine that co_yields each step; a JS generator is the
+    same idea — a function whose stack is frozen between calls.)
+
+    A single "Step" pulls ONE operation from each of the three generators, so all
+    three advance in lockstep and you can watch who is doing more work per step.
+
+  No dependencies, no build — this is a self-contained page. Style tokens are
+  copied from the LGR curriculum volumes (white page, gold accents, Monokai code).
+  ============================================================================
+-->
+<style>
+  /* --- curriculum design tokens (from ~/lgr-business/curriculum/vol-*.html) --- */
+  :root{
+    --bg:#ffffff; --bg-soft:#f7f6f3; --ink:#1d1a14; --ink-soft:#6b6357;
+    --gold:#8f7443; --gold-soft:#b08a4f; --card:#faf9f6; --rule:#e5e1d8;
+    --good:#3f6b4a; --bad:#8a3a2b;
+    /* Monokai (the code/counter panels) */
+    --mono-bg:#272822; --mono-fg:#f8f8f2; --mono-dim:#88846f;
+    --mono-pink:#f92672; --mono-blue:#66d9ef; --mono-green:#a6e22e;
+    --mono-orange:#fd971f; --mono-yellow:#e6db74; --mono-purple:#ae81ff;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5; padding:32px 20px 64px; max-width:1180px; margin:0 auto;
+  }
+  h1{font-family:Georgia,'Times New Roman',serif; font-size:1.9rem; margin:0 0 4px; line-height:1.15;}
+  .kicker{color:var(--gold); font-family:var(--mono); font-size:.74rem;
+    text-transform:uppercase; letter-spacing:.16em; font-weight:700; margin-bottom:10px;}
+  .goldline{height:2px; width:60px; background:var(--gold); margin:14px 0 18px;}
+  .lede{color:var(--ink-soft); max-width:720px; margin:0 0 24px; font-size:1.02rem;}
+  .lede code{font-family:var(--mono); font-size:.9em; background:var(--bg-soft);
+    padding:1px 5px; border-radius:4px; color:var(--gold);}
+
+  /* --- controls --- */
+  .controls{display:flex; flex-wrap:wrap; gap:14px 20px; align-items:center;
+    background:var(--card); border:1px solid var(--rule); border-radius:10px;
+    padding:14px 18px; margin-bottom:22px;}
+  .controls .group{display:flex; align-items:center; gap:8px;}
+  .controls label{font-size:.78rem; color:var(--ink-soft); font-weight:600;
+    text-transform:uppercase; letter-spacing:.06em;}
+  button{
+    font:inherit; font-size:.9rem; font-weight:600; cursor:pointer;
+    background:var(--ink); color:var(--bg); border:1px solid var(--ink);
+    border-radius:7px; padding:7px 15px; transition:background .12s,color .12s;
+  }
+  button:hover{background:var(--gold);}
+  button.ghost{background:transparent; color:var(--ink); border-color:var(--rule);}
+  button.ghost:hover{border-color:var(--gold); color:var(--gold);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button:focus-visible, input:focus-visible{outline:3px solid var(--gold-soft); outline-offset:2px;}
+  input[type=range]{accent-color:var(--gold); width:120px;}
+  .val{font-family:var(--mono); font-size:.82rem; color:var(--gold); min-width:2.5em;}
+
+  /* --- the three lanes --- */
+  .lanes{display:grid; grid-template-columns:repeat(3,1fr); gap:18px;}
+  @media(max-width:820px){ .lanes{grid-template-columns:1fr;} }
+  .lane{border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--bg);}
+  .lane h2{font-family:Georgia,serif; font-size:1.12rem; margin:0; padding:12px 16px 4px;}
+  .lane .big-o{font-family:var(--mono); font-size:.76rem; color:var(--ink-soft);
+    padding:0 16px 10px;}
+  .lane .big-o b{color:var(--gold);}
+  .lane.winner h2{color:var(--good);}
+  .lane.done-lane{box-shadow:inset 0 0 0 2px var(--good);}
+
+  /* bar chart */
+  .bars{display:flex; align-items:flex-end; gap:2px; height:180px;
+    padding:10px 12px; background:var(--bg-soft);}
+  .bar{flex:1 1 0; background:var(--gold-soft); border-radius:2px 2px 0 0;
+    transition:height .08s linear;}
+  .bar.cmp{background:var(--mono-blue);}          /* being compared */
+  .bar.act{background:var(--mono-pink);}          /* being written / swapped */
+  .bar.sorted{background:var(--good);}            /* locked in final position */
+  body.reduced .bar{transition:none;}             /* no motion for reduced-motion */
+
+  /* the Monokai counter panel — the numbers are the lesson */
+  .counters{background:var(--mono-bg); color:var(--mono-fg); font-family:var(--mono);
+    font-size:.82rem; padding:11px 16px; display:flex; flex-direction:column; gap:3px;}
+  .counters .row{display:flex; justify-content:space-between; gap:12px;}
+  .counters .k{color:var(--mono-dim);}
+  .counters .comp{color:var(--mono-blue); font-weight:700; font-variant-numeric:tabular-nums;}
+  .counters .move{color:var(--mono-pink); font-weight:700; font-variant-numeric:tabular-nums;}
+  .counters .status{color:var(--mono-green); font-weight:700;}
+  .counters .status.running{color:var(--mono-yellow);}
+
+  .foot{margin-top:28px; font-size:.86rem; color:var(--ink-soft); max-width:760px;}
+  .foot code{font-family:var(--mono); font-size:.86em; color:var(--gold);}
+  .a11y{position:absolute; left:-9999px;}
+  .backlink{font-family:var(--mono); font-size:.78rem;}
+  .backlink a{color:var(--gold);}
+</style>
+</head>
+<body>
+  <div class="kicker">LGR curriculum · live viz</div>
+  <h1>Sort Race</h1>
+  <div class="goldline"></div>
+  <p class="lede">
+    The same shuffled array, sorted three ways at once. Insertion sort is
+    <code>O(n²)</code>; merge and quicksort are <code>O(n log n)</code>. Grow the array
+    and watch the <span style="color:var(--mono-blue);font-weight:700">comparison</span>
+    counters diverge — that gap <em>is</em> the difference between the complexity classes.
+    Press <strong>Step</strong> to advance one operation each, or <strong>Play</strong> to run.
+  </p>
+
+  <div class="controls" role="group" aria-label="Sort race controls">
+    <div class="group">
+      <button id="play" aria-keyshortcuts="p">▶ Play</button>
+      <button id="step" class="ghost" aria-keyshortcuts="ArrowRight">Step ›</button>
+      <button id="shuffle" class="ghost" aria-keyshortcuts="s">↻ Shuffle</button>
+    </div>
+    <div class="group">
+      <label for="size">Size</label>
+      <input type="range" id="size" min="8" max="64" step="1" value="32" aria-describedby="sizeval">
+      <span class="val" id="sizeval">32</span>
+    </div>
+    <div class="group">
+      <label for="speed">Speed</label>
+      <input type="range" id="speed" min="1" max="60" step="1" value="24" aria-describedby="speedval">
+      <span class="val" id="speedval">24/s</span>
+    </div>
+  </div>
+
+  <div class="lanes" id="lanes"></div>
+
+  <p class="foot">
+    <strong>Reading it:</strong> comparisons (blue) are the fair currency of a sort — each is one
+    "is a &gt; b?". At <code>n = 32</code>, insertion averages roughly <code>n²/4 ≈ 256</code> comparisons;
+    merge and quick land near <code>n·log₂n ≈ 160</code>. Small here — but double the array and insertion
+    <em>quadruples</em> while the others barely move. Moves (pink) are writes/swaps: insertion shifts,
+    merge copies into a scratch buffer, quicksort swaps in place.
+    <span class="backlink">— part of the <a href="../">Mission Control</a> curriculum.</span>
+  </p>
+
+  <div aria-live="polite" class="a11y" id="live"></div>
+
+<script type="module">
+/* ==========================================================================
+   1. THE ALGORITHMS AS GENERATORS
+   --------------------------------------------------------------------------
+   Each function mutates its OWN copy of the array and yields one operation at
+   a time. An operation is a tiny object the renderer knows how to draw:
+     { cmp:[i,j] }      → two bars being compared (blue)
+     { act:[i,...] }    → bars being written/swapped (pink)
+     { sorted:i }       → bar i is now locked in its final place (green)
+   The generator increments the shared counters object as it goes, so the count
+   is the TRUE number of operations this exact implementation performed — not an
+   estimate. That is what makes the panel spot-checkable.
+   ========================================================================== */
+
+// Insertion sort — grow a sorted prefix, sliding each new value back into place.
+// Comparisons: one per `a[j] > key` test. Moves: one per shift + one per final drop.
+function* insertionSort(a, c){
+  yield { sorted:0 };                              // a[0] alone is trivially "sorted"
+  for(let i=1;i<a.length;i++){
+    const key=a[i];
+    let j=i-1;
+    while(j>=0){
+      c.comp++;                                    // the comparison a[j] > key
+      yield { cmp:[j,i] };
+      if(a[j]>key){ a[j+1]=a[j]; c.move++; yield { act:[j+1] }; j--; }
+      else break;
+    }
+    a[j+1]=key; c.move++;
+    yield { act:[j+1] };
+  }
+  for(let i=0;i<a.length;i++) yield { sorted:i };   // final sweep: paint the whole thing green
+}
+
+// Merge sort — split, sort halves, merge. Bottom-up so it's easy to write into the
+// live array. Comparisons: one per merge pick between the two runs. Moves: one per
+// value copied back from the scratch buffer.
+function* mergeSort(a, c){
+  const n=a.length;
+  for(let width=1; width<n; width*=2){
+    for(let lo=0; lo<n; lo+=2*width){
+      const mid=Math.min(lo+width,n), hi=Math.min(lo+2*width,n);
+      // merge a[lo..mid) and a[mid..hi) into scratch, then copy back
+      const scratch=[]; let i=lo, j=mid;
+      while(i<mid && j<hi){
+        c.comp++;                                  // compare the two run fronts
+        yield { cmp:[i,j] };
+        if(a[i]<=a[j]) scratch.push(a[i++]); else scratch.push(a[j++]);
+      }
+      while(i<mid) scratch.push(a[i++]);
+      while(j<hi)  scratch.push(a[j++]);
+      for(let k=0;k<scratch.length;k++){
+        a[lo+k]=scratch[k]; c.move++;
+        yield { act:[lo+k] };
+      }
+    }
+  }
+  for(let i=0;i<n;i++) yield { sorted:i };
+}
+
+// Quicksort — Lomuto partition around the last element, explicit stack (no recursion
+// so the generator stays flat). Comparisons: one per `a[k] < pivot`. Moves: one per swap.
+function* quickSort(a, c){
+  const swap=(x,y)=>{ const t=a[x]; a[x]=a[y]; a[y]=t; c.move++; };
+  const stack=[[0,a.length-1]];
+  while(stack.length){
+    const [lo,hi]=stack.pop();
+    if(lo>=hi){ if(lo===hi) yield { sorted:lo }; continue; }
+    const pivot=a[hi];
+    let i=lo;
+    for(let k=lo;k<hi;k++){
+      c.comp++;                                    // compare a[k] against the pivot
+      yield { cmp:[k,hi] };
+      if(a[k]<pivot){ if(i!==k){ swap(i,k); yield { act:[i,k] }; } i++; }
+    }
+    if(i!==hi){ swap(i,hi); yield { act:[i,hi] }; }
+    yield { sorted:i };                            // pivot is now in its final home
+    stack.push([lo,i-1]); stack.push([i+1,hi]);
+  }
+  for(let i=0;i<a.length;i++) yield { sorted:i };
+}
+
+const ALGOS=[
+  { key:'insertion', name:'Insertion sort', bigO:'best O(n) · avg/worst <b>O(n²)</b>', gen:insertionSort },
+  { key:'merge',     name:'Merge sort',     bigO:'always <b>O(n log n)</b> · O(n) space', gen:mergeSort },
+  { key:'quick',     name:'Quicksort',      bigO:'avg <b>O(n log n)</b> · worst O(n²)', gen:quickSort },
+];
+
+/* ==========================================================================
+   2. STATE + RENDERING
+   ========================================================================== */
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(reduced) document.body.classList.add('reduced');
+
+const lanesEl=document.getElementById('lanes');
+const liveEl=document.getElementById('live');
+let base=[];            // the shared shuffled source array
+let lanes=[];           // per-algorithm working state
+let playing=false, timer=null;
+
+function makeArray(n){
+  // values 1..n shuffled (Fisher–Yates). Distinct heights read cleanly as bars.
+  const a=Array.from({length:n},(_,i)=>i+1);
+  for(let i=n-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return a;
+}
+
+function buildLanes(){
+  lanesEl.replaceChildren();
+  lanes = ALGOS.map(algo=>{
+    const arr=base.slice();
+    const counters={comp:0,move:0};
+    const el=document.createElement('div'); el.className='lane';
+    el.innerHTML=`
+      <h2>${algo.name}</h2>
+      <div class="big-o">${algo.bigO}</div>
+      <div class="bars" role="img" aria-label="${algo.name} array, ${arr.length} bars"></div>
+      <div class="counters">
+        <div class="row"><span class="k">comparisons</span><span class="comp">0</span></div>
+        <div class="row"><span class="k">moves</span><span class="move">0</span></div>
+        <div class="row"><span class="k">status</span><span class="status running">running…</span></div>
+      </div>`;
+    lanesEl.appendChild(el);
+    const barsEl=el.querySelector('.bars');
+    const bars=arr.map(v=>{ const b=document.createElement('div'); b.className='bar'; barsEl.appendChild(b); return b; });
+    return {
+      algo, arr, counters, el, bars,
+      gen: algo.gen(arr, counters),
+      done:false,
+      sorted:new Set(),
+      highlight:{cmp:[],act:[]},
+      compEl:el.querySelector('.comp'), moveEl:el.querySelector('.move'),
+      statusEl:el.querySelector('.status'),
+    };
+  });
+  render();
+}
+
+function render(){
+  const max=base.length;
+  for(const L of lanes){
+    for(let i=0;i<L.bars.length;i++){
+      const b=L.bars[i];
+      b.style.height=(L.arr[i]/max*100)+'%';
+      b.className='bar'
+        + (L.sorted.has(i)?' sorted':'')
+        + (L.highlight.cmp.includes(i)?' cmp':'')
+        + (L.highlight.act.includes(i)?' act':'');
+    }
+    L.compEl.textContent=L.counters.comp;
+    L.moveEl.textContent=L.counters.move;
+  }
+}
+
+// Advance every lane by exactly one yielded operation. Returns true if any lane
+// is still working (so the play loop knows when to stop).
+function stepOnce(){
+  let anyRunning=false;
+  for(const L of lanes){
+    if(L.done) continue;
+    const {value,done}=L.gen.next();
+    if(done){ finishLane(L); continue; }
+    anyRunning=true;
+    L.highlight={cmp:[],act:[]};
+    if(value.cmp) L.highlight.cmp=value.cmp;
+    if(value.act) L.highlight.act=value.act;
+    if(value.sorted!==undefined) L.sorted.add(value.sorted);
+  }
+  render();
+  if(!anyRunning) markWinner();
+  return anyRunning;
+}
+
+function finishLane(L){
+  L.done=true;
+  L.highlight={cmp:[],act:[]};
+  for(let i=0;i<L.arr.length;i++) L.sorted.add(i);
+  L.statusEl.textContent=`done · ${L.counters.comp} comparisons`;
+  L.statusEl.classList.remove('running');
+  L.el.classList.add('done-lane');
+  liveEl.textContent=`${L.algo.name} finished in ${L.counters.comp} comparisons, ${L.counters.move} moves.`;
+}
+
+function markWinner(){
+  // fewest comparisons wins the "race" — the honest O-class signal
+  let best=null;
+  for(const L of lanes) if(best===null || L.counters.comp<best.counters.comp) best=L;
+  for(const L of lanes) L.el.classList.toggle('winner', L===best);
+  stopPlay();
+}
+
+/* ==========================================================================
+   3. CONTROLS + KEYBOARD
+   ========================================================================== */
+const playBtn=document.getElementById('play');
+const stepBtn=document.getElementById('step');
+const shuffleBtn=document.getElementById('shuffle');
+const sizeEl=document.getElementById('size');
+const speedEl=document.getElementById('speed');
+const sizeVal=document.getElementById('sizeval');
+const speedVal=document.getElementById('speedval');
+
+function reset(){
+  stopPlay();
+  base=makeArray(Number(sizeEl.value));
+  buildLanes();
+}
+function startPlay(){
+  if(playing || reduced) return;             // reduced-motion: step-mode only, never auto-run
+  playing=true; playBtn.textContent='❚❚ Pause';
+  const tick=()=>{
+    if(!playing) return;
+    const more=stepOnce();
+    if(!more){ stopPlay(); return; }
+    timer=setTimeout(tick, 1000/Number(speedEl.value));
+  };
+  tick();
+}
+function stopPlay(){
+  playing=false; playBtn.textContent='▶ Play';
+  if(timer){ clearTimeout(timer); timer=null; }
+}
+
+playBtn.addEventListener('click', ()=> playing?stopPlay():startPlay());
+stepBtn.addEventListener('click', ()=>{ stopPlay(); stepOnce(); });
+shuffleBtn.addEventListener('click', reset);
+sizeEl.addEventListener('input', ()=>{ sizeVal.textContent=sizeEl.value; reset(); });
+speedEl.addEventListener('input', ()=>{ speedVal.textContent=speedEl.value+'/s'; });
+
+// keyboard shortcuts (ignored while typing in a control that owns arrows)
+addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT') return;
+  if(e.key==='ArrowRight'){ e.preventDefault(); stopPlay(); stepOnce(); }
+  else if(e.key==='p' || e.key===' '){ e.preventDefault(); playing?stopPlay():startPlay(); }
+  else if(e.key==='s'){ e.preventDefault(); reset(); }
+});
+
+// Boot. Reduced-motion users get a ready-to-step board and no autoplay by default.
+reset();
+if(reduced){ playBtn.disabled=true; playBtn.textContent='Step only'; playBtn.title='Reduced motion is on — use Step ›'; }
+
+/* Debug/test seam (the engine's __wash/__celestial probe convention): expose state
+   + a synchronous run-to-completion so a verifier can read the exact counters and
+   check them against an independent oracle (insertion shifts === array inversions). */
+window.__sortRace = {
+  get base(){ return base; },
+  get lanes(){ return lanes; },
+  runToEnd(){ stopPlay(); let guard=0; while(stepOnce() && guard++<1e6){} return lanes.map(L=>({key:L.algo.key, comp:L.counters.comp, move:L.counters.move, sorted:L.arr.slice()})); },
+};
+</script>
+</body>
+</html>

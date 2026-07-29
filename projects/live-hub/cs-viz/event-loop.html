@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Event Loop — call stack, tasks &amp; microtasks · LGR curriculum</title>
+<link rel="icon" href="data:,"><!-- self-contained: suppress the default favicon request (no external resources) -->
+<!--
+  ============================================================================
+  EVENT LOOP — tick through the canonical JavaScript ordering puzzle, one step
+  at a time, watching the call stack, the microtask queue and the macrotask
+  ("task") queue.
+  ----------------------------------------------------------------------------
+  The program (Vol-5, chapter 7, the drill):
+
+      console.log('1');
+      setTimeout(() => console.log('2'), 0);
+      Promise.resolve().then(() => console.log('3'));
+      console.log('4');
+
+  Output: 1, 4, 3, 2 — and this page shows WHY, mechanically. The rule:
+    1. Run synchronous code until the call stack empties.
+    2. Drain the ENTIRE microtask queue (Promise .then callbacks) — including any
+       microtasks queued WHILE draining.
+    3. Run exactly ONE macrotask (a setTimeout callback).
+    4. Go back to step 2.
+  So Promise.then always beats setTimeout, even a 0ms one.
+
+  This is NOT a JS interpreter — it's a faithful MODEL of the loop. The program
+  is expressed as data (log / schedule-macrotask / schedule-microtask), and a
+  small engine walks the four rules above, yielding one state per atomic action.
+  That guarantees the ordering it teaches is the ordering the rules produce.
+
+  Self-contained page, no build. Style tokens from the LGR curriculum volumes.
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#ffffff; --bg-soft:#f7f6f3; --ink:#1d1a14; --ink-soft:#6b6357;
+    --gold:#8f7443; --gold-soft:#b08a4f; --card:#faf9f6; --rule:#e5e1d8;
+    --good:#3f6b4a; --bad:#8a3a2b;
+    --mono-bg:#272822; --mono-fg:#f8f8f2; --mono-dim:#88846f;
+    --mono-pink:#f92672; --mono-blue:#66d9ef; --mono-green:#a6e22e;
+    --mono-orange:#fd971f; --mono-yellow:#e6db74; --mono-purple:#ae81ff;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5; padding:32px 20px 64px; max-width:1180px; margin:0 auto;}
+  h1{font-family:Georgia,'Times New Roman',serif; font-size:1.9rem; margin:0 0 4px; line-height:1.15;}
+  .kicker{color:var(--gold); font-family:var(--mono); font-size:.74rem;
+    text-transform:uppercase; letter-spacing:.16em; font-weight:700; margin-bottom:10px;}
+  .goldline{height:2px; width:60px; background:var(--gold); margin:14px 0 18px;}
+  .lede{color:var(--ink-soft); max-width:730px; margin:0 0 22px; font-size:1.02rem;}
+  .lede code{font-family:var(--mono); font-size:.9em; background:var(--bg-soft);
+    padding:1px 5px; border-radius:4px; color:var(--gold);}
+
+  .controls{display:flex; flex-wrap:wrap; gap:14px 20px; align-items:center;
+    background:var(--card); border:1px solid var(--rule); border-radius:10px;
+    padding:14px 18px; margin-bottom:20px;}
+  .controls .group{display:flex; align-items:center; gap:8px;}
+  .controls label{font-size:.78rem; color:var(--ink-soft); font-weight:600;
+    text-transform:uppercase; letter-spacing:.06em;}
+  button{font:inherit; font-size:.9rem; font-weight:600; cursor:pointer;
+    background:var(--ink); color:var(--bg); border:1px solid var(--ink);
+    border-radius:7px; padding:7px 15px; transition:background .12s,color .12s;}
+  button:hover{background:var(--gold);}
+  button.ghost{background:transparent; color:var(--ink); border-color:var(--rule);}
+  button.ghost:hover{border-color:var(--gold); color:var(--gold);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button:focus-visible, select:focus-visible{outline:3px solid var(--gold-soft); outline-offset:2px;}
+  select{font:inherit; font-size:.86rem; padding:6px 8px; border:1px solid var(--rule);
+    border-radius:7px; background:var(--bg); color:var(--ink);}
+  .stepno{font-family:var(--mono); font-size:.8rem; color:var(--ink-soft); margin-left:auto;}
+
+  /* code panel (Monokai) */
+  .stage{display:grid; grid-template-columns:1.15fr .85fr; gap:16px; align-items:start;}
+  @media(max-width:820px){ .stage{grid-template-columns:1fr;} }
+  .code{background:var(--mono-bg); border-radius:10px; padding:14px 16px; overflow-x:auto;}
+  .code .cap{font-family:var(--mono); font-size:.72rem; color:var(--mono-dim);
+    text-transform:uppercase; letter-spacing:.1em; margin-bottom:8px;}
+  .code pre{margin:0; font-family:var(--mono); font-size:.9rem; line-height:1.6; color:var(--mono-fg);}
+  .code .ln{display:block; padding:1px 8px; border-radius:4px; border-left:3px solid transparent;}
+  .code .ln.active{background:#3e3d32; border-left-color:var(--mono-yellow);}
+  .kw{color:var(--mono-pink);} .fn{color:var(--mono-green);} .str{color:var(--mono-yellow);}
+  .num{color:var(--mono-purple);} .typ{color:var(--mono-blue); font-style:italic;} .pun{color:var(--mono-fg);}
+
+  .console{background:#1b1c17; border-radius:10px; padding:14px 16px;}
+  .console .cap{font-family:var(--mono); font-size:.72rem; color:var(--mono-dim);
+    text-transform:uppercase; letter-spacing:.1em; margin-bottom:8px;}
+  .console .out{font-family:var(--mono); font-size:1rem; color:var(--mono-green); min-height:1.4em;}
+  .console .out span{margin-right:.5em;}
+  .console .out .fresh{color:#fff; background:var(--good); border-radius:4px; padding:0 6px;}
+  .console .expected{font-family:var(--mono); font-size:.76rem; color:var(--mono-dim); margin-top:8px;}
+
+  /* the three structures */
+  .queues{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:16px;}
+  @media(max-width:640px){ .queues{grid-template-columns:1fr;} }
+  .box{border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--bg);}
+  .box h3{margin:0; padding:9px 14px 2px; font-family:Georgia,serif; font-size:1rem;}
+  .box .kind{font-family:var(--mono); font-size:.72rem; color:var(--ink-soft); padding:0 14px 8px;}
+  .box .kind b{color:var(--gold);}
+  .slots{padding:8px 12px 12px; display:flex; flex-direction:column-reverse; gap:5px; min-height:120px;
+    background:var(--bg-soft);}
+  .box.q .slots{flex-direction:column;}                 /* queues read top→bottom (front at top) */
+  .slot{font-family:var(--mono); font-size:.82rem; padding:6px 10px; border-radius:5px;
+    background:var(--card); border:1px solid var(--rule); color:var(--ink);}
+  .box.stack .slot{background:#fde2ee; border-color:var(--mono-pink);}    /* LIFO — pink */
+  .box.micro .slot{background:#e7f6fb; border-color:var(--mono-blue);}    /* high-prio */
+  .box.micro .slot:first-child{box-shadow:0 0 0 2px var(--mono-blue);}    /* next to drain */
+  .box.macro .slot{background:#fff3e0; border-color:var(--mono-orange);}
+  .empty{color:var(--ink-soft); font-family:var(--mono); font-size:.78rem; opacity:.6; padding:6px 10px;}
+
+  .note{margin-top:16px; background:var(--card); border:1px solid var(--rule);
+    border-left:4px solid var(--gold); border-radius:8px; padding:12px 16px;
+    font-size:.92rem; color:var(--ink);}
+  .note b{color:var(--gold);}
+  .foot{margin-top:22px; font-size:.86rem; color:var(--ink-soft); max-width:760px;}
+  .foot code{font-family:var(--mono); color:var(--gold);}
+  .backlink{font-family:var(--mono); font-size:.78rem;} .backlink a{color:var(--gold);}
+  .a11y{position:absolute; left:-9999px;}
+</style>
+</head>
+<body>
+  <div class="kicker">LGR curriculum · live viz</div>
+  <h1>The Event Loop</h1>
+  <div class="goldline"></div>
+  <p class="lede">
+    JavaScript runs on <strong>one thread</strong>. The event loop decides what runs next from three places:
+    the <span style="color:var(--mono-pink);font-weight:700">call stack</span>,
+    the <span style="color:var(--mono-blue);font-weight:700">microtask queue</span> (<code>Promise.then</code>),
+    and the <span style="color:var(--mono-orange);font-weight:700">macrotask queue</span> (<code>setTimeout</code>).
+    Step through the canonical puzzle and watch the output order <code>1, 4, 3, 2</code> assemble itself —
+    <strong>microtasks always drain before the next macrotask</strong>.
+  </p>
+
+  <div class="controls" role="group" aria-label="Event loop controls">
+    <div class="group">
+      <button id="play" aria-keyshortcuts="p">▶ Play</button>
+      <button id="step" class="ghost" aria-keyshortcuts="ArrowRight">Step ›</button>
+      <button id="back" class="ghost" aria-keyshortcuts="ArrowLeft">‹ Back</button>
+      <button id="restart" class="ghost" aria-keyshortcuts="r">↻ Restart</button>
+    </div>
+    <div class="group">
+      <label for="prog">Program</label>
+      <select id="prog">
+        <option value="canonical">Canonical (1,4,3,2)</option>
+        <option value="chained">Chained .then follow-up</option>
+      </select>
+    </div>
+    <span class="stepno" id="stepno">step 0</span>
+  </div>
+
+  <div class="stage">
+    <div class="code">
+      <div class="cap">program</div>
+      <pre id="src"></pre>
+    </div>
+    <div class="console">
+      <div class="cap">console output</div>
+      <div class="out" id="out"></div>
+      <div class="expected" id="expected"></div>
+    </div>
+  </div>
+
+  <div class="queues">
+    <div class="box stack">
+      <h3>Call stack</h3>
+      <div class="kind">LIFO · what's <b>running now</b></div>
+      <div class="slots" id="stack"></div>
+    </div>
+    <div class="box micro q">
+      <h3>Microtask queue</h3>
+      <div class="kind">FIFO · <b>Promise.then</b> · high priority</div>
+      <div class="slots" id="micro"></div>
+    </div>
+    <div class="box macro q">
+      <h3>Macrotask queue</h3>
+      <div class="kind">FIFO · <b>setTimeout</b> · one per cycle</div>
+      <div class="slots" id="macro"></div>
+    </div>
+  </div>
+
+  <div class="note" id="note" aria-live="polite">Press <strong>Step</strong> to begin.</div>
+
+  <p class="foot">
+    <strong>The trap:</strong> a <code>setTimeout(fn, 0)</code> feels instant, but <code>0</code> is only a
+    <em>minimum</em> delay — the callback still waits in the macrotask queue for a free loop tick, and every
+    pending microtask jumps ahead of it. That's why <code>3</code> (a <code>Promise.then</code>) prints
+    before <code>2</code> (a <code>setTimeout</code>) even though <code>setTimeout</code> was written first.
+    <span class="backlink">— part of the <a href="../">Mission Control</a> curriculum.</span>
+  </p>
+
+  <div aria-live="polite" class="a11y" id="live"></div>
+
+<script type="module">
+/* ==========================================================================
+   1. PROGRAMS AS DATA
+   An instruction is one of:
+     { log:'1', line:n }                          → prints to console
+     { macro:{label, body:[instr…]}, line:n }     → setTimeout: schedule a macrotask
+     { micro:{label, body:[instr…]}, line:n }     → Promise.then: schedule a microtask
+   `body` is the callback's own instruction list — so a .then can itself schedule
+   another .then (the "chained" program), which is the crux of the follow-up.
+   `srcLines` is the pretty-printed source shown alongside, indexed by `line`.
+   ========================================================================== */
+const PROGRAMS={
+  canonical:{
+    expected:['1','4','3','2'],
+    srcLines:[
+      `<span class="pun">console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'1'</span><span class="pun">);</span>`,
+      `<span class="fn">setTimeout</span><span class="pun">(() </span><span class="typ">=></span><span class="pun"> console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'2'</span><span class="pun">), </span><span class="num">0</span><span class="pun">);</span>`,
+      `<span class="typ">Promise</span><span class="pun">.</span><span class="fn">resolve</span><span class="pun">().</span><span class="fn">then</span><span class="pun">(() </span><span class="typ">=></span><span class="pun"> console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'3'</span><span class="pun">));</span>`,
+      `<span class="pun">console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'4'</span><span class="pun">);</span>`,
+    ],
+    main:{ label:'main script', body:[
+      { log:'1', line:0 },
+      { macro:{ label:"setTimeout → '2'", body:[{ log:'2', line:1 }] }, line:1 },
+      { micro:{ label:"then → '3'",       body:[{ log:'3', line:2 }] }, line:2 },
+      { log:'4', line:3 },
+    ]},
+  },
+  chained:{
+    expected:['1','end','A','B','timeout'],
+    srcLines:[
+      `<span class="pun">console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'1'</span><span class="pun">);</span>`,
+      `<span class="fn">setTimeout</span><span class="pun">(() </span><span class="typ">=></span><span class="pun"> console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'timeout'</span><span class="pun">), </span><span class="num">0</span><span class="pun">);</span>`,
+      `<span class="typ">Promise</span><span class="pun">.</span><span class="fn">resolve</span><span class="pun">().</span><span class="fn">then</span><span class="pun">(() </span><span class="typ">=></span><span class="pun"> {</span>`,
+      `<span class="pun">  console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'A'</span><span class="pun">);</span>`,
+      `<span class="pun">  </span><span class="typ">Promise</span><span class="pun">.</span><span class="fn">resolve</span><span class="pun">().</span><span class="fn">then</span><span class="pun">(() </span><span class="typ">=></span><span class="pun"> console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'B'</span><span class="pun">));</span>`,
+      `<span class="pun">});</span>`,
+      `<span class="pun">console.</span><span class="fn">log</span><span class="pun">(</span><span class="str">'end'</span><span class="pun">);</span>`,
+    ],
+    main:{ label:'main script', body:[
+      { log:'1', line:0 },
+      { macro:{ label:"setTimeout → 'timeout'", body:[{ log:'timeout', line:1 }] }, line:1 },
+      { micro:{ label:"then → 'A'", body:[
+        { log:'A', line:3 },
+        { micro:{ label:"then → 'B'", body:[{ log:'B', line:4 }] }, line:4 },
+      ] }, line:2 },
+      { log:'end', line:6 },
+    ]},
+  },
+};
+
+/* ==========================================================================
+   2. THE EVENT-LOOP ENGINE — yields one state snapshot per atomic action.
+   It literally follows the four rules; the ordering it shows is therefore the
+   ordering the rules produce, not a number I typed in.
+   ========================================================================== */
+function* run(program){
+  const stack=[], micro=[], macro=[], out=[];
+  const snap=(note, line=null, fresh=false)=>({
+    stack:stack.slice(), micro:micro.map(m=>m.label), macro:macro.map(m=>m.label),
+    out:out.slice(), note, line, fresh,
+  });
+
+  function* execFrame(frame){
+    stack.push(frame.label);
+    yield snap(`Push <b>${frame.label}</b> onto the call stack and run it.`, null);
+    for(const instr of frame.body){
+      if(instr.log!==undefined){
+        out.push(instr.log);
+        yield snap(`<b>console.log('${instr.log}')</b> runs synchronously → prints "${instr.log}".`, instr.line, true);
+      } else if(instr.macro){
+        macro.push({ label:instr.macro.label, body:instr.macro.body });
+        yield snap(`<b>setTimeout(…, 0)</b> — the callback is handed to the <b>macrotask</b> queue. It waits (even at 0 ms).`, instr.line);
+      } else if(instr.micro){
+        micro.push({ label:instr.micro.label, body:instr.micro.body });
+        yield snap(`<b>Promise.resolve().then(…)</b> — the callback is queued as a <b>microtask</b>.`, instr.line);
+      }
+    }
+    stack.pop();
+    yield snap(`<b>${frame.label}</b> returns — pop it off the stack.`, null);
+  }
+
+  // Rule 1 — run the synchronous top-level script to completion.
+  yield* execFrame(program.main);
+
+  // Rules 2–4 — the loop.
+  while(micro.length || macro.length){
+    // Rule 2: drain the ENTIRE microtask queue (including microtasks queued mid-drain).
+    while(micro.length){
+      const cb=micro.shift();
+      yield snap(`Call stack empty → the loop drains a <b>microtask</b>: ${cb.label}. (All microtasks go before any macrotask.)`, null);
+      yield* execFrame(cb);
+    }
+    // Rule 3: run exactly ONE macrotask.
+    if(macro.length){
+      const cb=macro.shift();
+      yield snap(`Microtask queue empty → the loop runs <b>one macrotask</b>: ${cb.label}.`, null);
+      yield* execFrame(cb);
+    }
+    // Rule 4: back to the top of the while — drain microtasks again.
+  }
+  yield snap(`Both queues empty and the stack is clear — the program is idle. ✅`, null);
+}
+
+/* ==========================================================================
+   3. MATERIALIZE ALL STEPS, then let Step/Back scrub through them.
+   Precomputing is what makes Back trivial and Play smooth, and it costs nothing
+   for programs this size.
+   ========================================================================== */
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const els={
+  src:document.getElementById('src'), out:document.getElementById('out'),
+  expected:document.getElementById('expected'), stack:document.getElementById('stack'),
+  micro:document.getElementById('micro'), macro:document.getElementById('macro'),
+  note:document.getElementById('note'), stepno:document.getElementById('stepno'),
+  live:document.getElementById('live'),
+};
+let steps=[], idx=0, playing=false, timer=null, progKey='canonical';
+
+function load(key){
+  progKey=key;
+  const prog=PROGRAMS[key];
+  steps=[...run(prog)];
+  idx=0;
+  // draw the source once; active line updates per step
+  els.src.replaceChildren();
+  prog.srcLines.forEach((html,i)=>{
+    const div=document.createElement('span'); div.className='ln'; div.dataset.line=i; div.innerHTML=html;
+    els.src.appendChild(div);
+  });
+  els.expected.textContent='expected: '+prog.expected.join(', ');
+  render();
+}
+
+function fill(container, items, cls){
+  container.replaceChildren();
+  if(!items.length){ const e=document.createElement('div'); e.className='empty'; e.textContent='(empty)'; container.appendChild(e); return; }
+  for(const it of items){ const d=document.createElement('div'); d.className='slot'; d.textContent=it; container.appendChild(d); }
+}
+
+function render(){
+  const s=steps[idx];
+  fill(els.stack, s.stack);
+  fill(els.micro, s.micro);
+  fill(els.macro, s.macro);
+  // console with the freshest value highlighted
+  els.out.replaceChildren();
+  s.out.forEach((v,i)=>{ const sp=document.createElement('span'); sp.textContent=v;
+    if(s.fresh && i===s.out.length-1) sp.className='fresh'; els.out.appendChild(sp); });
+  // active source line
+  for(const ln of els.src.children) ln.classList.toggle('active', Number(ln.dataset.line)===s.line);
+  els.note.innerHTML=s.note;
+  els.stepno.textContent=`step ${idx} / ${steps.length-1}`;
+  els.live.textContent=s.note.replace(/<[^>]+>/g,'');
+  document.getElementById('back').disabled = idx===0;
+  document.getElementById('step').disabled = idx===steps.length-1;
+}
+
+function go(n){ idx=Math.max(0,Math.min(steps.length-1,n)); render(); }
+function startPlay(){
+  if(playing || reduced || idx>=steps.length-1) return;   // reduced-motion: step-mode only
+  playing=true; playBtn.textContent='❚❚ Pause';
+  const tick=()=>{ if(!playing) return; if(idx>=steps.length-1){ stopPlay(); return; } go(idx+1); timer=setTimeout(tick, 950); };
+  tick();
+}
+function stopPlay(){ playing=false; playBtn.textContent='▶ Play'; if(timer){ clearTimeout(timer); timer=null; } }
+
+const playBtn=document.getElementById('play');
+document.getElementById('step').addEventListener('click', ()=>{ stopPlay(); go(idx+1); });
+document.getElementById('back').addEventListener('click', ()=>{ stopPlay(); go(idx-1); });
+document.getElementById('restart').addEventListener('click', ()=>{ stopPlay(); go(0); });
+playBtn.addEventListener('click', ()=> playing?stopPlay():startPlay());
+document.getElementById('prog').addEventListener('change', e=>{ stopPlay(); load(e.target.value); });
+addEventListener('keydown', e=>{
+  if(e.target.tagName==='SELECT') return;
+  if(e.key==='ArrowRight'){ e.preventDefault(); stopPlay(); go(idx+1); }
+  else if(e.key==='ArrowLeft'){ e.preventDefault(); stopPlay(); go(idx-1); }
+  else if(e.key==='p'||e.key===' '){ e.preventDefault(); playing?stopPlay():startPlay(); }
+  else if(e.key==='r'){ e.preventDefault(); stopPlay(); go(0); }
+});
+
+load('canonical');   // reduced-motion or not, we boot at step 0 and never autoplay
+if(reduced){ playBtn.disabled=true; playBtn.textContent='Step only'; playBtn.title='Reduced motion is on — use Step ›'; }
+
+/* Debug/test seam: the FINAL console output of a program's full trace is the thing
+   to verify (it must equal the documented expected order). */
+window.__eventLoop = {
+  finalOutput(key='canonical'){ const t=[...run(PROGRAMS[key])]; return t[t.length-1].out; },
+  expected(key='canonical'){ return PROGRAMS[key].expected; },
+};
+</script>
+</body>
+</html>

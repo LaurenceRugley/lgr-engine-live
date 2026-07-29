@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph Wave — BFS vs DFS · LGR curriculum</title>
+<link rel="icon" href="data:,"><!-- self-contained: suppress the default favicon request (no external resources) -->
+<!--
+  ============================================================================
+  GRAPH WAVE — breadth-first vs depth-first search on the SAME graph, side by side.
+  ----------------------------------------------------------------------------
+  The lesson lives in the ONE data-structure difference between the two:
+
+      BFS uses a QUEUE  (first-in, first-out) → it spreads out in rings.
+      DFS uses a STACK  (last-in,  first-out) → it plunges down one path.
+
+  That is the entire difference. Same graph, same start node, same neighbour
+  order — swap the queue for a stack and "spread out evenly" becomes "dive to the
+  bottom first." You can watch it happen: the frontier (blue) is literally the
+  contents of the queue/stack, and the numbers are the order nodes were visited.
+
+  (In C++: BFS is a std::queue<Node>, DFS is a std::stack<Node> — or the call
+  stack itself if you write DFS recursively. The container IS the algorithm.)
+
+  Self-contained page — no build, no dependencies. SVG for crisp, themeable nodes.
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#ffffff; --bg-soft:#f7f6f3; --ink:#1d1a14; --ink-soft:#6b6357;
+    --gold:#8f7443; --gold-soft:#b08a4f; --card:#faf9f6; --rule:#e5e1d8;
+    --good:#3f6b4a; --bad:#8a3a2b;
+    --mono-bg:#272822; --mono-fg:#f8f8f2; --mono-dim:#88846f;
+    --mono-pink:#f92672; --mono-blue:#66d9ef; --mono-green:#a6e22e;
+    --mono-yellow:#e6db74;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5; padding:32px 20px 64px; max-width:1180px; margin:0 auto;}
+  h1{font-family:Georgia,'Times New Roman',serif; font-size:1.9rem; margin:0 0 4px; line-height:1.15;}
+  .kicker{color:var(--gold); font-family:var(--mono); font-size:.74rem;
+    text-transform:uppercase; letter-spacing:.16em; font-weight:700; margin-bottom:10px;}
+  .goldline{height:2px; width:60px; background:var(--gold); margin:14px 0 18px;}
+  .lede{color:var(--ink-soft); max-width:730px; margin:0 0 22px; font-size:1.02rem;}
+  .lede code{font-family:var(--mono); font-size:.9em; background:var(--bg-soft);
+    padding:1px 5px; border-radius:4px; color:var(--gold);}
+
+  .controls{display:flex; flex-wrap:wrap; gap:14px 20px; align-items:center;
+    background:var(--card); border:1px solid var(--rule); border-radius:10px;
+    padding:14px 18px; margin-bottom:22px;}
+  .controls .group{display:flex; align-items:center; gap:8px;}
+  .controls .hint{font-size:.8rem; color:var(--ink-soft);}
+  .controls .hint b{color:var(--gold);}
+  button{font:inherit; font-size:.9rem; font-weight:600; cursor:pointer;
+    background:var(--ink); color:var(--bg); border:1px solid var(--ink);
+    border-radius:7px; padding:7px 15px; transition:background .12s,color .12s;}
+  button:hover{background:var(--gold);}
+  button.ghost{background:transparent; color:var(--ink); border-color:var(--rule);}
+  button.ghost:hover{border-color:var(--gold); color:var(--gold);}
+  button:focus-visible{outline:3px solid var(--gold-soft); outline-offset:2px;}
+
+  .lanes{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  @media(max-width:820px){ .lanes{grid-template-columns:1fr;} }
+  .lane{border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--bg);}
+  .lane h2{font-family:Georgia,serif; font-size:1.14rem; margin:0; padding:12px 16px 2px;}
+  .lane .sub{font-family:var(--mono); font-size:.76rem; color:var(--ink-soft); padding:0 16px 8px;}
+  .lane .sub b{color:var(--gold);}
+  svg{display:block; width:100%; height:auto; background:var(--bg-soft);}
+
+  /* graph nodes */
+  .edge{stroke:var(--rule); stroke-width:2;}
+  .edge.tree{stroke:var(--good); stroke-width:3;}       /* edge the search actually used */
+  .node circle{fill:var(--bg); stroke:var(--gold-soft); stroke-width:2.5; transition:fill .12s,stroke .12s;}
+  .node text{font-family:var(--mono); font-size:11px; fill:var(--ink); text-anchor:middle;
+    dominant-baseline:central; font-weight:700;}
+  .node.frontier circle{fill:#e7f6fb; stroke:var(--mono-blue); stroke-width:3;}
+  .node.current  circle{fill:#fde2ee; stroke:var(--mono-pink); stroke-width:4;}
+  .node.visited  circle{fill:var(--good); stroke:var(--good);}
+  .node.visited text{fill:#fff;}
+  .node.start circle{stroke-dasharray:3 2;}
+  .node{cursor:pointer;}
+  body.reduced .node circle{transition:none;}
+  .order{font-family:var(--mono); font-size:9px; fill:var(--gold); text-anchor:middle; font-weight:700;}
+
+  /* the queue/stack readout — the actual data structure, drawn */
+  .ds{background:var(--mono-bg); color:var(--mono-fg); font-family:var(--mono);
+    font-size:.8rem; padding:10px 16px; display:flex; flex-direction:column; gap:5px;}
+  .ds .label{color:var(--mono-dim);}
+  .ds .cells{display:flex; gap:4px; flex-wrap:wrap; min-height:24px;}
+  .ds .cell{background:#3e3d32; color:var(--mono-blue); border-radius:4px;
+    padding:2px 8px; font-weight:700;}
+  .ds .cell.next{background:var(--mono-blue); color:var(--mono-bg);}   /* the one popped next */
+  .ds .status{color:var(--mono-green); font-weight:700;}
+  .ds .order-line{color:var(--mono-yellow); font-weight:700; word-break:break-all;}
+
+  .foot{margin-top:26px; font-size:.86rem; color:var(--ink-soft); max-width:760px;}
+  .foot code{font-family:var(--mono); color:var(--gold);}
+  .backlink{font-family:var(--mono); font-size:.78rem;}
+  .backlink a{color:var(--gold);}
+  .a11y{position:absolute; left:-9999px;}
+</style>
+</head>
+<body>
+  <div class="kicker">LGR curriculum · live viz</div>
+  <h1>Graph Wave</h1>
+  <div class="goldline"></div>
+  <p class="lede">
+    One graph, two searches. <strong>BFS</strong> pulls from a <code>queue</code> and spreads out in
+    rings; <strong>DFS</strong> pulls from a <code>stack</code> and dives down one path. Same start, same
+    neighbours — only the container differs. The blue nodes are the frontier (exactly what's sitting in the
+    queue/stack); the green numbers are visit order. <strong>Click any node</strong> to start from there.
+  </p>
+
+  <div class="controls" role="group" aria-label="Graph search controls">
+    <div class="group">
+      <button id="play" aria-keyshortcuts="p">▶ Play</button>
+      <button id="step" class="ghost" aria-keyshortcuts="ArrowRight">Step ›</button>
+      <button id="restart" class="ghost" aria-keyshortcuts="r">↻ Restart</button>
+    </div>
+    <div class="group hint">start node: <b id="startlabel">A</b> — <span>click a node or press its letter</span></div>
+  </div>
+
+  <div class="lanes">
+    <div class="lane" id="lane-bfs">
+      <h2>Breadth-first search</h2>
+      <div class="sub">frontier = a <b>QUEUE</b> · first in, first out → rings</div>
+      <svg viewBox="0 0 300 240" role="img" aria-label="BFS graph"></svg>
+      <div class="ds">
+        <div class="label">queue (front → back)</div>
+        <div class="cells" data-cells></div>
+        <div class="order-line" data-order>visited: —</div>
+        <div class="status" data-status>ready</div>
+      </div>
+    </div>
+    <div class="lane" id="lane-dfs">
+      <h2>Depth-first search</h2>
+      <div class="sub">frontier = a <b>STACK</b> · last in, first out → dives</div>
+      <svg viewBox="0 0 300 240" role="img" aria-label="DFS graph"></svg>
+      <div class="ds">
+        <div class="label">stack (top → bottom)</div>
+        <div class="cells" data-cells></div>
+        <div class="order-line" data-order>visited: —</div>
+        <div class="status" data-status>ready</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">
+    <strong>Why it matters:</strong> BFS finds the <em>fewest-edges</em> path to every node — that's why
+    it's the tool for shortest paths on unweighted graphs. DFS goes deep first — the natural shape for
+    "explore a maze," topological sort, and cycle detection. Both visit every node exactly once, so both
+    are <code>O(V + E)</code>; they differ only in the <em>order</em>, and that order comes entirely from
+    queue-vs-stack. <span class="backlink">— part of the <a href="../">Mission Control</a> curriculum.</span>
+  </p>
+
+  <div aria-live="polite" class="a11y" id="live"></div>
+
+<script type="module">
+/* ==========================================================================
+   THE GRAPH — fixed layout so both panels are identical and reproducible.
+   Positions are in the SVG's 300×240 coordinate space. Adjacency is stored
+   SORTED so neighbour order is deterministic (the traversal must be repeatable
+   for the two panels to be a fair comparison).
+   ========================================================================== */
+const NODES={
+  A:[150, 34], B:[ 68, 92], C:[150, 92], D:[232, 92],
+  E:[ 32,152], F:[110,152], G:[190,152], H:[268,152],
+  I:[ 90,212], J:[170,212], K:[250,212],
+};
+const EDGES=[
+  ['A','B'],['A','C'],['A','D'],
+  ['B','E'],['B','F'],['C','F'],['C','G'],['D','G'],['D','H'],
+  ['E','I'],['F','I'],['F','J'],['G','J'],['G','K'],['H','K'],
+];
+// build sorted adjacency
+const ADJ={};
+for(const id of Object.keys(NODES)) ADJ[id]=[];
+for(const [a,b] of EDGES){ ADJ[a].push(b); ADJ[b].push(a); }
+for(const id of Object.keys(ADJ)) ADJ[id].sort();
+
+/* ==========================================================================
+   THE TWO SEARCHES AS GENERATORS
+   Each yields one "visit" event at a time:
+     { current, frontier:[...], treeEdge:[from,to]|null }
+   `frontier` is the live contents of the queue (BFS) or stack (DFS) AFTER the
+   current node's neighbours have been pushed — i.e. exactly what the panel draws.
+   ========================================================================== */
+function* bfs(start){
+  const seen=new Set([start]);
+  const queue=[start];                       // FIFO
+  const from={};
+  const order=[];
+  while(queue.length){
+    const node=queue.shift();                // take from the FRONT
+    order.push(node);
+    for(const nb of ADJ[node]) if(!seen.has(nb)){ seen.add(nb); queue.push(nb); from[nb]=node; }
+    yield { current:node, frontier:queue.slice(), order:order.slice(),
+            treeEdge: from[node]?[from[node],node]:null };
+  }
+}
+function* dfs(start){
+  const seen=new Set();
+  const stack=[start];                       // LIFO
+  const from={};
+  const order=[];
+  while(stack.length){
+    const node=stack.pop();                  // take from the TOP
+    if(seen.has(node)) continue;
+    seen.add(node); order.push(node);
+    // push neighbours in REVERSE sorted order so we explore them in sorted order
+    for(let i=ADJ[node].length-1;i>=0;i--){ const nb=ADJ[node][i]; if(!seen.has(nb)){ if(from[nb]===undefined) from[nb]=node; stack.push(nb); } }
+    yield { current:node, frontier:stack.slice().reverse(), order:order.slice(),
+            treeEdge: from[node]?[from[node],node]:null };
+  }
+}
+
+/* ==========================================================================
+   RENDERING — one SVG per lane, redrawn from the search state each step.
+   ========================================================================== */
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(reduced) document.body.classList.add('reduced');
+const liveEl=document.getElementById('live');
+
+function makeLane(laneId, gen){
+  const el=document.getElementById(laneId);
+  const svg=el.querySelector('svg');
+  const NS='http://www.w3.org/2000/svg';
+  // draw edges first (under nodes)
+  const edgeEls={};
+  for(const [a,b] of EDGES){
+    const ln=document.createElementNS(NS,'line');
+    ln.setAttribute('x1',NODES[a][0]); ln.setAttribute('y1',NODES[a][1]);
+    ln.setAttribute('x2',NODES[b][0]); ln.setAttribute('y2',NODES[b][1]);
+    ln.setAttribute('class','edge'); svg.appendChild(ln);
+    edgeEls[a+'-'+b]=ln; edgeEls[b+'-'+a]=ln;
+  }
+  // draw nodes
+  const nodeEls={};
+  for(const id of Object.keys(NODES)){
+    const [x,y]=NODES[id];
+    const g=document.createElementNS(NS,'g'); g.setAttribute('class','node'); g.dataset.id=id;
+    const c=document.createElementNS(NS,'circle'); c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r',14);
+    const t=document.createElementNS(NS,'text'); t.setAttribute('x',x); t.setAttribute('y',y); t.textContent=id;
+    const o=document.createElementNS(NS,'text'); o.setAttribute('class','order'); o.setAttribute('x',x); o.setAttribute('y',y-20);
+    g.append(c,t,o); svg.appendChild(g);
+    g.addEventListener('click', ()=> setStart(id));
+    nodeEls[id]={g,order:o};
+  }
+  return {
+    el, svg, edgeEls, nodeEls, gen,
+    frontier:[], order:[], current:null, treeEdges:new Set(), done:false,
+    cellsEl:el.querySelector('[data-cells]'),
+    orderEl:el.querySelector('[data-order]'),
+    statusEl:el.querySelector('[data-status]'),
+  };
+}
+
+function renderLane(L){
+  const orderIdx={}; L.order.forEach((id,i)=>orderIdx[id]=i+1);
+  const seen=new Set(L.order);
+  const frontier=new Set(L.frontier);
+  for(const id of Object.keys(NODES)){
+    const {g,order}=L.nodeEls[id];
+    let cls='node';
+    if(id===L.current) cls+=' current';
+    else if(seen.has(id)) cls+=' visited';
+    else if(frontier.has(id)) cls+=' frontier';
+    if(id===L.start) cls+=' start';
+    g.setAttribute('class',cls);
+    order.textContent = orderIdx[id]?('#'+orderIdx[id]):'';
+  }
+  for(const k of Object.keys(L.edgeEls)) L.edgeEls[k].setAttribute('class','edge');
+  for(const e of L.treeEdges) L.edgeEls[e]?.setAttribute('class','edge tree');
+  // the data-structure readout: front/top cell is highlighted as "next out"
+  L.cellsEl.replaceChildren();
+  L.frontier.forEach((id,i)=>{
+    const d=document.createElement('div'); d.className='cell'+(i===0?' next':''); d.textContent=id;
+    L.cellsEl.appendChild(d);
+  });
+  L.orderEl.textContent='visited: '+(L.order.length?L.order.join(' → '):'—');
+}
+
+/* ==========================================================================
+   DRIVER — both lanes advance together on Step / Play.
+   ========================================================================== */
+let lanes=[], playing=false, timer=null, startNode='A';
+
+function build(){
+  document.getElementById('startlabel').textContent=startNode;
+  lanes=[ makeLane('lane-bfs', bfs(startNode)), makeLane('lane-dfs', dfs(startNode)) ];
+  for(const L of lanes){ L.start=startNode; renderLane(L); L.statusEl.textContent='ready'; }
+}
+function stepOnce(){
+  let anyRunning=false;
+  for(const L of lanes){
+    if(L.done) continue;
+    const {value,done}=L.gen.next();
+    if(done){ L.done=true; L.current=null; L.frontier=[]; L.statusEl.textContent='complete · '+L.order.length+' nodes'; renderLane(L); continue; }
+    anyRunning=true;
+    L.current=value.current; L.frontier=value.frontier; L.order=value.order;
+    if(value.treeEdge) L.treeEdges.add(value.treeEdge[0]+'-'+value.treeEdge[1]);
+    L.statusEl.textContent='visiting '+value.current;
+    L.statusEl.classList.add('running');
+    renderLane(L);
+  }
+  if(!anyRunning){ stopPlay(); liveEl.textContent='Both searches complete.'; }
+  return anyRunning;
+}
+function startPlay(){
+  if(playing || reduced) return;             // reduced-motion: step-mode only
+  playing=true; playBtn.textContent='❚❚ Pause';
+  const tick=()=>{ if(!playing) return; if(!stepOnce()){ stopPlay(); return; } timer=setTimeout(tick, 600); };
+  tick();
+}
+function stopPlay(){ playing=false; playBtn.textContent='▶ Play'; if(timer){ clearTimeout(timer); timer=null; } }
+function setStart(id){ stopPlay(); startNode=id; build(); liveEl.textContent='Start node set to '+id; }
+
+const playBtn=document.getElementById('play');
+document.getElementById('step').addEventListener('click', ()=>{ stopPlay(); stepOnce(); });
+document.getElementById('restart').addEventListener('click', ()=>{ stopPlay(); build(); });
+playBtn.addEventListener('click', ()=> playing?stopPlay():startPlay());
+addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT') return;
+  const up=e.key.toUpperCase();
+  if(e.key==='ArrowRight'){ e.preventDefault(); stopPlay(); stepOnce(); }
+  else if(e.key==='p'||e.key===' '){ e.preventDefault(); playing?stopPlay():startPlay(); }
+  else if(e.key==='r'){ e.preventDefault(); stopPlay(); build(); }
+  else if(NODES[up]){ setStart(up); }        // press a node's letter to start from it
+});
+
+build();
+if(reduced){ playBtn.disabled=true; playBtn.textContent='Step only'; playBtn.title='Reduced motion is on — use Step ›'; }
+
+/* Debug/test seam: expose the graph + a full-run of both searches so a verifier can
+   confirm BFS order (level-by-level) vs DFS order (deep-first) independently. */
+window.__graphWave = {
+  ADJ, NODES,
+  fullRun(start='A'){
+    const collect=(gen)=>{ const o=[]; for(const s of gen) o.push(s.current); return o; };
+    return { start, bfs:collect(bfs(start)), dfs:collect(dfs(start)) };
+  },
+};
+</script>
+</body>
+</html>
