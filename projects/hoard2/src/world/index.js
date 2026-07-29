@@ -51,11 +51,13 @@ export function createWorld(ctx) {
   // ?water=1 forces it back ON — the before/after A/B toggle for the water-edge proof + debugging.
   const _waterOn = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('water') === '1');
   engine.setWaterEnabled?.(_waterOn);
-  // B2 CLOUD-SCALE LIFT (owner's B1 "white puffs" flag): the engine cloud field's altitude band (hiY
-  // 4-6.8) is CITY-scale → head-height sprites in this small arena. The decrepit forest reads better
-  // BARE (a grim empty sky), so disable the field here (engine seam, city clouds untouched). The stray
-  // low-sprite hide in main.js becomes redundant but harmless.
-  engine.setCloudsEnabled?.(false);
+  // A4 CLOUDS RETURN (owner: "clouds back at proper altitude WITH drift — a living sky"). B2 disabled the
+  // field because its clear band (hiY 4-6.8) sat at HEAD HEIGHT in this small arena (the "white puffs"). The
+  // A4 altitude multiplier lifts that band into real SKY (≈14-24 u up), so the clouds read as a high, moving
+  // overcast — visible when you dive to first-person and look up, and drifting east (the field already drifts
+  // + fades at the band edges). City clouds untouched (default multiplier 1). Re-enabled + lifted:
+  engine.setCloudsEnabled?.(true);
+  engine.setCloudAltitude?.(3.5);
   // B2 finding #6 — dial the beauty chromatic-aberration WAY down (the loud rainbow fringing on thin tree
   // trunks both B1 critics flagged). 0.3 keeps a filmic hint without the rainbow. City CA untouched (1.0).
   engine.setChromaScale?.(0.3);
@@ -110,6 +112,27 @@ export function createWorld(ctx) {
   );
   ground.position.y = GROUND_Y; ground.receiveShadow = true;
   scene.add(ground);
+
+  /* ---- A4 CLOUD SHADOWS: sell the MOVING SKY in the iso view (which never shows the sky) through its
+     EVIDENCE — soft dark patches drifting across the arena floor, as if clouds were passing overhead
+     (DESIGN's ruling). Cheap: ONE plane of dark soft blobs, UV-scrolled east with the cloud wind, faded
+     out at night (no sun → no cloud shadow) and under fog. Drawn just above the ground, non-picking. ---- */
+  const _csTex = (() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+    const g2 = cv.getContext('2d'); g2.clearRect(0, 0, 256, 256);
+    const r2 = rng.fork ? rng.fork('cloudshadow') : Math.random;
+    for (let i = 0; i < 11; i++) {
+      const x = r2() * 256, y = r2() * 256, r = 42 + r2() * 74;
+      const grad = g2.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, 'rgba(14,16,22,0.5)'); grad.addColorStop(1, 'rgba(14,16,22,0)');
+      g2.fillStyle = grad; g2.beginPath(); g2.arc(x, y, r, 0, 7); g2.fill();
+    }
+    const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2.4, 2.4); return t;
+  })();
+  const _csMat = new THREE.MeshBasicMaterial({ map: _csTex, transparent: true, depthWrite: false, opacity: 0, fog: true });
+  const cloudShadows = new THREE.Mesh(new THREE.CircleGeometry(ARENA_EXTENT + 6, 48).rotateX(-Math.PI / 2), _csMat);
+  cloudShadows.position.y = GROUND_Y + 0.02; cloudShadows.renderOrder = 2; cloudShadows.raycast = () => {};
+  scene.add(cloudShadows);
 
   // LIGHT-THE-HOARD (2026-07-27): the engine's SunRig already drives a DIRECTIONAL sun key (city.key) +
   // a hemisphere fill (city.fill) every frame via updateWorld — hoard2 INHERITS the real sun stack. The
@@ -248,9 +271,34 @@ export function createWorld(ctx) {
   }
   scene.add(ruinGroup);
 
+  /* ---- A4 INTACT BUILDINGS INSIDE THE ARENA (owner: real cover, scavenge, new tactics). Two SEEDED intact
+     structures in the play ring: they register as obstacles EVERYWHERE — the flow-field routes zombies
+     around them, the walker pushes out, and ballistics stops shots on their walls (see buildingCylinders() +
+     makeCastWorld) — so they're real cover you fight behind, not decoration. Each has a richer SCAVENGE node
+     at its base (risk/reward: the loot sits in the chokepoint). Interiors are OUT of scope (solid blocks —
+     flagged). Seeded off worldRng → deterministic (same seed → same buildings → same paths). ---- */
+  const _buildings = [];
+  const bRng = rng.fork ? rng.fork('buildings') : Math.random;
+  for (let i = 0; i < 2; i++) {
+    const ang = (i / 2) * Math.PI * 2 + bRng() * 1.1 + 0.7;
+    const rad = 11 + bRng() * 5;                       // off-centre, inside the play ring
+    const bx = Math.cos(ang) * rad, bz = Math.sin(ang) * rad;
+    const w = 4.4 + bRng() * 1.6, d = 3.6 + bRng() * 1.3, h = 3.9 + bRng() * 1.1;
+    _buildings.push({ x: bx, z: bz, r: Math.max(w, d) * 0.5, h });   // cover cylinder (footprint × height)
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), surfaces.stone);
+    body.position.set(0, h / 2, 0); body.castShadow = true; body.receiveShadow = true;
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 1.08, 0.42, d * 1.08), surfaces.stone);
+    roof.position.set(0, h + 0.21, 0); roof.castShadow = true; roof.receiveShadow = true;
+    g.add(body); g.add(roof); g.position.set(bx, GROUND_Y, bz);
+    scene.add(g);
+  }
+
   /* ---- OBSTACLES + HARVEST NODES (built once; facade returns the cached arrays — no per-call alloc) ---- */
-  // obstacles = tree trunks (within the play radius, from the forest) + interactive-ruin footprints.
-  const _obstacles = forest.colliders.concat(ruins.map((r) => ({ x: r.x, z: r.z, r: r.r })));
+  // obstacles = tree trunks (within the play radius, from the forest) + interactive-ruin footprints + A4 buildings.
+  const _obstacles = forest.colliders
+    .concat(ruins.map((r) => ({ x: r.x, z: r.z, r: r.r })))
+    .concat(_buildings.map((b) => ({ x: b.x, z: b.z, r: b.r })));
   // wood grows on the dead trees inside the play radius; scrap salvages from the ruins.
   const treeNodes = [];
   for (const key of ['bare', 'conifer']) {
@@ -259,6 +307,12 @@ export function createWorld(ctx) {
     }
   }
   const _harvest = deriveHarvest(treeNodes, ruins, { woodAmount: 6, scrapAmount: 8 });
+  // A4 SCAVENGE: a RICHER node at each building's base — the risk/reward is that the good loot sits at the
+  // structure, which is also the chokepoint the horde funnels toward. (open field = 6/8; building = 14/18.)
+  for (const b of _buildings) {
+    _harvest.wood.push({ x: b.x + b.r * 0.85, z: b.z, amount: 14 });
+    _harvest.scrap.push({ x: b.x - b.r * 0.85, z: b.z, amount: 18 });
+  }
 
   /* ---- CELESTIALS · SKY · CLOUDS · WEATHER — INHERITED from the engine (not project-local) ----
      LIGHT-THE-HOARD: createCityWorld already builds celestials (sun/moon/stars/constellations), the
@@ -314,13 +368,20 @@ export function createWorld(ctx) {
   const facade = {
     groundAt: (_x, _z) => GROUND_Y,            // FLAT play area (ratified #8)
     nightFactor: () => _nf,                    // THE canonical night value (sim difficulty + fx read this)
-    obstacles: () => _obstacles,               // [{x,z,r}] trees + ruins (sim field + player walker)
+    obstacles: () => _obstacles,               // [{x,z,r}] trees + ruins + A4 buildings (sim field + player walker)
+    buildingCylinders: () => _buildings,       // A4 [{x,z,r,h}] intact cover — ballistics stops shots on them
     harvestNodes: () => _harvest,              // { wood:[{x,z,amount}], scrap:[{x,z,amount}] } (build)
     playRadius: PLAY_RADIUS,
     update(dt, _t) {
       _elapsed += dt;
       _phase = phaseAt(SUN.startT, _elapsed, DAY_LENGTH_S);
       _nf = resolveNight(_override, _phase, SUN);
+
+      // A4 CLOUD SHADOWS drift east with the wind (matches the cloud field's +x drift) and fade with night —
+      // strong by day (the sun casts them), gone at deep night. A slow scroll reads as a lazy overcast moving.
+      _csTex.offset.x = (_elapsed * 0.010) % 1;
+      _csTex.offset.y = (_elapsed * 0.004) % 1;
+      _csMat.opacity = 0.5 * (1 - _nf);
 
       // drive the visible sun: follow the clock, OR (when overridden) jump to the phase that matches nf
       // so a forced night also DARKENS the sky, not just the sim.

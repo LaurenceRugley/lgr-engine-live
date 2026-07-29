@@ -22,7 +22,10 @@
 // Build the ballistics castWorld(ox,oy,oz,ex,ey,ez) provider. `castBarriers(seg)` is BUILD's facade,
 // seg = { o:{x,y,z}, e:{x,y,z} }, returning { point, normal, id, t } | null. The ground is the flat play
 // plane at `groundY`; a dropping bullet buries into the dirt there (v1 hoard.js:277).
-export function makeCastWorld(groundY, castBarriers) {
+// A4: `getBuildings()` (optional) returns the intact cover structures as vertical cylinders
+// [{x,z,r,h}] — a shot is stopped by a building's wall (segment-vs-vertical-cylinder), so the intact
+// structures are real cover that blocks bullets, not just movement.
+export function makeCastWorld(groundY, castBarriers, getBuildings) {
   const rec = { t: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 } };
   const seg = { o: { x: 0, y: 0, z: 0 }, e: { x: 0, y: 0, z: 0 } };
   return function castWorld(ox, oy, oz, ex, ey, ez) {
@@ -31,6 +34,20 @@ export function makeCastWorld(groundY, castBarriers) {
     if (oy > groundY && ey <= groundY && oy !== ey) {
       const tg = (oy - groundY) / (oy - ey);
       if (tg >= 0 && tg <= 1) { bestT = tg; hx = ox + (ex - ox) * tg; hy = groundY; hz = oz + (ez - oz) * tg; nx = 0; ny = 1; nz = 0; }
+    }
+    // A4 BUILDING COVER — segment vs each vertical cylinder (circle footprint × height). Entry root of the
+    // 2D ray-circle quadratic, then a y-range gate so only the walled height blocks (a shot over the roof passes).
+    const B = getBuildings ? getBuildings() : null;
+    if (B) for (let i = 0; i < B.length; i++) {
+      const b = B[i], dx = ex - ox, dz = ez - oz, mx = ox - b.x, mz = oz - b.z;
+      const a = dx * dx + dz * dz; if (a < 1e-9) continue;
+      const hb = 2 * (dx * mx + dz * mz), cc = mx * mx + mz * mz - b.r * b.r;
+      const disc = hb * hb - 4 * a * cc; if (disc < 0) continue;
+      const t = (-hb - Math.sqrt(disc)) / (2 * a);
+      if (t < 0 || t > 1 || t >= bestT) continue;
+      const y = oy + (ey - oy) * t; if (y < groundY || y > groundY + b.h) continue;
+      bestT = t; hx = ox + dx * t; hz = oz + dz * t; hy = y;
+      const inv = 1 / Math.max(1e-6, Math.hypot(hx - b.x, hz - b.z)); nx = (hx - b.x) * inv; ny = 0; nz = (hz - b.z) * inv;
     }
     if (castBarriers) {
       seg.o.x = ox; seg.o.y = oy; seg.o.z = oz; seg.e.x = ex; seg.e.y = ey; seg.e.z = ez;

@@ -1083,6 +1083,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     setWaterEnabled,   // B2 WORLD-TRUTH: contextual-water enable seam (false → no bay water body; city default true)
     get waterEnabled() { return _waterOn; },
     setCloudsEnabled: (on) => clouds.setEnabled(on),   // B2 CLOUD-SCALE LIFT: false → no head-height puffs in a small arena
+    setCloudAltitude: (m) => clouds.setAltitude(m),    // A4: lift the clear band into real sky (city default 1 → byte-identical)
     get cloudsEnabled() { return clouds.enabled; },
     setChromaScale,    // B2: scale the beauty chromatic-aberration (1 = city default; hoard2 dials down)
     setGradeCool,      // B2: warm→cool grade candidate (0 = city warm default; hoard2 baked cool per owner ruling)

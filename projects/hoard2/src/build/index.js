@@ -69,6 +69,40 @@ export function createBuild(ctx) {
     if (m) { scene.remove(m); meshes.delete(id); }
   }
 
+  // ---- A4 GHOST BUILD-MODE (owner-approved): a translucent preview barrier under the cursor. Green = it
+  // can be placed here; red = it can't (unaffordable / off-arena / overlapping). The player drives it from
+  // the cursor's ground point; a click commits via placeAt. ----
+  let ghost = null, ghostMat = null;
+  if (THREE && scene) {
+    ghostMat = new THREE.MeshBasicMaterial({ color: 0x5ad25a, transparent: true, opacity: 0.3, depthWrite: false });
+    ghost = new THREE.Mesh(barrierGeo, ghostMat);
+    ghost.visible = false; ghost.renderOrder = 3; ghost.raycast = () => {};
+    scene.add(ghost);
+  }
+  function validAt(x, z) {
+    if (!canAfford(stock)) return false;                                 // can't afford → red
+    if (Math.hypot(x, z) > config.PLAY_RADIUS - 1) return false;         // off the play disc → red
+    return !field.barriers.some((bb) => bb.alive && Math.hypot(bb.cx - x, bb.cz - z) < WALL.length * 0.85); // overlap → red
+  }
+  function updateGhost(x, z, dir = 'x') {
+    if (!ghost) return false;
+    const valid = validAt(x, z);
+    const halfLen = WALL.length / 2, halfThick = WALL.thickness / 2;
+    const hx = dir === 'z' ? halfThick : halfLen, hz = dir === 'z' ? halfLen : halfThick;
+    ghost.position.set(x, config.GROUND_Y + WALL.height / 2, z);
+    ghost.scale.set(hx * 2, WALL.height, hz * 2);
+    ghostMat.color.setHex(valid ? 0x5ad25a : 0xd2402c);
+    return valid;
+  }
+  function setGhostVisible(on) { if (ghost) ghost.visible = !!on; }
+  function placeAt(x, z, dir = 'x') {
+    if (!validAt(x, z)) return null;
+    stock.wood -= BARRIER_COST.wood; stock.scrap -= BARRIER_COST.scrap;
+    const b = field.place(x, z, dir);
+    spawnMesh(b); emitBarrier('barrier:place', b);
+    return b;
+  }
+
   // ---- reused event payloads (engine-invariants #7: no per-frame/hot alloc for repeat emits) ----
   const dmgPayload = { id: 0, seg: 0, hp: 0, cx: 0, cz: 0 };
   const gainPayload = { material: '', amount: 0, source: '' };
@@ -212,6 +246,9 @@ export function createBuild(ctx) {
     materials: () => ({ wood: stock.wood, scrap: stock.scrap }),
     // Extra (supplementary to the pinned surface): let ui/player trigger placement/repair directly.
     place: () => place(),
+    updateGhost: (x, z, dir) => updateGhost(x, z, dir),   // A4 ghost build-mode: preview under the cursor
+    setGhostVisible: (on) => setGhostVisible(on),
+    placeAt: (x, z, dir) => placeAt(x, z, dir),            // commit at the cursor's ground point
     repair: () => repairNearest(),
     update(_dt, _t) {
       // No hot work: barriers are event-driven. Nothing to allocate or poll per frame.

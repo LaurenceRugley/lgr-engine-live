@@ -159,7 +159,7 @@ export function createPlayer(ctx) {
   let _nfLastFill = -1;   // A2: last night-factor the survivor's night-fill emissive was set to
   const getSim = () => (_sim || (_sim = registry.get('sim')));
 
-  const castWorld = makeCastWorld(GROUND_Y, (seg) => getBuild().castBarriers(seg));
+  const castWorld = makeCastWorld(GROUND_Y, (seg) => getBuild().castBarriers(seg), () => getWorld().buildingCylinders());
   const castTargets = makeCastTargets((seg) => getSim().queryTargets(seg), GUN.targetRadius);
 
   const _hitEvt = { point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, target: null, damage: 0 };
@@ -178,6 +178,11 @@ export function createPlayer(ctx) {
   /* ---- INPUT state (keys tracked here; the rig azimuth drives camera-relative move) ---- */
   const keys = Object.create(null);
   let firing = false, orbiting = false, lastX = 0, lastY = 0;
+  // A4 GHOST BUILD-MODE (iso): B toggles a cursor-aimed ghost wall; LMB places, ESC/RMB cancels.
+  let buildMode = false;
+  function setBuildMode(on) { buildMode = !!on && !dive.active; if (buildMode) firing = false; getBuild().setGhostVisible(buildMode); }
+  function buildDir() { const dx = _aimPt.x - player.x, dz = _aimPt.z - player.z; return Math.abs(dx) > Math.abs(dz) ? 'z' : 'x'; }  // wall broadside to the aim line
+  function placeGhost() { if (buildMode && aimValid) getBuild().placeAt(_aimPt.x, _aimPt.z, buildDir()); }
   const coarse = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   const pointerNdc = new THREE.Vector2();
   let aimValid = false;
@@ -187,16 +192,39 @@ export function createPlayer(ctx) {
   const ORBIT_SPEED = 0.005;
 
   const dom = renderer && renderer.domElement;
+  let _cursorX = 0, _cursorY = 0;             // A4: raw client cursor for the iso reticle
   const setPointer = (cx, cy) => {
     pointerNdc.x = (cx / window.innerWidth) * 2 - 1;
     pointerNdc.y = -(cy / window.innerHeight) * 2 + 1;
+    _cursorX = cx; _cursorY = cy;
     aimValid = true;
   };
+
+  /* A4 CROSSHAIRS (style bible: cool, minimal, on-theme) — an FP CENTER reticle (where you look/fire) and a
+     subtle ISO CURSOR ring (where the shot goes). DOM overlay, non-interactive; iso ring is fine-pointer only. */
+  const reticles = (typeof document !== 'undefined') ? (() => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:5';
+    const bar = 'position:absolute;background:rgba(202,216,208,.82);box-shadow:0 0 2px rgba(0,0,0,.85)';
+    const fp = document.createElement('div');
+    fp.style.cssText = 'position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;display:none';
+    fp.innerHTML = `<span style="${bar};left:12px;top:0;width:2px;height:9px"></span>`
+      + `<span style="${bar};left:12px;bottom:0;width:2px;height:9px"></span>`
+      + `<span style="${bar};top:12px;left:0;height:2px;width:9px"></span>`
+      + `<span style="${bar};top:12px;right:0;height:2px;width:9px"></span>`;
+    const iso = document.createElement('div');
+    iso.style.cssText = 'position:absolute;width:20px;height:20px;margin:-10px 0 0 -10px;display:none;border-radius:50%;'
+      + 'border:2px solid rgba(196,212,202,.7);box-shadow:0 0 3px rgba(0,0,0,.7),inset 0 0 2px rgba(0,0,0,.5)';
+    wrap.appendChild(fp); wrap.appendChild(iso); document.body.appendChild(wrap);
+    return { fp, iso };
+  })() : null;
   if (typeof window !== 'undefined') {
     window.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase(); keys[k] = true;
       if (k === 'f') { e.preventDefault(); onDiveToggle(); }
+      else if (k === 'escape' && buildMode) { e.preventDefault(); setBuildMode(false); }   // A4: ESC cancels build-mode
       else if (k === 'escape' && dive.active) { e.preventDefault(); dive.exit(); tryExitPointerLock(); }
+      else if (k === 'b' && !dive.active) { e.preventDefault(); setBuildMode(!buildMode); }  // A4: B toggles the ghost build-mode (iso)
       else if (k === ' ' || k === 'v') { e.preventDefault(); doMelee(); }
     });
     window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
@@ -211,6 +239,7 @@ export function createPlayer(ctx) {
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('mousedown', (e) => {
       if (dive.active) { if (e.button === 0) firing = true; return; }   // dived: mouse turns your head; LMB still fires forward
+      if (buildMode) { if (e.button === 0) { setPointer(e.clientX, e.clientY); placeGhost(); } if (e.button === 2) setBuildMode(false); return; }  // A4: LMB places, RMB cancels
       if (e.button === 0) { setPointer(e.clientX, e.clientY); firing = true; }
       if (e.button === 2) { orbiting = true; lastX = e.clientX; lastY = e.clientY; }
     });
@@ -446,19 +475,33 @@ export function createPlayer(ctx) {
       // place + orient the survivor mesh at the pose. B4: HIDE the whole body in the dive — the FP eye sits
       // inside its head, so the mesh rendered in front of the camera (you saw your own body, and the muzzle
       // flash lit it). The FP viewmodel is the gun you see; the iso hand-gun hides with the body.
+      // A4 GHOST BUILD-MODE: the preview wall tracks the cursor's ground point (raycast above set _aimPt).
+      if (buildMode && aimValid && !dive.active) getBuild().updateGhost(_aimPt.x, _aimPt.z, buildDir());
+      // A4 CROSSHAIRS: FP center reticle when dived; iso cursor ring when aiming with a fine pointer.
+      if (reticles) {
+        reticles.fp.style.display = dive.active ? 'block' : 'none';
+        if (!dive.active && aimValid && !coarse && !dead) {
+          reticles.iso.style.display = 'block';
+          reticles.iso.style.left = _cursorX + 'px'; reticles.iso.style.top = _cursorY + 'px';
+        } else reticles.iso.style.display = 'none';
+      }
       if (survivor) {
         survivor.object.visible = !dive.active;
         survivor.object.position.set(player.x, GROUND_Y, player.z);
         survivor.setHeading(player.facing);   // A1: SMOOTH body turn (slerped in the rig), not a snap
         // B3 head-look: the survivor turns its head toward where you're aiming (the cursor ground point).
         if (aimValid) survivor.setLookTarget(_aimPt.x, EYE_Y, _aimPt.z);
-        // A1 AIM-IK: the gun visibly TRACKS what it would shoot — the nearest zombie in the assist cone
-        // (the same target fireShot picks); when none is in the cone, the arm relaxes back to the walk. iso
-        // only (the survivor is hidden in the dive; the viewmodel already follows the camera there).
+        // A4 AIM TRUTH: the gun orients to where you're aiming CONTINUOUSLY (owner: the gun should always
+        // aim, not only when a zombie's in the assist cone). It SNAPS to the assist target when one's in the
+        // cone (so it points at what it'll actually hit), else points down the cursor/facing ray at chest
+        // height — the arm no longer relaxes to the walk pose when nothing's near. iso only (the survivor is
+        // hidden in the dive; the FP viewmodel already points down the camera/reticle).
         if (!dive.active && !dead) {
           const ad = computeAim();
           const tgt = getSim().queryCone(player.x, player.z, ad.x, ad.z, ASSIST.cosHalf, ASSIST.range);
-          survivor.setAim(tgt ? { x: tgt.x, y: GROUND_Y + ASSIST.chestY, z: tgt.z } : null);
+          survivor.setAim(tgt
+            ? { x: tgt.x, y: GROUND_Y + ASSIST.chestY, z: tgt.z }
+            : { x: player.x + ad.x * ASSIST.range, y: GROUND_Y + ASSIST.chestY, z: player.z + ad.z * ASSIST.range });
         } else survivor.setAim(null);
       }
       const _sp = Math.hypot(player.vx || 0, player.vz || 0);

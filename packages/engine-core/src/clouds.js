@@ -112,8 +112,8 @@ export function createCloudField({ extent = 8, count = 16, enabled = true } = {}
       if (c.x > SPAN) { c.x = -SPAN; c.z = rnd(-SPAN, SPAN); }
       // ENTER/EXIT fade — soft at both edges of the band so clouds "appear" and dissolve, not pop.
       const edge = Math.min(smooth(c.x, -SPAN, -SPAN + 3), 1 - smooth(c.x, SPAN - 3, SPAN));
-      // altitude: high by default, sinks to the MIST band as fog rises.
-      const y = c.hiY * (1 - fog) + c.loY * fog;
+      // altitude: high by default (× the A4 lift multiplier), sinks to the MIST band as fog rises.
+      const y = c.hiY * _altMul * (1 - fog) + c.loY * fog;
       // per-weather opacity: fog = ultra-transparent mist; rain = heavier; clear = medium. The
       // cloud's personal ceiling (op) + wisp factor give the VARIED transparency Laurence asked for.
       const wispFade = 1 - 0.5 * c.wisp;               // wispy clouds are fainter (but not invisible)
@@ -146,7 +146,12 @@ export function createCloudField({ extent = 8, count = 16, enabled = true } = {}
   function getFollowables() { return followables; }
 
   function setEnabled(on) { _enabled = !!on; group.visible = _enabled; }
-  return { group, update, setTexture, getFollowables, setEnabled, get enabled() { return _enabled; }, get count() { return clouds.length; } };
+  // A4 ALTITUDE LIFT: the clear/rain band (hiY 4.0–6.8) is sized for the dimetric CITY frame; in a small
+  // arena those sit at head height (the owner's "white puffs"). A multiplier lifts the whole clear band into
+  // real SKY without touching the mist (loY) band. Default 1 → CITY BYTE-IDENTICAL (never set there).
+  let _altMul = 1;
+  function setAltitude(mult) { _altMul = mult > 0 ? mult : 1; }
+  return { group, update, setTexture, getFollowables, setEnabled, setAltitude, get enabled() { return _enabled; }, get count() { return clouds.length; } };
 }
 
 function smooth(v, a, b) { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); }
