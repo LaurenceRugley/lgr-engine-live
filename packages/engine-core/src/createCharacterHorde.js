@@ -30,6 +30,7 @@
    }
    ============================================================ */
 import * as THREE from 'three';
+import { applyNightFill } from './character-night-fill.js';
 
 export function createCharacterHorde(rig, opts = {}) {
   const size = opts.size || 48;
@@ -49,6 +50,7 @@ export function createCharacterHorde(rig, opts = {}) {
   }
   let activeCount = 0;
   const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+  const _nfSeen = new Set();   // A2: dedup scratch for setNightFill (cleared each call, never re-alloc)
 
   return {
     group,
@@ -97,6 +99,22 @@ export function createCharacterHorde(rig, opts = {}) {
     setLayerParams(i, params) { slots[i].handle.setLayerParams(params); },
     setLocomotion(i, speed01) { slots[i].handle.setLocomotion(speed01); },   // A1: velocity-driven idle/walk/run blend
     playAction(i, name) { slots[i].handle.playAction(name); },               // A1: one-shot (hit/attack) over the blend
+    // A2 NIGHT FILL: lift the swarm off black at night. The project OVERRIDES slot materials (setType tints),
+    // so we can't use the rig's source materials — walk the ACTIVE slots' actual mesh materials, deduped, and
+    // apply the night emissive to each unique one (~4 tinted materials, not 42 meshes). Cheap, zero lights.
+    setNightFill(nf, opts) {
+      _nfSeen.clear();
+      for (let i = 0; i < size; i++) {
+        if (!slots[i].active) continue;
+        const mesh = slots[i].handle.object;
+        mesh.traverse((n) => {
+          if (!n.isMesh || !n.material) return;
+          const m = n.material;
+          if (_nfSeen.has(m)) return; _nfSeen.add(m);
+          applyNightFill(m, nf, opts);
+        });
+      }
+    },
     dispose() { for (const s of slots) s.handle.dispose(); },
   };
 }

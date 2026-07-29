@@ -52,6 +52,7 @@ import * as THREE from 'three';
 import { createBeautyPresenter } from './createBeautyPresenter.js';
 import { createHeroWipe } from './createHeroWipe.js';
 import { resolveEasing } from '../math/easing.js';
+import { buildReelPlan } from '../reel-grammar.js';
 
 const DEG2RAD = Math.PI / 180;
 const v3 = (a, d = 0) => new THREE.Vector3(a?.[0] ?? d, a?.[1] ?? d, a?.[2] ?? d);
@@ -133,15 +134,57 @@ export function createCameraDirector(core, { wipe } = {}) {
       drift: p.drift || null,                  // { amp, speed } subtle breathing (3D only)
       hasPose: !!(p.from || p.center || p.pos || p.lookAt),  // does this shot pose the camera at all?
       pos: v3(p.pos ?? p.from),
+      offset: v3(p.offset),                    // A2 follow: fixed camera offset from the tracked subject
     };
-    if (!['orbit', 'dolly', 'push-in', 'hold', 'timelapse'].includes(s.move)) {
-      throw new Error(`createCameraDirector: unknown move ${JSON.stringify(s.move)} (orbit|dolly|push-in|hold|timelapse)`);
+    if (!['orbit', 'dolly', 'push-in', 'hold', 'timelapse', 'crane', 'follow'].includes(s.move)) {
+      throw new Error(`createCameraDirector: unknown move ${JSON.stringify(s.move)} (orbit|dolly|push-in|hold|timelapse|crane|follow)`);
     }
     if (s.bestT == null) s.bestT = s.move === 'timelapse' ? 1 : s.move === 'hold' ? 0 : 0.5;
     return s;
   }
 
   function addShot(spec) { shots.push(normalizeShot(spec)); return api; }
+
+  /* ── REEL GRAMMAR MODE (Arc R1) ──────────────────────────────────────────────────────────────────
+     addReelSequence(pack, spec) expands the SHARED reel grammar (reel-grammar.js) into director shots so a
+     beauty-pack reel obeys the trailer rule by construction: hook-first, 2–3 s shots, wide→medium→close
+     rotation with focal cycling, loop-aware tail. It's the director-side wiring of the ability the Hoard
+     capture + the ffmpeg compositor also consume — one grammar, three renderers, no drift.
+
+     A framing maps to an ORBIT at a distance around the subject: wide = far/low arc, medium = mid, close =
+     near. The beat's focal sets the fov. Every shot is real footage of the pack from frame one (the pack is
+     live) — there is no intro shot to insert, so the trailer rule holds automatically.
+
+     spec: { subject:[x,y,z], beats:[…grammar beats…], loop?, radius?, height?, arcDeg?, transition? }
+       radius = the CLOSE distance (wide/medium scale it out by 2.4×/1.6×); arcDeg = per-shot orbit sweep. */
+  function addReelSequence(pack, spec = {}) {
+    const plan = buildReelPlan(spec.beats || [], { loop: spec.loop });
+    const subject = spec.subject || [0, 0, 0];
+    const rClose = spec.radius ?? 6;
+    const scale = { close: 1, medium: 1.6, wide: 2.4 };
+    const height = spec.height ?? 2;
+    const arcDeg = spec.arcDeg ?? 24;                 // a gentle live drift per shot (not a full circle)
+    let startDeg = spec.startDeg ?? -12;
+    for (const sh of plan.shots) {
+      const radius = rClose * (scale[sh.framing] ?? 1.6);
+      addShot({
+        pack,
+        move: sh.move === 'push-in' ? 'push-in' : 'orbit',
+        duration: sh.durationMs,
+        easing: 'easeInOutSine',
+        framing: { center: subject, radius: radius * 0.5, fill: 0.82 },   // vertical safe-area reframe hint
+        params: {
+          center: subject, radius, height,
+          startDeg, arcDeg,
+          fovFrom: sh.fov, fovTo: sh.fov,            // hold the beat's focal (fov cycles shot-to-shot)
+          lookAt: subject, from: [subject[0] + radius, subject[1] + height, subject[2]], to: [subject[0], subject[1] + height, subject[2]],
+        },
+        transition: spec.transition || { mode: 'fade', duration: 350 },   // playbook: ~0.35s snappy cut
+      });
+      startDeg += arcDeg;                            // continue the drift so the loopback lands back near start
+    }
+    return { api, plan };
+  }
   function on(evt, cb) { (listeners[evt] || (listeners[evt] = [])).push(cb); return api; }
   function emit(evt, payload) { for (const cb of listeners[evt] || []) cb(payload); }
 
@@ -173,6 +216,21 @@ export function createCameraDirector(core, { wipe } = {}) {
           cam.fov = shot.fovFrom + (shot.fovTo - shot.fovFrom) * t;
           cam.updateProjectionMatrix();
         }
+        break;
+      }
+      case 'crane': {
+        // A2 vertical JIB — sweep the camera position from→to (author gives a Y-dominant delta) while the
+        // lens stays locked on a fixed point. A rising crane over a crowd, a descending drop onto a subject.
+        cam.position.lerpVectors(shot.from, shot.to, t);
+        cam.lookAt(shot.lookAt.x, shot.lookAt.y, shot.lookAt.z);
+        break;
+      }
+      case 'follow': {
+        // A2 TRACKING — hold a fixed offset from a subject that travels lookFrom→lookTo, camera always framing
+        // it (a dolly that rides alongside a moving actor). Static subject (lookFrom==lookTo) → a steady hold.
+        _look.lerpVectors(shot.lookFrom, shot.lookTo, t);
+        cam.position.set(_look.x + shot.offset.x, _look.y + shot.offset.y, _look.z + shot.offset.z);
+        cam.lookAt(_look.x, _look.y, _look.z);
         break;
       }
       case 'hold':
@@ -281,7 +339,7 @@ export function createCameraDirector(core, { wipe } = {}) {
   }
 
   const api = {
-    addShot, play, pause, restart, update, on, dispose, setVertical,
+    addShot, addReelSequence, play, pause, restart, update, on, dispose, setVertical,
     get playing()   { return playing; },
     get shotIndex() { return idx; },
     get phase()     { return phase; },

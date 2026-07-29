@@ -38,6 +38,7 @@ export function createSim(ctx) {
   let kills = 0, score = 0, _nf = 0;
   let field = null, _fieldDirty = false;
   let horde = null, zRig = null;
+  let _nfLastFill = -1;   // A2: last night-factor the swarm's night-fill emissive was set to (re-apply on change)
   const _zType = new Array(pool.max).fill(null);       // last type mirrored per slot (avoid redundant setType)
   const _typeMat = { walker: null, runner: null, tank: null };
   const _zPrevFlash = new Float32Array(pool.max);      // B3: prev-frame flash per slot → hit-react on the rising edge
@@ -205,6 +206,10 @@ export function createSim(ctx) {
     horde.setLookTarget(p.x, config.EYE_Y, p.z);
     const cp = (rig && rig.camera && rig.camera.position) || null;
     horde.update(sdt, cp ? cp.x : p.x, cp ? cp.y : 2, cp ? cp.z : p.z);
+    // A2 ALIVE-AT-NIGHT: lift the swarm off pure black with the night emissive fill (R1's money-shot gap).
+    // Re-apply only when the night factor actually moved (the cycle is slow) — a handful of set-calls, not
+    // per-frame churn. Visual only; never touches the sim trace (determinism holds).
+    if (Math.abs(_nf - _nfLastFill) > 0.004) { horde.setNightFill(_nf); _nfLastFill = _nf; }
   }
 
   function syncState() {

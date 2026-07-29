@@ -77,6 +77,7 @@ export function createFx(ctx) {
   // GLB), exactly as the sim's live horde does. Async: until the GLB lands, `sink.ready()` is false and the
   // pool bookkeeping runs headless; syncActive() catches the horde up the moment it is built.
   let horde = null;
+  let _nfLastFill = -1;   // A2: last night-factor the corpse horde's night-fill was set to
   const _camPos = new THREE.Vector3();
   const corpseRig = createCharacterRig({ url: 'models/zombie.glb' });
   const sink = {
@@ -175,6 +176,13 @@ export function createFx(ctx) {
       // wall-clock. We deliberately do NOT also call corpseRig.update (that would double-step every mixer).
       core.update(dt);
       stepAudio(dt);   // B5: dread keying + positional-groan scheduler (wall-clock; no-op headless/pre-unlock)
+      // A2 ALIVE-AT-NIGHT: the CORPSES read at night too (a body in the moonlight, not a black hole), same
+      // night-fill as the live swarm; re-applied only when the night factor moves.
+      if (horde) {
+        const w = registry.has('world') ? registry.get('world') : null;
+        const nf = w ? w.nightFactor() : 0;
+        if (Math.abs(nf - _nfLastFill) > 0.004) { horde.setNightFill(nf); _nfLastFill = nf; }
+      }
     },
     counts() { return core.counts(); },
     dispose() { core.dispose(); if (ambient) ambient.stop(); if (gpu) gpu.dispose(); dec.dispose(); if (horde) horde.dispose(); corpseRig.dispose(); },

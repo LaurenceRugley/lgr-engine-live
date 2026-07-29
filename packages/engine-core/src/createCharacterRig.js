@@ -39,6 +39,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './character-anim.js';
 import { flinchEnvelope, headYawDelta, wrapPi } from './character-layers.js';
+import { applyNightFill, collectMaterials } from './character-night-fill.js';
 import { damp } from './math.js';
 
 // Beauty B3 — PROCEDURAL MOTION LAYERS. Additive rotations applied to named bones AFTER the mixer poses
@@ -120,6 +121,8 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
     let _headingTarget = null;         // A1: smoothed body yaw (rad) or null (caller sets the yaw directly)
     const boneArmForeR = bones.RightForeArm || null;          // A1 aim-IK: the forearm (gun end of the chain)
     let aimTarget = null, aimW = 0, _aimActive = false;       // A1 aim-IK: {x,y,z} to track + a blend weight
+    let _idleRelax = false, _relaxW = 0, _relaxClock = 0;     // A2 idle-relax: opt-in softening of a braced idle
+    const boneArmL2 = bones.LeftArm || null;                  // A2 idle-relax: the off-hand arm to lower
     const lp = {
       headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact },
       recoil: { ...LAYER_DEFAULTS.recoil }, swing: { ...LAYER_DEFAULTS.swing },
@@ -171,6 +174,9 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
       // A1 AIM-IK: the world point the gun should track (iso: the aim/target). null → the arm relaxes back to
       // the clip pose (aimW eases to 0). Distant characters: the caller clears this (skip the solver).
       setAim(t) { if (t == null) { _aimActive = false; return; } if (!aimTarget) aimTarget = { x: 0, y: 0, z: 0 }; aimTarget.x = t.x; aimTarget.y = t.y; aimTarget.z = t.z; _aimActive = true; },
+      // A2: opt in to the idle-relax layer (softens a braced 'lunge' idle → a settled stand + slow sway when
+      // truly idle). The survivor enables it; zombies stay braced/menacing (default off).
+      setIdleRelax(on) { _idleRelax = !!on; },
       // A1: clear the anim state so a RECYCLED pool slot re-arms cleanly. The horde's setActive(i,false) calls
       // mixer.stopAllAction() (stops the loco actions) but the handle is reused — without this reset _locoOn
       // stays true and the next setLocomotion just sets weights on STOPPED actions → the respawn freezes in
@@ -207,6 +213,24 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
           if (locoActions.idle) locoActions.idle.setEffectiveWeight(wi * base);
           if (locoActions.walk) { locoActions.walk.setEffectiveWeight(ww * base); locoActions.walk.setEffectiveTimeScale(0.85 + 0.5 * s); }  // match stride to speed → less foot-slide
           if (locoActions.run) locoActions.run.setEffectiveWeight(wr * base);
+        }
+        // ── A2 IDLE-RELAX — the survivor.glb idle is a braced 'lunge' (owner note); when TRULY idle (no aim,
+        // no action, not moving) ease the arms down off the chest and add a slow weight-shift sway so it reads
+        // as a person standing, not bracing. Opt-in (survivor only). Composes before aim/recoil, which override
+        // the gun arm when they engage; here they don't (idle gate). Offsets never accumulate (mixer resets).
+        if (_idleRelax) {
+          const wantRelax = (!_aimActive && !_actActive && _locoSpeed < 0.08) ? 1 : 0;
+          _relaxW = damp(_relaxW, wantRelax, wantRelax ? 2.4 : 6, dt);
+          if (_relaxW > 0.01) {
+            _relaxClock += dt;
+            const w = _relaxW, sway = Math.sin(_relaxClock * 0.7);
+            if (boneArmL2) { _q.setFromAxisAngle(_AX_X, 0.85 * w); boneArmL2.quaternion.multiply(_q); }   // lower off-hand
+            if (boneArmR)  { _q.setFromAxisAngle(_AX_X, 0.85 * w); boneArmR.quaternion.multiply(_q); }    // lower gun hand
+            if (boneSpine) {
+              _q.setFromAxisAngle(_AX_Z, sway * 0.04 * w); boneSpine.quaternion.multiply(_q);             // side weight-shift sway
+              _q.setFromAxisAngle(_AX_X, -0.14 * w); boneSpine.quaternion.multiply(_q);                   // ease the braced forward lean upright
+            }
+          }
         }
         // ── A1 HEADING — slerp the body toward the target yaw (smooth turns instead of snapping).
         if (_headingTarget != null) {
@@ -317,5 +341,15 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
     if (source) source.scene.traverse((n) => { if (n.geometry) n.geometry.dispose(); if (n.material) { const m = n.material; (Array.isArray(m) ? m : [m]).forEach((x) => x.dispose()); } });
   }
 
-  return { ready, spawn, update, dispose, get count() { return recs.length; }, get animations() { return source ? source.animations.map((a) => a.name) : []; } };
+  // A2 NIGHT FILL: lift this rig's characters off pure black at night (nf 0..1). Applies to the SHARED
+  // source materials (every clone inherits them), so it's a handful of set-calls regardless of instance
+  // count. A rig whose materials are overridden downstream (the horde's setType) uses horde.setNightFill.
+  let _nfMats = null;
+  function setNightFill(nf, opts) {
+    if (!source) return;
+    if (!_nfMats) _nfMats = collectMaterials(source.scene);
+    for (const m of _nfMats) applyNightFill(m, nf, opts);
+  }
+
+  return { ready, spawn, update, dispose, setNightFill, get count() { return recs.length; }, get animations() { return source ? source.animations.map((a) => a.name) : []; } };
 }

@@ -55,13 +55,19 @@ export function createPlayer(ctx) {
 
   /* ---- the rigged survivor (async; a stand-in nothing until the GLB lands) ---- */
   let survivor = null, isoGun = null;
-  const charRig = createCharacterRig({ url: 'models/survivor.glb' });
+  let _workCd = 0;   // A2: harvest/build gesture cooldown (s) — throttles the Working clip re-trigger
+  // A2 ACTION COVERAGE: the survivor.glb ships a WORKING clip — wire it as the harvest/build gesture so the
+  // survivor visibly chops/works instead of standing idle at a node. (Clip inventory: Idle/Walk/Run/Punch/
+  // Death/Jump/Working — no reload or eat clip, and those events don't exist in the sim, so they're out of
+  // scope this arc; fire-recoil + melee are the existing B4 procedural gestures.)
+  const charRig = createCharacterRig({ url: 'models/survivor.glb', states: { idle: 'Idle', walk: 'Walk', run: 'Run', attack: 'Punch', hit: 'HitReact', death: 'Death', work: 'Working' } });
   charRig.ready.then(() => {
     survivor = charRig.spawn({ castShadow: true });
     survivor.object.scale.setScalar(CHAR_SCALE);
     survivor.object.position.set(player.x, GROUND_Y, player.z);
     scene.add(survivor.object);
     survivor.setState('idle');
+    survivor.setIdleRelax(true);   // A2: soften the survivor's braced 'lunge' idle when standing calm
     // B4: put the forge-skinned gun in the survivor's RIGHT HAND (the bone lives in unscaled object space,
     // so the kit is scaled up to read at the 0.32 body scale; pose tuned to sit in the palm pointing fwd).
     isoGun = createWeaponKit({ material: ctx.weaponSkins ? ctx.weaponSkins.gunmetal : null });
@@ -78,6 +84,21 @@ export function createPlayer(ctx) {
   // procedural spine/arm flinch IS its hit reaction). Fired on the sim's player:damage; a generic recoil
   // (the layer leans the torso back + throws the arms) — enough to sell "you got hit" without a clip.
   events.on('player:damage', () => { if (survivor) survivor.hitReact(0, 0); });
+
+  // A2 ACTION COVERAGE — harvest + build gestures on the events that fire. There is no harvest start/stop
+  // event (only harvest:gain per tick), so a COOLDOWN gates the re-trigger: the Working clip plays a chunk,
+  // and rapid ticks refresh it at a natural cadence rather than resetting every frame (which would stutter).
+  // barrier:place fires once per placement (no cooldown); repair ticks (short cooldown). Play only when
+  // roughly stationary so a running survivor doesn't "work" mid-stride.
+  function tryWork(cd) {
+    if (!survivor || _workCd > 0) return;
+    const moving = Math.hypot(player.vx || 0, player.vz || 0) > 1.2;
+    if (moving && !dive.active) return;
+    survivor.playAction('work'); _workCd = cd;
+  }
+  events.on('harvest:gain', () => tryWork(1.1));
+  events.on('barrier:place', () => { if (survivor) { survivor.playAction('work'); _workCd = 0.9; } });
+  events.on('barrier:repair', () => tryWork(0.9));
 
   // B4 FP VIEWMODEL — the gun the player SEES in the dive (positioned in front of the FP eye each dived
   // frame; hidden in iso). Uses the WORN skin (so iso=gunmetal + FP=worn read as skin variants side-by-side).
@@ -135,6 +156,7 @@ export function createPlayer(ctx) {
   let _build = null, _world = null, _sim = null;
   const getBuild = () => (_build || (_build = registry.get('build')));
   const getWorld = () => (_world || (_world = registry.get('world')));
+  let _nfLastFill = -1;   // A2: last night-factor the survivor's night-fill emissive was set to
   const getSim = () => (_sim || (_sim = registry.get('sim')));
 
   const castWorld = makeCastWorld(GROUND_Y, (seg) => getBuild().castBarriers(seg));
@@ -440,8 +462,15 @@ export function createPlayer(ctx) {
         } else survivor.setAim(null);
       }
       const _sp = Math.hypot(player.vx || 0, player.vz || 0);
+      if (_workCd > 0) _workCd -= rdt;                 // A2: tick the harvest/build gesture cooldown
       charRig.update(rdt);
       driveAnim(Math.min(1, _sp / MOVE.sprintSpeed), dead);   // A1: blend weights from ACTUAL velocity
+      // A2 ALIVE-AT-NIGHT: the survivor gets the same cool night lift as the horde (consistency + it reads
+      // in FP/deep night); re-applied only when the night factor moves. The lantern stays the warm anchor.
+      // The survivor already reads via its warm LANTERN, so it needs only a LIGHT cool fill — a lower max
+      // than the horde (0.62) so its head doesn't read as a glowing bulb on top of the lantern (critic nit).
+      const _nf = getWorld().nightFactor();
+      if (Math.abs(_nf - _nfLastFill) > 0.004) { charRig.setNightFill(_nf, { max: 0.28 }); _nfLastFill = _nf; }
       rig.update(dt);                                 // rig eases on the real frame dt (matches main's present)
     },
     // handles for critics / debug
