@@ -34,6 +34,33 @@ export function flinchEnvelope(u, attack = 0.14) {
   return s;
 }
 
+// A5 — MELEE-SWING impulse over normalised time u∈[0,1]. Returns a SIGNED factor (~[-0.32, 1]) that reads
+// as a real strike in three beats instead of one symmetric pose: a short WIND-UP that cocks the arm back
+// (anticipation → negative), a fast IMPACT that whips forward through the +1 peak, then a slower RECOVERY
+// that eases back to rest (the "settle"). `windup` = fraction spent cocking; `strike` = u of the peak.
+// C++ anchor: a hand-authored ease curve — the animator's anticipation/action/follow-through as a function.
+export function swingEnvelope(u, windup = 0.24, strike = 0.5) {
+  if (u <= 0 || u >= 1) return 0;
+  const back = 0.32;                                                         // how far the arm cocks back
+  const ss = (a) => a * a * (3 - 2 * a);                                     // smoothstep
+  if (u < windup) return -back * ss(u / windup);                            // ease back to -back (wind-up)
+  if (u < strike) return -back + (1 + back) * ss((u - windup) / (strike - windup)); // whip -back → +1 (impact)
+  return 1 - ss((u - strike) / (1 - strike));                               // +1 → 0 (recovery / settle)
+}
+
+// A8-3 — RELOAD DIP envelope over normalised time u∈[0,1]. Returns 0..1 = how far the gun is LOWERED from
+// ready: a quick drop as the weapon comes off aim, a HOLD at the bottom (the hands work the magazine), then
+// a raise back to ready. Three beats read as a real reload, not a single pose — the "dip" the owner wants
+// between fire and ready. `down`/`up` are the fractions spent dropping / raising (the middle is the hold).
+// C++ anchor: a trapezoidal envelope — ramp up, plateau, ramp down — the classic ADSR "sustain" shape.
+export function dipEnvelope(u, down = 0.22, up = 0.28) {
+  if (u <= 0 || u >= 1) return 0;
+  const ss = (a) => a * a * (3 - 2 * a);                 // smoothstep
+  if (u < down) return ss(u / down);                     // drop off aim → 1 (fully lowered)
+  if (u > 1 - up) return ss((1 - u) / up);               // raise back to ready → 0
+  return 1;                                              // HOLD at the bottom (working the mag)
+}
+
 // Signed head-turn (radians) to look at a target: from the character's facing `charYaw` toward the world
 // direction (dx,dz), wrapped short and clamped to ±cone. Facing convention matches the game (yaw 0 = +z:
 // forward = (sin yaw, cos yaw)), so the target bearing is atan2(dx, dz). Returns 0 when the target is

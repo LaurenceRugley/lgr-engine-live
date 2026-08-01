@@ -63,7 +63,7 @@ const NIGHT_STREET_WARM = new THREE.Color('#3a2c22');
 const WATER_CLOCK_PERIOD = (2 * Math.PI / 0.9) * 9;   // ≈62.8 s
 const AERIAL_BASE = 0.016;   // always-on aerial perspective floor (additive with weather fog)
 
-export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex = 0, onEggFound = null } = {}) {
+export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex = 0, onEggFound = null, shadowMapSize = 2048 } = {}) {
   // Destructure stable references from core (these don't change after construction).
   const {
     renderer, scene, rig, sunRig, drawBuffer,
@@ -284,10 +284,20 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
 
   /* L67 SKY-IBL throttle */
   let envTex = null, _lastEnvSeg = -1;
+  // A6-0a — the IBL env is a PMREM of the Preetham sky, REBUILT only when the quantized `seg` bucket changes
+  // (else it holds a stale snapshot — PMREM is too costly to rebuild every frame). The CITY default is 4
+  // buckets/cycle, whose boundaries fall AT the horizon crossings (t=.25/.75): so the afternoon bucket's env is
+  // built at NOON (bright) and HELD all the way to dusk, then SNAPS to the below-horizon dark env at the
+  // crossing — measured as the dusk "flash-to-dark" (env-on 119→54 in one second while lights stay put; the
+  // sunDir swap is byte-stable, ruled out). Consumers that want a SMOOTH dusk raise the bucket count so the env
+  // tracks the descending sun in small steps instead of holding noon then snapping. Default 4 → CITY
+  // BYTE-IDENTICAL (never raised there); hoard2 opts in via setEnvSegments.
+  let _envSegments = 4;
+  const setEnvSegments = (n) => { _envSegments = Math.max(4, Math.floor(n) || 4); };
   // SEAM A: now that envTex/_lastEnvSeg exist, register the context-restore invalidator.
   core.onContextRestored(() => { envTex = null; _lastEnvSeg = -1; renderer.shadowMap.needsUpdate = true; });
   function ensureEnv() {
-    const seg = Math.floor((sunRig.t % 1) * 4) % 4;
+    const seg = Math.floor((sunRig.t % 1) * _envSegments) % _envSegments;
     if (seg !== _lastEnvSeg || !envTex) { _lastEnvSeg = seg; envTex = skyAtmo.buildEnv(renderer); }
     return envTex;
   }
@@ -353,6 +363,13 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
      Scoped per-consumer (each project owns its engine); hoard2 exposes it as ?gradecool for the owner A/B. */
   let _gradeCool = 0.0;
   const setGradeCool = (a) => { _gradeCool = Math.min(1, Math.max(0, a)); };
+
+  /* A6-0b — SUN EXCEPTION amount for the filmic grade. 0 = off → the grade darkens/cools the sun with the rest
+     (city default → byte-identical); >0 (hoard2 opts in) → the bright+warm sun disc survives the cool grade as
+     its post-ACES HOT self while the cool palette holds everywhere else (DESIGN ruling). Feeds uSunException. */
+  let _sunException = 0.0;
+  const setSunException = (a) => { _sunException = Math.min(1, Math.max(0, +a || 0)); };
+  const _sunProj = new THREE.Vector3(), _camFwd = new THREE.Vector3();   // A6-0b scratch: project the sun to screen
 
   function worldHeightAt(wx, wz) {
     if (!worldData) return 0;
@@ -721,16 +738,25 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
   city.group.remove(city.key);
   scene.add(city.key);
   city.key.castShadow = true;
-  city.key.shadow.mapSize.set(2048, 2048);
+  // M1 MOBILE TRUTH: the shadow map resolution is now a per-project option (default 2048, city byte-identical).
+  // Mobile passes 1024 — a quarter of the shadow-pass pixels — since the phone can't afford a 2048 re-render.
+  city.key.shadow.mapSize.set(shadowMapSize, shadowMapSize);
   city.key.shadow.bias = -0.00018;
   city.key.shadow.normalBias = 0.028;
   scene.add(city.key.target);
   const SHADOW_DIST = 24;
+  // A11 THE LIGHT CEILING — an opt-in shadow-frustum extent override. Default null → EXACTLY today's path
+  // (h = city.extent + 4.5, far = SHADOW_DIST*2), so city/hub/showcase are byte-identical. A consumer whose
+  // PLAY AREA is larger than the city footprint (hoard2's arena: play ring r=26 vs city.extent ~7.6) opts in
+  // to a bigger extent so its objects at play distance actually CAST shadows instead of falling outside the
+  // frustum — the measured A11 "floating" cause (4/6 sampled objects had no shadow). When set, the ortho far
+  // plane grows with it so tall rim casters aren't depth-clipped; the default branch is left untouched.
+  let _shadowExtentOverride = null;
   function fitShadowFrustum() {
     const cam = city.key.shadow.camera;
-    const h = city.extent + 4.5;
+    const h = _shadowExtentOverride != null ? _shadowExtentOverride : city.extent + 4.5;
     cam.left = -h; cam.right = h; cam.top = h; cam.bottom = -h;
-    cam.near = 1; cam.far = SHADOW_DIST * 2;
+    cam.near = 1; cam.far = _shadowExtentOverride != null ? SHADOW_DIST * 2 + h : SHADOW_DIST * 2;
     cam.updateProjectionMatrix();
     renderer.shadowMap.needsUpdate = true;
     collider.rebuild(city.state.solids);
@@ -749,6 +775,15 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
   const SHADOW_EPS2 = 0.00002;
   const _lastShadowSunDir = new THREE.Vector3(1, 1, 1);
   let _lastShadowsOn = false;
+  // M1 MOBILE TRUTH — SHADOW-REFRESH THROTTLE. By default the map re-renders whenever the sun moves past
+  // SHADOW_EPS2 — fine for the city (frozen-ish sun), catastrophic for hoard2 mobile where the A4 sun sweeps
+  // ~98° over 9 min, forcing a full 2048² PCFSoft re-render over ~144 skinned casters ~every 1.4 s. This
+  // throttle caps that: with `_shadowThrottleS > 0` the map re-renders at MOST once per N seconds (mobile
+  // pairs it with a static-only caster set + 1024 map + plain PCF, so the few refreshes are cheap and the
+  // static building shadows only lag the moving sun by a couple of degrees between updates — imperceptible).
+  // 0 (city default) = the original every-move behaviour, byte-identical. Also drives the panic tier's freeze.
+  let _shadowThrottleS = 0;
+  let _shadowClock = 1e9;   // start large so the FIRST eligible frame refreshes immediately (boot already dirtied it)
   let _loaderFrames = 0;
   const _washProbe = { alt: 0, k: 0, u: 0, v: 0, z: 0 };
 
@@ -844,6 +879,21 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     }
     filmicMaterial.uniforms.uBloomStrength.value = 0.0;
     filmicMaterial.uniforms.uRays.value = 0.0;
+    filmicMaterial.uniforms.uSunException.value = _sunException;   // A6-0b: 0 (city) → no-op inside the uGrade gate → byte-identical
+    // A6-0b: project the sun onto the ACTIVE render camera so the filmic pass knows WHERE the sun is (colour/luma
+    // can't separate it from the bright sky). Only when a consumer opted in (_sunException>0) and the sun is in
+    // front of the camera; else radius 0 → mask 0. Point = camPos + sunDir·R (R matches the celestials skydome).
+    if (_sunException > 0) {
+      rig.camera.getWorldDirection(_camFwd);
+      const inFront = _camFwd.dot(sunRig.sunArc) > 0.05;
+      if (inFront) {
+        _sunProj.copy(rig.camera.position).addScaledVector(sunRig.sunArc, 88).project(rig.camera);
+        filmicMaterial.uniforms.uSunScreenPos.value.set(_sunProj.x * 0.5 + 0.5, _sunProj.y * 0.5 + 0.5);
+        filmicMaterial.uniforms.uSunRadius.value = 0.40;
+      } else {
+        filmicMaterial.uniforms.uSunRadius.value = 0.0;   // sun behind the camera → no exception this frame
+      }
+    }
     reflStrength.value = (beauty && core._qualityRefl) ? 1.0 : 0.0;
     waterMaterial.uniforms.uReflStrength.value = reflStrength.value;
     if (reflStrength.value > 0.0) renderReflection(rig.camera);
@@ -963,9 +1013,15 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     const sFactor = shadowsOn ? grazeFade * nightF : 0.0;
     city.key.shadow.intensity = 0.72 * sFactor;
     vectorShadow.value = 0.52 * sFactor;
-    if (shadowsOn && (!_lastShadowsOn || _lastShadowSunDir.distanceToSquared(sunRig.sunDir) > SHADOW_EPS2)) {
+    // M1 throttle: only ALLOW a re-render once the throttle window has elapsed (0 → always, city default).
+    // The sun-moved / first-frame test still gates WHETHER a refresh is needed; the throttle gates HOW OFTEN.
+    _shadowClock += dt;
+    const _throttleReady = _shadowThrottleS <= 0 || _shadowClock >= _shadowThrottleS;
+    if (shadowsOn && _throttleReady && (!_lastShadowsOn || _lastShadowSunDir.distanceToSquared(sunRig.sunDir) > SHADOW_EPS2)) {
       renderer.shadowMap.needsUpdate = true;
       _lastShadowSunDir.copy(sunRig.sunDir);
+      _shadowClock = 0;
+      if (typeof window !== 'undefined') window.__shadowUpdates = (window.__shadowUpdates | 0) + 1;   // M1 probe: shadow-pass re-renders
     }
     _lastShadowsOn = shadowsOn;
     const dayness = 1.0 - sunRig.windowGlow;
@@ -1045,7 +1101,11 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     }
     if (typeof window !== 'undefined') { _washProbe.alt = +(_walt).toFixed(2); _washProbe.k = +(_wk).toFixed(3); _washProbe.u = +(_wu).toFixed(3); _washProbe.v = +(_wv).toFixed(3); _washProbe.z = +(_wz).toFixed(4); window.__wash = _washProbe; }
 
-    if (waveOk) {
+    // M1 item 4 — gate the wave-sim RT ping-pong on `_waterOn`, not just `waveOk`. Before this it ran EVERY
+    // frame (a full-screen RT render + 3-target rotation) even when the water body was disabled (hoard2's
+    // setWaterEnabled(false)) — pure waste the diagnosis flagged, paid by v1 too. The water material only
+    // draws when `_waterOn` (water.visible), so when it's off nothing consumes uHeight and skipping is safe.
+    if (waveOk && _waterOn) {
       const [prev, curr, next] = targets;
       simMaterial.uniforms.uPrev.value = prev.texture;
       simMaterial.uniforms.uCurr.value = curr.texture;
@@ -1079,11 +1139,28 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     // pilot samplers + collider
     setPilotWaterSampler, setPilotGroundSampler, collider,
     fitShadowFrustum, SHADOW_DIST,
+    // A11: opt-in shadow-frustum extent (null → today's city.extent+4.5 default; a bigger play area opts in).
+    setShadowFrustumExtent: (h) => { _shadowExtentOverride = (h != null && +h > 0) ? +h : null; fitShadowFrustum(); },
     setUrbanVisible,   // L HOARD-3: hide the whole city for a non-city map (keeps the sky)
     setWaterEnabled,   // B2 WORLD-TRUTH: contextual-water enable seam (false → no bay water body; city default true)
+    // M1 MOBILE TRUTH: cap how often the sun shadow map re-renders (seconds). 0 = every sun-move (city default);
+    // mobile sets a large value to near-freeze the map (its casters are static, so the staleness is invisible).
+    setShadowThrottle: (s) => { _shadowThrottleS = Math.max(0, +s || 0); },
     get waterEnabled() { return _waterOn; },
     setCloudsEnabled: (on) => clouds.setEnabled(on),   // B2 CLOUD-SCALE LIFT: false → no head-height puffs in a small arena
     setCloudAltitude: (m) => clouds.setAltitude(m),    // A4: lift the clear band into real sky (city default 1 → byte-identical)
+    // A6-1 FP SKY SHOW: drive the (already-built, always-updated) weather rig. The city never calls this →
+    // weatherRig stays 'clear' → byte-identical; hoard2 opts in with a seeded day-cycle schedule so the sky is
+    // "packed with the weather" (overcast/rain/fog roll through). setKind only changes the GOAL — the rig eases
+    // every scalar (overcast/fog/cloud/intensity) toward it, so transitions are smooth by construction.
+    setWeatherKind: (k) => weatherRig.setKind(k),      // k ∈ WEATHER_KINDS ('clear'|'rain'|'snow'|'fog')
+    get weatherKind() { return weatherRig.kind; },
+    // A6-1: how GRADUALLY weather eases in (1 = city default/byte-identical; hoard2 sets it low so weather
+    // gathers over several seconds — looks like real weather rolling in AND keeps the cycle smoothness gate green).
+    setWeatherEaseScale: (s) => weatherRig.setEaseScale(s),
+    setSunCore: (v) => celestials.setSunCore(v),       // A5: fill the sun's dull centre with a solid hot core (city default 0/off → byte-identical)
+    setEnvSegments,    // A6-0a: IBL-env rebuild cadence (buckets/cycle; city default 4 → byte-identical; hoard2 raises it for a smooth dusk)
+    setSunException,   // A6-0b: sun survives the cool grade as an exception (0 = off/byte-identical; hoard2 opts in)
     get cloudsEnabled() { return clouds.enabled; },
     setChromaScale,    // B2: scale the beauty chromatic-aberration (1 = city default; hoard2 dials down)
     setGradeCool,      // B2: warm→cool grade candidate (0 = city warm default; hoard2 baked cool per owner ruling)

@@ -26,8 +26,12 @@
    ============================================================ */
 const DROP_TABLE = ['food', 'scrap', 'scrap', 'bandage', 'food']; // weighted: scrap common, food/bandage rarer
 
-export function createZombiePool(config, srng) {
-  const MAXZ = config.MAXZ, Z = config.ZTYPE, N = config.NIGHT;
+export function createZombiePool(config, srng, cap) {
+  // M1 MOBILE TRUTH: the pool cap is overridable (mobile passes config.MAXZ_MOBILE) so the tier runs fewer
+  // concurrent bodies without a code fork. Everything downstream (arrays, the render horde size = pool.max)
+  // follows this ONE number. Default = config.MAXZ (desktop, unchanged).
+  const MAXZ = (cap != null && cap > 0) ? cap : config.MAXZ;
+  const Z = config.ZTYPE, N = config.NIGHT;
   const TYPES = Object.keys(Z);
   let typeWeightTotal = 0; for (const k of TYPES) typeWeightTotal += Z[k].weight;
 

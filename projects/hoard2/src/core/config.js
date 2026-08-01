@@ -36,6 +36,11 @@ export const WAVE = {
   spawnIntervalS: 0.9,
 };
 export const MAXZ = 96; // live-zombie pool cap (≥40 concurrent + headroom); 1:1 with the rig horde
+// M1 MOBILE TRUTH — the mobile character budget. v2 runs 96 live + 48 corpses = 144 skinned rigs (each a
+// SkeletonUtils clone with its own mixer); v1 — the phone-PROVEN class — ran ≤48 total. The mobile tier
+// caps to ~v1's budget (40 live + 8 corpses = 48 skinned), a PROFILE the sim/fx select on ctx.mobile — NOT
+// a code fork. Fewer bodies on screen is a tier, not a different game: waves, night-scaling, dive all stand.
+export const MAXZ_MOBILE = 40;        // live-zombie pool cap on mobile (still ≥ a full early-wave burst)
 // SPAWN RING — zombies appear on a ring around the SURVIVOR (not world-centre) at this distance, so the
 // approach time is short + CONSISTENT wherever you stand (playtest #2: centre-spawn at r≈27 left early
 // waves empty for ~30s). Difficulty-neutral: same zombies, same speed — they just start closer. Runners
@@ -43,6 +48,7 @@ export const MAXZ = 96; // live-zombie pool cap (≥40 concurrent + headroom); 1
 export const SPAWN_RING = 16;
 export const SPAWN_JITTER = 3; // ± ring wobble so the ring doesn't read as a perfect circle
 export const CORPSE_CAP = 48; // corpse pool cap (DONE #5: corpses persist ≥10s OR to pool cap)
+export const CORPSE_CAP_MOBILE = 8; // mobile corpse pool cap (40 live + 8 corpses = 48 skinned = v1 class)
 export const CORPSE_TTL_S = 14; // ≥10s persistence floor before a corpse recycles
 
 /* ---- ZOMBIE TYPES (≥3 visibly distinct — DONE #3) ---- */
@@ -53,6 +59,14 @@ export const ZTYPE = {
   runner: { speed: 2.65, hp: 18, scale: 0.66, weight: 0.30, dmg: 6 }, // the fast fragile fear
   tank: { speed: 0.85, hp: 220, scale: 1.2, weight: 0.08, dmg: 22 }, // the big rare event
 };
+
+// A6-2 TURN-IN-PLACE — cap how fast a zombie's BODY yaws (rad/s). The sim SNAPPED facing to the velocity
+// direction every frame; slewing the displayed yaw at a capped rate makes a direction change read as a
+// deliberate PIVOT (a heavy shambler leaning into the turn) rather than an instant whip-around. MEASURED
+// (slip probe): the un-capped peak body-yaw is ~5.4 rad/s, so this value must sit BELOW that to actually
+// bite. 4.0 gives a weightier turn while still refacing a strafing player in ~0.8 s. ?turnrate=<n> tunes it
+// live (owner taste). NOTE: presentation-only (feeds setTransform, never the sim) → the sim trace is unmoved.
+export const ZOMBIE_TURN_RATE = 4.0;
 
 /* ---- NIGHT (harder AND measurable — ratified: speed ×1.4 AND count ×1.5 at full night) ---- */
 // nightFactor nf ∈ [0,1] (0 = day, 1 = deep night) is produced by the world day/night wiring and read

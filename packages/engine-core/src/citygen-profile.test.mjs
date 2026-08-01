@@ -47,3 +47,32 @@ test('determinism: same (seed, custom profile) ⇒ same extent + meshCount', () 
   assert.equal(a.extent, b.extent);
   assert.equal(a.state.meshCount, b.state.meshCount);
 });
+
+/* ============================================================
+   ARC A21 — blockPattern (additive). Same discipline as the profile tests above: OMITTING blockPattern
+   must be indistinguishable from before it existed (the byte-identical guard — tier-guard/present-parity
+   prove the pixels; this proves the param routing + default). 'radial' must be a REAL, different,
+   deterministic pattern, not a cosmetic label. 'organic' must say what it is (deferred), not fake it.
+   ============================================================ */
+test('OMITTING blockPattern (every existing caller) behaves exactly as before adding this param', () => {
+  const withDefault = createCity({ seed: 1337, profileIndex: 0 });
+  const explicitGrid = createCity({ seed: 1337, profileIndex: 0, blockPattern: 'grid' });
+  assert.equal(withDefault.state.sig, explicitGrid.state.sig, 'default omission ≡ explicit "grid"');
+  assert.equal(withDefault.extent, explicitGrid.extent);
+  assert.equal(withDefault.state.meshCount, explicitGrid.state.meshCount);
+});
+
+test('"radial" is a genuinely different, deterministic pattern (not just a label)', () => {
+  const grid = createCity({ seed: 1337, profileIndex: 0, blockPattern: 'grid' });
+  const radial1 = createCity({ seed: 1337, profileIndex: 0, blockPattern: 'radial' });
+  const radial2 = createCity({ seed: 1337, profileIndex: 0, blockPattern: 'radial' });
+  assert.notEqual(radial1.state.sig, grid.state.sig, 'radial produces a different layout signature than grid');
+  assert.equal(radial1.state.sig, radial2.state.sig, 'same seed ⇒ same radial layout (deterministic)');
+  assert.ok(radial1.state.meshCount > 0, 'the radial city actually built');
+});
+
+test('"organic" is HONESTLY not yet implemented — it falls back to "grid" (documented, not silently faked)', () => {
+  const grid = createCity({ seed: 1337, profileIndex: 0, blockPattern: 'grid' });
+  const organic = createCity({ seed: 1337, profileIndex: 0, blockPattern: 'organic' });
+  assert.equal(organic.state.sig, grid.state.sig, '"organic" currently generates identically to "grid" (the stated fallback)');
+});

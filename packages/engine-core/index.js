@@ -38,6 +38,9 @@ export { createWeatherRig } from './src/weather-rig.js';
 export { createCloudField } from './src/clouds.js';
 export { createCelestials } from './src/celestials.js';
 export { createCapture } from './src/capture.js';
+// Arc A10 — the generic recorder was reachable only THROUGH createCapture (city's inline wiring); export it
+// directly so any demo project can arm the reel recorder (?rec=1 → R toggles an MP4/WebM) without re-wiring.
+export { createRecorder, pickVideoType, recorderExt, VIDEO_TYPES } from './src/createRecorder.js';
 
 // The viewer control-bar widget (tap bar + shareable-link command bus).
 export { createViewerUI } from './src/viewer-ui.js';
@@ -149,6 +152,50 @@ export { createScrollDirector } from './src/scroll-director.js';
 // L78 — ENGINE HARDENING: honest profiling (p95/p99 + GPU-ms + leak gate) + adaptive quality (lock a smooth fps).
 export { createEngineProfiler } from './src/profiler.js';
 export { createQualityGovernor } from './src/quality-governor.js';
+// Arc A10 — the FIELD-DEBUG instrument lifted to core (docs/field-debug-doctrine.md): a screenshot-able
+// GL-stack overlay (caps · tier/path state · live luminance · unmissable highp verdict) every project
+// inherits behind its own ?debug=gl gate. Default-inert → shipped looks stay byte-identical when off.
+export { createDebugOverlay } from './src/debug-overlay.js';
+// Arc A11 THE LIGHT CEILING — procedural contact grounding: soft radial dark patches on the ground under
+// objects so they read as PLACED, not floating (chosen over SSAO by measurement + cost — see the module).
+// Opt-in, default-inert → byte-identical for any project that doesn't create it.
+export { createContactShadows } from './src/contact-shadow.js';
+// Arc A12 WATER, PROPERLY — a CONTEXTUAL water body (pond/lake/shoreline, never a global plane) with an
+// ANALYTIC ripple/depth/shoreline/Fresnel shader that rides the MOBILE direct path (no half-float, no texture
+// sampling → no OES_texture_half_float_linear dependency). Opt-in via the recipe's `water` field.
+export { createWaterSurface } from './src/createWaterSurface.js';
+// Cross-repo SKY LIFT (docs/sky-lift-manifest.md, from lgr-live-sky) — reusable atmosphere fidelity as core
+// abilities, each an OPT-IN EffectComposer post-pass whose default is a NO-OP (byte-identical). DESKTOP-
+// BEAUTY-ONLY when run in an HDR composer (the manifest's half-float finding); a consumer builds the composer.
+export { createAtmosphereGrade } from './src/createAtmosphereGrade.js';
+export { createGodRays, godRayVisibility } from './src/createGodRays.js';
+export { createMilkyWay } from './src/createMilkyWay.js';
+export { createVolumetricClouds, CLOUD_TIERS } from './src/createVolumetricClouds.js';
+// SKY LIFT #2 (manifest §8) — the celestial-coordinate foundation: sidereal star spin + REAL-LOCATION mode
+// (physical sun/moon for a place, date & longitude). Pure math, no-op by construction. A client-site
+// capability ("the sky over <place> right now"); createMilkyWay accepts its starRotMatrix(t) for rotating stars.
+export { createCelestial } from './src/createCelestial.js';
+// ARC A20 — THE REAL-ASTRONOMY LIFT (docs/real-astronomy-lift-manifest.md in lgr-live-sky, from
+// lgr-live-sky): "what is in the sky above this place at this time" — real stars (Yale BSC5), 88
+// constellations, all 7 planets, all 110 Messier objects, and the Bortle light-pollution model that
+// governs visibility for stars/planets/Messier through ONE shared shader mechanism (createCelestial's
+// starAltAz feeds all three catalogs the same precession+sidereal+refraction pipeline the sun/moon use).
+// No-op by construction (each factory's group starts invisible); real-location-mode only.
+export { limitingMagnitude, skyGlow, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
+export { planetPosition, PLANET_KEYS } from './src/planets.js';
+export { createTrueStars } from './src/createTrueStars.js';
+export { createConstellations } from './src/createConstellations.js';
+export { createSolarSystem } from './src/createSolarSystem.js';
+// ⚠️ createMessier renders CC BY-SA (OpenNGC) data — any consumer that ships it MUST surface
+// astronomy-credits.js's getAttribution() (docs/engine-invariants.md #8, assets/astronomy/CREDITS.md).
+export { createMessier } from './src/createMessier.js';
+export { ASTRONOMY_CREDITS, getAttribution } from './src/astronomy-credits.js';
+// The EffectComposer machinery a consumer needs to run those passes (a project builds its OWN composer;
+// the engine's beauty pipeline is not one). Re-exported so a consumer shares ONE three instance with the
+// passes (no dual-three). Projects import from src → tree-shaken out unless used; only dist-lib bundles them.
+export { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+export { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+export { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 // L64 — PROCEDURAL TERRAIN: seeded heightfield + biome generator + flat-shaded chunked mesh.
 // L69 — `rebuildTerrainChunks` for live sculpting (dirty-chunk update).
@@ -217,6 +264,37 @@ export { createForest, placeForest } from './src/createForest.js';
 // forge-recipes.js; a project wires the materials. supported=false on iOS-p0 (bake skipped, flat fallback).
 export { createTextureForge, nyquistFeatureFloor, repeatFor, FORGE_MIN_TEXELS } from './src/createTextureForge.js';
 export { HOARD_SURFACES, forgeHoardMaterials, WEAPON_SKINS } from './src/forge-recipes.js';
+// Arc A7-1 — world-scale macro de-tiling for a tiled floor (breaks the iso-distance repeat grid a single
+// tile can't, since a tile holds no feature bigger than itself). Opt-in via onBeforeCompile → byte-safe.
+export { applyGroundMacro } from './src/ground-macro.js';
+
+// Arc A14 GLINT — constant-time glinty-NDF specular (own implementation from the SIGGRAPH-Asia-2025
+// paper; no textures/RTs/half-float). applyGlint decorates a lit MeshStandardMaterial (composes with
+// applyGroundMacro); createGlintMaterial mints a fresh one. Opt-in via onBeforeCompile → byte-safe.
+export { applyGlint, createGlintMaterial } from './src/createGlintMaterial.js';
+
+// Arc A15 BAKED RADIANCE PROBES — the engine's FIRST indirect-light term. A build-time bake
+// (tools/bake-probes.mjs) writes a sparse RGBA8 irradiance volume; createIndirectField uploads it as a
+// Data3DTexture and adds the bounce to Three's `irradiance` via onBeforeCompile — mobile-safe (8-bit 3D
+// linear, no half-float), composes with macro/glint. Opt-in (a caller must build+apply a field) → byte-safe.
+export { createIndirectField } from './src/createIndirectField.js';
+
+// Arc A9 TEXT→WORLD — map generation as a LIBRARY. A world RECIPE (plain data) + an INTERPRETER that
+// composes the modules above (terrain/forest/city clusters/ruins/buildings/scatter/water) into a playable
+// arena + a keyword TEXT front-end (description → recipe, no runtime AI). The recipe is the API. The pure
+// play-ring generators (scatterRuins/scatterProps/deriveHarvest/placeCoverBuildings) + the decrepit/intact
+// city profiles were lifted here from hoard2 so the interpreter is self-contained (engine-first).
+export { defaultRecipe, normalizeRecipe, mergeRecipes, RECIPE_BIOMES } from './src/world-recipe.js';
+export { createWorldFromRecipe } from './src/createWorldFromRecipe.js';
+export { recipeFromText, describeVocabulary } from './src/world-recipe-text.js';
+// A18 portable experience format — the bundle manifest schema + validator (pure; the spec's reference impl).
+export { BUNDLE_FORMAT, BUNDLE_VERSION, buildManifest, validateManifest, isVersionCompatible, parseVersion } from './src/world-bundle.js';
+export { scatterRuins, scatterProps, deriveHarvest, placeCoverBuildings, citySolidsToObstacles } from './src/world-scatter.js';
+export { buildDecrepitProfile, buildIntactProfile, DECREPIT_TOWERS } from './src/world-profiles.js';
+// ARC A21 — THE CITY GENERATOR: the urban-recipe → citygen-profile translator (unifies citygen.js's
+// profile-based generator with the world-recipe schema; see docs/world-recipe-schema.md's "Urban city"
+// section for the round-trip proof this rests on).
+export { cityProfileFromUrban, URBAN_ERAS } from './src/urban-profile.js';
 
 // Beauty B4 COMBAT FEEL — the weapon kit: a chamfered-primitive hard-surface gun (NO fingers), merged to a
 // handful of draw calls, skinned by a forge gunmetal material. The wielder (hand bone / FP viewmodel) + the
@@ -273,6 +351,8 @@ export { createBeautyPresenter } from './src/hero/createBeautyPresenter.js';
 // Raw shader strings a few app-level materials compose directly (the dive crossfade; the
 // pixelate tool). Exporting them keeps projects from reaching into the package's src/shaders.
 export { default as fullscreenVert } from './src/shaders/fullscreen.vert';
+// A19 RISO LIFT — the Risograph print effect as a core ability (lifted from lgr-image-studio; engine-first).
+export { createRiso, RISO_INKS } from './src/riso.js';
 export { default as postDiveFrag } from './src/shaders/post-dive.frag';
 export { default as postPixelkitFrag } from './src/shaders/post-pixelkit.frag';
 

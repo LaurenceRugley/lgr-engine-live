@@ -5,7 +5,39 @@
    ============================================================ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { wrapPi, flinchEnvelope, headYawDelta } from './character-layers.js';
+import { wrapPi, flinchEnvelope, headYawDelta, swingEnvelope, dipEnvelope } from './character-layers.js';
+
+test('swingEnvelope: three beats — wind-up BACK (negative), forward peak, settle to zero', () => {
+  assert.equal(swingEnvelope(0), 0, 'no swing at the very start');
+  assert.equal(swingEnvelope(1), 0, 'fully settled at the end — the arm does NOT stay extended');
+  assert.equal(swingEnvelope(-0.1), 0);
+  assert.equal(swingEnvelope(1.5), 0);
+  // WIND-UP: the arm cocks BACK before the strike (this is the "not a single pose" property).
+  const windup = swingEnvelope(0.12);
+  assert.ok(windup < 0, 'mid wind-up the arm is cocked back (negative), not already swinging');
+  // IMPACT: the peak lands near the strike point (u≈0.5) and reaches full forward (~1).
+  const peak = swingEnvelope(0.5);
+  assert.ok(peak > 0.95, 'the strike whips forward to the +1 peak');
+  assert.ok(peak > windup, 'the forward peak is well past the cocked-back wind-up');
+  // RECOVERY: past the peak it eases home, still forward but decaying.
+  const recover = swingEnvelope(0.8);
+  assert.ok(recover > 0 && recover < peak, 'past impact it is settling back toward rest');
+});
+
+test('dipEnvelope: a RELOAD dip — zero at ends, HELD at 1 through the middle (drop, work the mag, raise)', () => {
+  // WHY this matters (not just what): the reload beat must READ as lower→hold→raise, not a symmetric bump.
+  // If the middle didn't plateau at 1 the gun would bob instead of staying down while the hands work — the
+  // owner's "reload dip → ready" rhythm depends on the HOLD. A test that only checked the endpoints couldn't
+  // fail when the plateau regressed to a peak, so it asserts the sustain explicitly.
+  assert.equal(dipEnvelope(0), 0);
+  assert.equal(dipEnvelope(1), 0);
+  assert.equal(dipEnvelope(-0.1), 0);
+  assert.equal(dipEnvelope(0.5), 1, 'held fully lowered through the middle (the mag-work sustain)');
+  assert.equal(dipEnvelope(0.4), 1);
+  assert.equal(dipEnvelope(0.6), 1);
+  assert.ok(dipEnvelope(0.11) > 0 && dipEnvelope(0.11) < 1, 'still dropping in the first fifth');
+  assert.ok(dipEnvelope(0.86) > 0 && dipEnvelope(0.86) < 1, 'raising back to ready in the last quarter');
+});
 
 test('flinchEnvelope: zero at both ends, positive + single-peaked in between (recoil then settle)', () => {
   assert.equal(flinchEnvelope(0), 0, 'no flinch at the very start');

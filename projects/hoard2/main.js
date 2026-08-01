@@ -21,7 +21,7 @@
    C++ anchor: main() that constructs the subsystems, injects a shared context, and runs the frame loop
    — the systems never `#include` each other, they talk through the injected registry + event bus.
    ============================================================ */
-import { THREE, createEngine, CAM, createAppShell, readAppFlags, createDiveController } from '@lgr/engine-core';
+import { THREE, createEngine, CAM, createAppShell, readAppFlags, createDiveController, createDebugOverlay } from '@lgr/engine-core';
 
 import * as config from './src/core/config.js';
 import { createRegistry } from './src/core/registry.js';
@@ -49,14 +49,77 @@ window.__seed = seed;
 //               still black → the latter (deeper iOS Metal-WebGL issue).
 const DEBUG_GL = app.q.get('debug') === 'gl';
 const SAFE = app.q.get('safe') === '1';
+//  ?noenv=1   → drop the IBL environment (scene.environment). A one-tap bisect for "is the PMREM/half-float
+//               env the thing blacking iOS?" — documented in field-debug-doctrine.md, previously parsed
+//               NOWHERE (a debug switch that silently did nothing). Wired at scene-setup below.
+const NOENV = app.q.get('noenv') === '1';
+
+// MOBILE TIER (ARC M1 MOBILE TRUTH). The mobile RENDERING tier keys off a COARSE POINTER (a touch device)
+// — deliberately NOT off LOWP (computed below). LOWP is the iOS-p0 fragment-PRECISION path (a separate
+// axis); the owner's phone plays v1's FULL PBR beauty smoothly, so it is very likely NOT p0 (LOWP off) yet
+// still a phone that must shed the v2-ONLY extra load (13 lights, a sun re-rendering a 2048² soft shadow
+// map every ~1.4 s, 144 skinned characters, two city clusters). So the tier is ORTHOGONAL to LOWP: it
+// degrades scene COST regardless of which render path (beauty present OR the LOWP direct Lambert) draws.
+// v1 proves the beauty pipeline itself is fine on his phone — the extra load is the killer. ?mobile=1 forces
+// the tier on any device (the harness BEFORE/AFTER handle); ?mobile=0 forces it off. Desktop is untouched.
+// C++ anchor: MOBILE is a compile-time device-class branch the owners read to size their budgets.
+const _coarsePtr = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+const _mobileParam = app.q.get('mobile');
+const MOBILE = _mobileParam === '1' || (_mobileParam !== '0' && !!_coarsePtr);
+window.__mobile = MOBILE;
+
+// ARC A5-BLACK (owner field data 2026-07-29 — CORRECTS the M1 assumption above). His iPhone banner:
+// highp p23 (so LOWP off), MOBILE on, 6 lights, 0 GL errors, env SET, tone 0 — yet lum 0.6/255 = BLACK.
+// The ONE anomaly: OES_texture_half_float_linear MISSING. The iOS device silently CANNOT linear-filter
+// half-float textures (it's nominally core in WebGL2, so no error fires) — which is exactly what the BEAUTY
+// pipeline needs: its HDR half-float render targets (grab/beauty/bloom, composited with linear sampling)
+// AND the PMREM env map (half-float, sampled by every MeshStandardMaterial). Either blacks the frame with
+// no GL error. The forge's baked maps are 8-bit (safe), so this is purely the beauty PATH. The proxy can't
+// reproduce it (Mac WebGL2 honors half-float-linear), so the DEVICE is the oracle via the ?debug=gl lum.
+// FIX: on mobile, take the DIRECT render path (the same one LOWP uses) — no beauty RTs, Lambert ignores the
+// PMREM env, 8-bit forge maps sample fine. This sidesteps the entire half-float-linear class. It also lands
+// the owner's accepted blocky look (M1). ?mobilebeauty=1 forces the OLD beauty path back for on-device A/B
+// (expected: black) so he can CONFIRM the diagnosis by watching the lum number flip.
+const _mobileBeauty = app.q.get('mobilebeauty') === '1';
+const MOBILE_DIRECT = MOBILE && !_mobileBeauty;   // mobile → direct render (the half-float-safe path)
+window.__mobileDirect = MOBILE_DIRECT;
+
+// M1 item 5 — THE MOBILE QUALITY LADDER (governor teeth). The default engine ladder can only drop
+// dpr/shadows/reflection — it can NEVER shed lights, characters, or scene mass, so a struggling phone
+// grinds at ~12 fps for ~14 s and still can't recover. This mobile ladder adds a `shed` level the engine
+// forwards to a project listener (registered below) that ACTUALLY sheds load: shed 1 → hide the corpse
+// pool (drops ~8 skinned mixers), shed 2 → shadows off + hide the backdrop ruins cluster (draw calls).
+// Rungs are still cheap-first (dpr before the destructive sheds). Desktop keeps the engine default ladder.
+const MOBILE_QUALITY_LADDER = [
+  { dpr: null, shadows: true,  refl: false, shed: 0 },   // 0 — full mobile tier (no-op; byte-identical to boot)
+  { dpr: 1.25, shadows: true,  refl: false, shed: 1 },   // 1 — shed the corpse pool first (cheapest to lose)
+  { dpr: 1.0,  shadows: false, refl: false, shed: 2 },   // 2 — shadows off + hide the backdrop ruins cluster
+  { dpr: 0.75, shadows: false, refl: false, shed: 2 },   // 3 — last resort: dpr floor (load already shed)
+];
 
 /* ---------- engine boot (frozen pipeline; default city hidden by world) ---------- */
 const container = document.getElementById('app') || document.body;
 // A3: opt into SOFT shadows (PCFSoftShadowMap) — softer, more realistic shadow edges than the engine's
-// default hard PCF. The city stays byte-identical (it never passes shadowType). The governor still drops
-// shadows on weak GPUs, so mobile is untouched in practice (WebKit lane verifies).
-const engine = createEngine({ demo: app.demo, citySeed: seed, profileIndex: 0, container, shadowType: 'soft' });
+// default hard PCF. The city stays byte-identical (it never passes shadowType). On MOBILE we drop to plain
+// PCF and a SMALLER shadow map (M1): PCFSoft is the priciest filter and the map re-renders over the whole
+// caster set — mobile can't afford either. Desktop keeps soft. (The governor still drops shadows on weak
+// GPUs; M1 adds the mobile-tier freeze/shrink on top so the phone matches v1's static-shadow class.)
+const engine = createEngine({
+  demo: app.demo, citySeed: seed, profileIndex: 0, container,
+  shadowType: MOBILE ? 'pcf' : 'soft',
+  // A11 THE LIGHT CEILING — desktop shadow map 2048 → 4096. The A11 frustum-fit (world/index.js) grows the
+  // ortho frustum from ±12u to ±30u to cover the play ring, which alone would drop texel density 84 → 34
+  // texels/u; the 4096 bump restores it to 68 texels/u (crisp near shadows across the WHOLE arena, not just
+  // the centre). MEASURED to hold perf: 42-concurrent p95 8.8 → 9.4 ms (budget 16.7), 0 mid-play compiles,
+  // governor L0. Mobile UNTOUCHED (1024 + its small frustum + the 15 s freeze). The governor still sheds
+  // shadows first under desktop load, so the 4096 map is a ceiling, not a floor.
+  shadowMapSize: MOBILE ? 1024 : 4096,
+  qualityLadder: MOBILE ? MOBILE_QUALITY_LADDER : undefined,   // M1 item 5: a mobile ladder that SHEDS load
+});
 const { renderer, scene, rig, sunRig } = engine;
+// ?noenv=1 — trap scene.environment to stay null so the beauty pipeline's per-frame assignment
+// (createCityWorld sets it every present) becomes a no-op → the IBL env is dropped for the whole run.
+if (NOENV) Object.defineProperty(scene, 'environment', { get: () => null, set: () => {}, configurable: true });
 const shell = createAppShell(engine, { name: 'hoard2', flags: app });
 
 // PRECISION-SAFE MOBILE PATH (owner iPhone root-cause: FRAG highp = p0). No high-precision fragment math
@@ -106,6 +169,7 @@ const ctx = {
   THREE, engine, scene, renderer, rig, sunRig, CAM,
   registry, events, rng, time, config,
   capture: CAPTURE,
+  mobile: MOBILE,   // M1 MOBILE TRUTH: the device-class tier flag every owner reads to size its budgets
   flags: app,
   // renderWorld(dest): the ONE pixel-pipeline call, owned by lead. The dive controller and any owner
   // that needs to draw the world routes through this so curStyle stays lead's.
@@ -126,11 +190,17 @@ const ctx = {
 // One rig, two views (iso ortho ↔ FP perspective eye). freezeFrom:true — capture the iso frame at dive()
 // and hold it through the descent while the FP eye renders live (v1 main.js:229). Both callbacks are the
 // same world pipeline; the RIG STATE (set each frame) picks the view.
+// A5-BLACK: on the mobile DIRECT path these callbacks are NO-OPS. renderWorld = renderCityPipeline (the
+// beauty pass) — and on mobile we never present through the dive controller (gameStep calls lowpRender), so
+// its freeze-capture render is pure waste AND it's the source of the dive bugs: that one beauty pass sets
+// scene.environment (PMREM half-float → iOS black silhouettes) AND shows the Sky mesh (raw ShaderMaterial,
+// ignores tonemapping → blown-white sky). Skipping it on mobile stops both at the source; lowpRender renders
+// the live view either way. Desktop keeps the real freeze-capture.
 const diveCtl = createDiveController(engine, {
   rate: 2.0,
   freezeFrom: true,
-  renderFrom: (t) => ctx.renderWorld(t),
-  renderTo: (t) => ctx.renderWorld(t),
+  renderFrom: (t) => { if (!MOBILE_DIRECT) ctx.renderWorld(t); },
+  renderTo: (t) => { if (!MOBILE_DIRECT) ctx.renderWorld(t); },
 });
 let _eyeSource = null; // player sets this: () => ({ pos:Vector3, dir:Vector3 }) | writes rig.setEye itself
 const dive = {
@@ -142,6 +212,12 @@ const dive = {
     if (diveCtl.mode !== 'a') return;
     curStyle = engine.decideStyle(); // fresh style for the freeze capture (rig still iso ortho)
     diveCtl.dive(dive.focusUv ? dive.focusUv() : new THREE.Vector2(0.5, 0.5));
+    // A5 MOBILE EXIT-TRAP FIX (owner bug #1): on the mobile DIRECT path gameStep calls lowpRender, never
+    // dive.present → diveCtl.update never runs → the transition state machine never eases past 'in'/'out'.
+    // So SNAP it to a settled endpoint here: enter → 'b' (dived), exit → 'a' (iso). Without this, exit left
+    // mode stuck at 'out' (dive.active stayed true) so the rig never returned to iso — the FP was a one-way
+    // trap. Desktop keeps the eased crossfade (mobile never presented it anyway — lowpRender draws live).
+    if (MOBILE_DIRECT) diveCtl.transition.snap('b');
     rig.setMode(CAM.PERSPECTIVE); // …then the FP eye renders through perspective (real depth)
     time.setDived(true);
     events.emit('dive:enter', { mode: 'walk' });
@@ -149,6 +225,7 @@ const dive = {
   exit() {
     if (diveCtl.mode === 'a') return;
     diveCtl.surface();
+    if (MOBILE_DIRECT) diveCtl.transition.snap('a');   // settle to iso immediately (see enter() — no update() on mobile)
     time.setDived(false);
     events.emit('dive:exit', { mode: 'walk' });
   },
@@ -167,6 +244,20 @@ const player = createPlayer(ctx);
 const build = createBuild(ctx);
 const fx = createFx(ctx);
 const ui = createUi(ctx);
+
+// M1 item 5 — GOVERNOR TEETH. The engine governor's ladder can only drop dpr/shadows/reflection — it can
+// NEVER shed lights, characters, or scene mass, so a struggling phone grinds at ~12 fps and can't recover.
+// The mobile ladder (MOBILE_QUALITY_LADDER above) adds a `shed` level per rung; here we subscribe and turn
+// that level into real project actions: shed ≥ 1 → drop the corpse pool (draws + mixers), shed ≥ 2 → hide the
+// distant backdrop ruins cluster (draw calls). Reversible — when headroom returns the governor steps back up
+// and we restore. Registered only on mobile (the desktop ladder carries no `shed`, so this is inert there).
+if (MOBILE && engine.addQualityListener) {
+  engine.addQualityListener((_level, rung) => {
+    const shed = (rung && rung.shed) | 0;
+    if (registry.has('fx')) registry.get('fx').setCorpsesActive?.(shed < 1);          // shed ≥ 1 → corpses off
+    if (registry.has('world')) registry.get('world').setBackdropVisible?.(shed < 2);  // shed ≥ 2 → backdrop hidden
+  });
+}
 
 // Hide engine scene-clutter that leaks into the decrepit arena once the urban world is hidden (critic
 // look-pass): the hiddenProp easter-egg, the engine ground DUST field (additive motes → blobby fuzz at
@@ -207,64 +298,85 @@ const _lowpCache = new Map(); // origMaterial → its MeshLambertMaterial twin (
 const _lowpSeen = new WeakSet();
 function _toLambert(m) {
   let L = _lowpCache.get(m);
-  if (L) return L;
-  L = new THREE.MeshLambertMaterial({
-    color: m.color ? m.color.clone() : new THREE.Color(0xffffff), map: m.map || null,
-    emissive: m.emissive ? m.emissive.clone() : new THREE.Color(0x000000), emissiveMap: m.emissiveMap || null,
-    transparent: !!m.transparent, opacity: m.opacity != null ? m.opacity : 1, side: m.side,
-    flatShading: !!m.flatShading, vertexColors: !!m.vertexColors, alphaTest: m.alphaTest || 0,
-  });
-  _lowpCache.set(m, L);
+  if (!L) {
+    L = new THREE.MeshLambertMaterial({
+      color: m.color ? m.color.clone() : new THREE.Color(0xffffff), map: m.map || null,
+      emissive: m.emissive ? m.emissive.clone() : new THREE.Color(0x000000), emissiveMap: m.emissiveMap || null,
+      transparent: !!m.transparent, opacity: m.opacity != null ? m.opacity : 1, side: m.side,
+      flatShading: !!m.flatShading, vertexColors: !!m.vertexColors, alphaTest: m.alphaTest || 0,
+    });
+    _lowpCache.set(m, L);
+  }
+  // A15 GI on the mobile DIRECT path: the twin is a fresh MeshLambert (no onBeforeCompile), so if the
+  // source carried a baked indirect field, re-apply it to the twin (Lambert uses Three's `irradiance`
+  // term, so the same injection works). Zero cost when GI is off — the tag is only set under ?gi=1.
+  if (m.userData && m.userData.__lgrIndirectField && !(L.userData && L.userData.__lgrIndirectApplied)) {
+    m.userData.__lgrIndirectField.apply(L);
+  }
   return L;
 }
+// A5-BLACK sky tonemap — the Sky mesh ignores renderer.toneMapping (raw ShaderMaterial), so the mobile
+// direct path's sky (the fog-colour clear) reads as blown-white paper by day. We tonemap that ONE colour
+// ourselves with the Narkowicz ACES approximation — the same S-curve the beauty ACES post applies — so the
+// horizon compresses to a readable sky. ?mobiletone=<n> is the A/B exposure knob: 0 = RAW (no tonemap, the
+// blown-white baseline), 1 = ACES @ exposure 1 (default), 1.4 = brighter. fog.color is linear (managed),
+// ACES → display-linear, and setClearColor srgb-encodes it — colour-correct. Hoisted out, no per-frame alloc.
+const _toneParam = app.q.get('mobiletone');
+const MOBILE_TONE_EXPOSURE = _toneParam != null ? (Number(_toneParam) || 0) : 1;
+const _skyFallback = new THREE.Color(0x8a8f80);
+const _clearOut = new THREE.Color();
+function _aces1(x) { x = Math.max(0, x); return Math.min(1, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)); }
+function _acesColor(src, exposure, out) { return out.setRGB(_aces1(src.r * exposure), _aces1(src.g * exposure), _aces1(src.b * exposure)); }
+
+// M1 item 4 — DON'T re-traverse the whole scene graph every frame. The Lambert swap only needs to catch NEW
+// lit meshes, which appear solely while the async GLBs (survivor/horde/corpses) load — a bounded early window.
+// So scan every frame for the first ~4 s (covers the loads), then only every 30th frame afterward (a late
+// material would still get swapped within ~0.5 s). The `_lowpSeen` WeakSet already makes each swap one-shot;
+// this removes the per-frame full-graph walk the diagnosis flagged as pure CPU tax on the p0 phone.
+let _lowpFrame = 0;
 function lowpRender() {
-  scene.traverse((o) => {
-    if (!(o.isMesh || o.isSkinnedMesh) || _lowpSeen.has(o)) return;
-    if (Array.isArray(o.material)) { if (o.material.some(_isLit)) { o.material = o.material.map((m) => (_isLit(m) ? _toLambert(m) : m)); _lowpSeen.add(o); } }
-    else if (_isLit(o.material)) { o.material = _toLambert(o.material); _lowpSeen.add(o); }
-  });
+  if (_lowpFrame < 240 || (_lowpFrame % 30) === 0) {
+    scene.traverse((o) => {
+      if (!(o.isMesh || o.isSkinnedMesh) || _lowpSeen.has(o)) return;
+      if (Array.isArray(o.material)) { if (o.material.some(_isLit)) { o.material = o.material.map((m) => (_isLit(m) ? _toLambert(m) : m)); _lowpSeen.add(o); } }
+      else if (_isLit(o.material)) { o.material = _toLambert(o.material); _lowpSeen.add(o); }
+    });
+  }
+  _lowpFrame++;
+  // A5-BLACK (owner field data): keep scene.environment NULL on the mobile direct path in BOTH iso AND dive.
+  // The dive's freeze-capture calls renderCityPipeline ONCE, which sets scene.environment = the PMREM sky
+  // (half-float). On iOS that env can't be linear-filtered, so every material sampling it goes BLACK — the
+  // dive "silhouettes against white sky" the owner saw (iso was fine because it never ran that capture).
+  // Lambert here needs no env; forcing null each frame removes the dependency. (Only recompiles the single
+  // frame it flips set→null, then no-ops — cheap.)
+  scene.environment = null;
   renderer.setRenderTarget(null);
-  renderer.setClearColor(scene.fog ? scene.fog.color : new THREE.Color(0x8a8f80), 1); // day/night haze as the sky
+  // A5-BLACK sky fix — the Sky mesh is beauty-tier-gated (visible=false here), so the background is this
+  // CLEAR colour (scene.fog.color, which updateWorld drives bright/hazy by day). Raw, with no tonemapping,
+  // it reads as blown-white paper in the FP dive (the owner's report). Run it through a cheap ACES-approx
+  // tonemap (the same curve the beauty post pass applies) so the horizon reads as SKY, not paper. Hoisted
+  // scratch, no per-frame alloc. Desktop is untouched (it never takes this path).
+  const _fc = scene.fog ? scene.fog.color : _skyFallback;
+  if (MOBILE_TONE_EXPOSURE > 0) renderer.setClearColor(_acesColor(_fc, MOBILE_TONE_EXPOSURE, _clearOut), 1);
+  else renderer.setClearColor(_fc, 1);   // ?mobiletone=0 — RAW (the blown-white A/B baseline)
   renderer.clear(true, true, true);
   renderer.render(scene, rig.camera);
 }
 
-/* ---------- ?debug=gl — screenshot-able GL-stack overlay ---------- */
-function buildGlDebug() {
-  const gl = renderer.getContext();
-  const de = gl.getExtension('WEBGL_debug_renderer_info');
-  const exts = gl.getSupportedExtensions() || [];
-  const ex = (n) => (exts.includes(n) ? '✓' : '✗');
-  const P = (sh, t) => { const f = gl.getShaderPrecisionFormat(sh, t); return f ? `p${f.precision} [${f.rangeMin},${f.rangeMax}]` : 'null'; };
-  const a = gl.getContextAttributes() || {};
-  const errs = []; for (let i = 0; i < 4; i++) { const e = gl.getError(); if (e) errs.push('0x' + e.toString(16)); }
-  const lines = [
-    `RENDERER ${de ? gl.getParameter(de.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}`,
-    `VENDOR   ${de ? gl.getParameter(de.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)}`,
-    `${gl.getParameter(gl.VERSION)} · WebGL2=${renderer.capabilities.isWebGL2}`,
-    `FRAG highp ${P(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)}  (p0 = NO highp → LOWP path ${LOWP ? 'ON' : 'off'})`,
-    `FRAG medp ${P(gl.FRAGMENT_SHADER, gl.MEDIUM_FLOAT)} · VERT highp ${P(gl.VERTEX_SHADER, gl.HIGH_FLOAT)}`,
-    `ext colorBufFloat ${ex('EXT_color_buffer_float')} · halfFloatLinear ${ex('OES_texture_half_float_linear')} · colorBufHalf ${ex('EXT_color_buffer_half_float')}`,
-    `ctx alpha=${a.alpha} depth=${a.depth} stencil=${a.stencil} aa=${a.antialias} preMult=${a.premultipliedAlpha} preserve=${a.preserveDrawingBuffer}`,
-    `getError@boot ${errs.length ? errs.join(',') : 'clean'} · outColorSpace ${renderer.outputColorSpace}`,
-  ];
-  const div = document.createElement('div');
-  div.id = 'h2-gldbg';
-  div.style.cssText = 'position:fixed;left:0;top:0;right:0;z-index:100;background:rgba(0,0,0,0.85);color:#3f6;font:11px/1.35 ui-monospace,monospace;padding:8px;white-space:pre-wrap;word-break:break-word;pointer-events:none;';
-  const live = document.createElement('div'); live.style.color = '#ffdd66';
-  div.textContent = lines.join('\n') + '\n';
-  div.appendChild(live);
-  document.body.appendChild(div);
-  const tick = () => {
-    let v = '?'; try { const c = renderer.domElement, w = 32, h = 32, oc = document.createElement('canvas'); oc.width = w; oc.height = h; const cx = oc.getContext('2d'); cx.drawImage(c, 0, 0, w, h); const d = cx.getImageData(0, 0, w, h).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += (d[i] + d[i + 1] + d[i + 2]) / 3; v = (s / (w * h)).toFixed(1); } catch (e) { v = 'err ' + e.message; }
-    let L = 0, hemi = 0, dirl = 0, pt = 0, amb = 0; scene.traverse((o) => { if (o.isLight) { L++; if (o.isHemisphereLight) hemi++; else if (o.isDirectionalLight) dirl++; else if (o.isPointLight) pt++; else if (o.isAmbientLight) amb++; } });
-    const ge = gl.getError();
-    live.textContent = `LIVE: lum ${v}/255 · lights ${L}(H${hemi} D${dirl} P${pt} A${amb}) · env ${scene.environment ? 'SET' : 'null'} · tone ${renderer.toneMapping}/${(+renderer.toneMappingExposure).toFixed(2)} · err ${ge ? '0x' + ge.toString(16) : 'clean'}${SAFE ? ' · SAFE(flat+nopost)' : ''}`;
-  };
-  setInterval(tick, 500); tick();
-  window.__gldbg = () => lines.join(' | ');
-}
-if (DEBUG_GL) buildGlDebug();
+/* ---------- ?debug=gl — the engine FIELD-DEBUG overlay (A10: lifted to core createDebugOverlay) ----------
+   The exact instrument that overturned three rounds of confident-wrong iOS diagnosis, now an engine ability
+   every project inherits (docs/field-debug-doctrine.md). hoard2 passes its own tier CHIPS (LOWP/MOBILE/SAFE)
+   + its render-path getter; the overlay owns the caps dump, the unmissable highp verdict, and the live
+   luminance/lights/env/tone/err ticker. Behaviour is equivalent to the old inline buildGlDebug it replaces. */
+if (DEBUG_GL) createDebugOverlay({
+  renderer, scene,
+  chips: [
+    { label: `LOWP ${LOWP ? 'ON' : 'off'}`, on: LOWP, color: '#ffcc33' },
+    { label: `MOBILE ${MOBILE ? 'ON' : 'off'}`, on: MOBILE, color: '#66ccff' },
+    { label: `SAFE ${SAFE ? 'ON' : 'off'}`, on: SAFE, color: '#ff99ff' },
+  ],
+  getPath: () => window.__renderPath,
+});
 
 /* ---------- pause + dive are core-executed (owners emit, core acts) ---------- */
 events.on('game:pause', () => time.setPaused(true));
@@ -289,9 +401,9 @@ function gameStep(dt, t) {
 
   engine.updateWorld(dt, t, { shadowsOn: true, seasonTarget: 0 }); // day/night, ambient, shadows
   curStyle = engine.decideStyle();
-  if (SAFE) safeRender();       // ?safe=1 — bare scene, flat unlit mats, no post (iOS-black bisect)
-  else if (LOWP) lowpRender();  // auto (or ?lowp=1) — precision-safe LIT path for no-highp GPUs (iOS)
-  else dive.present(dt);        // the single present
+  if (SAFE) { safeRender(); window.__renderPath = 'safe'; }              // ?safe=1 — bare scene, flat unlit mats, no post
+  else if (LOWP || MOBILE_DIRECT) { lowpRender(); window.__renderPath = 'direct'; }  // A5-BLACK: mobile-safe DIRECT render (no beauty half-float RTs / PMREM env → un-blacks iOS)
+  else { dive.present(dt); window.__renderPath = 'beauty'; }             // desktop (or ?mobilebeauty=1) — the full beauty present
 }
 
 /* ---------- readiness (drop the boot cover once the world is dressed) ---------- */

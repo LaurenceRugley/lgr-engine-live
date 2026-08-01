@@ -52,7 +52,7 @@ register before the first frame), never at construction time. `get` of a missing
 ## Event bus (vocabulary is FROZEN — `docs/HOARD-CONTRACT.md §Event vocabulary`)
 Emit with a reused payload object in hot paths (no per-frame alloc, engine-invariants #7). Who emits what:
 - **sim**: `wave:start`/`wave:clear {n,count,night}` · `zombie:spawn`/`zombie:death {id,type,pos,drops?}` · `player:damage {amount,from,hp}` · `player:death {cause}` · `item:pickup {kind}`
-- **player**: `weapon:fire {origin,dir,weapon,seed}` · `weapon:hit {point,normal,target?,damage}` · `melee:swing {origin,arc}` · `melee:hit {target,damage}` · `dive:enter`/`dive:exit {mode:'walk'}` (lead emits these via ctx.dive — you just call toggle)
+- **player**: `weapon:fire {origin,dir,weapon,seed}` · `weapon:hit {point,normal,target?,damage}` · `weapon:reload {}` (A8-3: the mag emptied → the reload beat began; a named SFX hook, no listener required) · `melee:swing {origin,arc}` · `melee:hit {target,damage}` · `dive:enter`/`dive:exit {mode:'walk'}` (lead emits these via ctx.dive — you just call toggle)
 - **build**: `harvest:gain {material,amount,source}` · `barrier:place`/`barrier:damage`/`barrier:breach`/`barrier:repair {id,seg,hp}`
 - **ui**: `game:pause`/`game:resume {source}` (core executes) · `craft {recipe,cost}` · `item:consume {kind,effect}`
 - **world**: `daynight:phase {t,night}`

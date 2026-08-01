@@ -203,7 +203,10 @@ export function createNightSky({ seed = 0x5ED, count = 340, spreadX = 21, yLo = 
   // debug handle for the night-sky parallax probe (like window.__rig): the two sub-groups' world transforms.
   if (typeof window !== 'undefined') window.__nightSkyDbg = { dome: domeGroup, wall: wallGroup, group };
 
-  return { group, update, place };
+  // `dome` (the rotating star SHELL) is exposed for a consumer that spins the sky (Live Sky's Earth-rotation
+  // stars). Additive — nothing in THIS repo reads it (grep-confirmed) so it cannot change behaviour here; it
+  // re-converges the vendored copy in ~/dev/lgr-live-sky (the lift-back flagged in the sky-lift manifest §8).
+  return { group, update, place, dome: domeGroup };
 }
 
 /* A soft, faintly-mottled cool band — a radial gradient with a few low-opacity blobs (procedural depth).

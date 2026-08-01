@@ -9,7 +9,7 @@
    the slim, game-only consumer. C++ anchor: a second executable that links the same engine lib and
    wires only the subsystem it needs.
    ============================================================ */
-import { THREE, createEngine, CAM, createAppShell, readAppFlags, createDiveController, createSeatedLook, createFirstPersonWalker, createParticles, createDecals, createCharacterRig, createCharacterHorde, makeVignette, damp, createForest } from '@lgr/engine-core';
+import { THREE, createEngine, CAM, createAppShell, readAppFlags, createDiveController, createSeatedLook, createFirstPersonWalker, createParticles, createDecals, createCharacterRig, createCharacterHorde, makeVignette, damp, createForest, createDebugOverlay, createRecorder } from '@lgr/engine-core';
 import { createHoard } from './hoard.js';
 
 // L114: the APP-half flags parsed ONCE by the shell helper (was a hand-rolled URLSearchParams + demo rule here).
@@ -21,6 +21,10 @@ const profileIndex = 0;
 
 const engine = createEngine({ demo: DEMO, citySeed, profileIndex });
 const { renderer, scene, rig, sunRig, city, landmarkFactory } = engine;
+// A10 FIELD-DEBUG overlay — ?debug=gl, default-inert (byte-identical when off).
+if (app.q.get('debug') === 'gl') createDebugOverlay({ renderer, scene, getPath: () => window.__renderPath || window.__mode });
+// A10 REEL RECORDER — ?rec=1 arms the engine recorder (R toggles a video of the hoard demo); opt-in → byte-identical off.
+if (app.q.get('rec') === '1') { const _rec = createRecorder({ canvas: renderer.domElement, name: 'hoard' }); window.addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { _rec.toggleRec(); e.preventDefault(); } }); }
 // L114 app-shell: hoard adopts only the SHARED seam (loop brackets + pause-on-hidden + ready + footer + resize).
 // Its exclusive drift items (?capture verbs, tap-pick) stay SHELVED per the mission scope. No onResize needed.
 const shell = createAppShell(engine, { name: 'hoard', flags: app });

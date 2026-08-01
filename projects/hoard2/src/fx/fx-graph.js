@@ -45,7 +45,10 @@ export function createFxCore(deps) {
   const sink = deps.sink;   // corpse horde glue (always provided; sink.ready() gates the visual half)
 
   const fxRng = rng.fork('fx');   // determinism: fx rolls come off the DECORRELATED 'fx' stream (never 'sim')
-  const pool = createCorpsePool({ cap: config.CORPSE_CAP, ttl: config.CORPSE_TTL_S });
+  // M1 MOBILE TRUTH: the corpse pool cap MUST equal the render horde's slot count (sink.apply(i) indexes the
+  // horde by pool slot). deps.corpseCap lets the mobile tier shrink both together (config.CORPSE_CAP_MOBILE);
+  // default = config.CORPSE_CAP (desktop, unchanged).
+  const pool = createCorpsePool({ cap: deps.corpseCap != null ? deps.corpseCap : config.CORPSE_CAP, ttl: config.CORPSE_TTL_S });
 
   let corpseClock = 0;   // wall-clock seconds; the pool's TTL/eviction "now" (advanced by realDt in update)
 

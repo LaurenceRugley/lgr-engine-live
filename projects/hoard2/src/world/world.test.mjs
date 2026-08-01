@@ -17,7 +17,7 @@ import { PROFILES } from '../../../../packages/engine-core/src/citygen.js';
 import { createRng } from '../core/rng.js';
 import * as config from '../core/config.js';
 import { buildDecrepitProfile, buildIntactProfile } from './profile.js';
-import { nightFactorAt, resolveNight, phaseAt, phaseForNight, smoothstep } from './daynight.js';
+import { nightFactorAt, resolveNight, phaseAt, phaseForNight, smoothstep, weatherKindAt, rainAmountAt } from './daynight.js';
 import { scatterRuins, deriveHarvest } from './scatter.js';
 
 const SUN = config.SUN;
@@ -126,6 +126,75 @@ test('phaseAt wraps a full cycle over DAY_LENGTH_S and stays in [0,1)', () => {
     assert.ok(t >= 0 && t < 1, `t in [0,1) for elapsed=${e}`);
   }
   assert.equal(smoothstep(2, 2, 5), 1, 'degenerate smoothstep is safe');
+});
+
+/* ------------------------------------------------------------------ A6-1 WEATHER SCHEDULE (the sky show) */
+test('weatherKindAt only ever returns an engine WEATHER_KIND', () => {
+  const KINDS = new Set(['clear', 'rain', 'snow', 'fog']);
+  for (let s = 1; s <= 20; s++) for (let t = 0; t < 1; t += 0.005) {
+    assert.ok(KINDS.has(weatherKindAt(t, s)), `t=${t.toFixed(3)} seed=${s} → not a weather kind`);
+  }
+});
+
+test('weather is CLEAR at the boot phase + forward (why: the run/harness sweeps FORWARD from SUN.startT — no startup ramp)', () => {
+  // A weather kind active at boot would ease in from frame 0 and read as a startup discontinuity on the
+  // cycle-smoothness sweep (which starts at startT and advances the clock FORWARD). So the boot phase and a
+  // forward margin (~the first coarse interval, ≈0.03 phase) must be clear; the sweep never revisits phases
+  // just BEHIND startT at boot, so a weather window abutting startT from below is fine.
+  for (let s = 1; s <= 30; s++) {
+    for (const t of [SUN.startT, SUN.startT + 0.01, SUN.startT + 0.02]) {
+      assert.equal(weatherKindAt(t, s), 'clear', `seed ${s}: boot+forward t=${t.toFixed(3)} must be clear`);
+    }
+  }
+});
+
+test('weather is OFF the dusk/dawn crossing + deep night (why: protect cycle-smoothness + keep the star show)', () => {
+  // The dusk crossing and the whole night arc must stay CLEAR: a weather onset there would stack on the
+  // cycle's own biggest brightness step (the smoothness gate) and would fog out the night star field.
+  for (let s = 1; s <= 30; s++) {
+    // deep night + dawn side + dusk edge and just past it
+    for (const t of [0.0, 0.05, 0.1, 0.15, 0.2, SUN.dawnT, SUN.duskT, 0.73, 0.8, 0.9, 0.95, 0.99]) {
+      assert.equal(weatherKindAt(t, s), 'clear', `seed ${s}: t=${t} must be clear (night/crossing)`);
+    }
+  }
+});
+
+test('weather is PRESENT during the day (the sky is "packed with the weather", not permanently clear)', () => {
+  // every seed gets at least one rain window and one fog window somewhere in the day arc.
+  for (let s = 1; s <= 20; s++) {
+    let sawRain = false, sawFog = false;
+    for (let t = SUN.dawnT; t <= SUN.duskT; t += 0.002) {
+      const k = weatherKindAt(t, s);
+      if (k === 'rain') sawRain = true;
+      if (k === 'fog') sawFog = true;
+    }
+    assert.ok(sawRain, `seed ${s}: a rain spell exists in the day`);
+    assert.ok(sawFog, `seed ${s}: a fog spell exists in the day`);
+  }
+});
+
+test('weatherKindAt is deterministic per seed, and seeds differ (reproducible for the harness, varied for play)', () => {
+  for (const t of [0.3, 0.5, 0.62, 0.66]) {
+    assert.equal(weatherKindAt(t, 1337), weatherKindAt(t, 1337), 'pure: same (t,seed) ⇒ same kind');
+  }
+  // the per-seed jitter shifts the windows → at least SOME phase differs between two seeds.
+  let anyDiff = false;
+  for (let t = 0.44; t < 0.7; t += 0.002) if (weatherKindAt(t, 1) !== weatherKindAt(t, 7)) { anyDiff = true; break; }
+  assert.ok(anyDiff, 'different seeds → different weather timing (not metronomic across seeds)');
+});
+
+test('A16 rainAmountAt: rain ripples appear ONLY during the rain window, as a smooth ease-in/out hump', () => {
+  for (const s of [1, 7, 42, 1337]) {
+    for (let t = 0; t < 1; t += 0.005) {
+      const amt = rainAmountAt(t, s);
+      assert.ok(amt >= 0 && amt <= 1, `rain amount in [0,1] (t=${t.toFixed(3)})`);
+      // the coupling contract: when the schedule is NOT raining, the sea is calm (no ripples leak into clear/fog).
+      if (weatherKindAt(t, s) !== 'rain') assert.equal(amt, 0, `clear/fog → no rain ripples (t=${t.toFixed(3)})`);
+    }
+    // mid-window the rain is near-full and strictly above the ease-in edge (a hump, not a step or a flat line).
+    assert.ok(rainAmountAt(0.60, s) > 0.5, `mid-window rain is substantial (seed ${s})`);
+    assert.ok(rainAmountAt(0.60, s) > rainAmountAt(0.565, s), `rain eases IN — peaks mid-window, not at the edge (seed ${s})`);
+  }
 });
 
 /* ------------------------------------------------------------------ SCATTER (ruins + harvest) */

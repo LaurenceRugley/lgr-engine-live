@@ -19,9 +19,16 @@ import * as THREE from 'three';
 
 export const WEATHER_KINDS = ['clear', 'rain', 'snow', 'fog'];
 
-export function createWeatherRig({ extent = 7 } = {}) {
+export function createWeatherRig({ extent = 7, easeScale = 1 } = {}) {
   const group = new THREE.Group();
   group.raycast = () => {};
+  // A6-1 SKY SHOW: a multiplier on how fast the EASED scalars (overcast/fog/cloud/intensity) glide toward a
+  // new kind — NOT the particle fall speed (rain must still fall at real velocity). Default 1 = the original
+  // rates (city byte-identical). A small consumer (hoard2) sets it LOW so weather GATHERS over several seconds
+  // instead of snapping on in ~1 s — which both looks more like real weather rolling in AND keeps the per-
+  // second brightness change tiny enough to pass the real-clock cycle-smoothness gate (the fast overcast
+  // onset was a measured discontinuity). Clamped >0 so weather always eventually reaches its goal.
+  let _easeScale = Math.max(0.02, +easeScale || 1);
 
   const COL = extent + 2;        // half-width of the column the precip falls through (covers the city)
   const TOP = 11, BOT = 0.25;    // recycle band: spawn at TOP, recycle when below BOT
@@ -64,15 +71,19 @@ export function createWeatherRig({ extent = 7 } = {}) {
 
   function setKind(k) { if (WEATHER_KINDS.includes(k)) kind = k; }
   function cycle() { kind = WEATHER_KINDS[(WEATHER_KINDS.indexOf(kind) + 1) % WEATHER_KINDS.length]; }
+  function setEaseScale(s) { _easeScale = Math.max(0.02, +s || 1); }   // A6-1: how gradually weather rolls in
 
   function update(dt, elapsed) {
     const isRain = kind === 'rain', isSnow = kind === 'snow', isFog = kind === 'fog';
     const active = kind !== 'clear';
-    intensity = ease(intensity, active ? 1 : 0, dt, 1.4);
-    overcast  = ease(overcast,  active ? 1 : 0, dt, 1.2);
-    fogAmt    = ease(fogAmt,    isFog ? 1 : 0, dt, 0.9);
-    cloudAmt  = ease(cloudAmt,  (active && !isFog) ? 1 : 0, dt, 1.0);
-    snowAccum = ease(snowAccum, isSnow ? 1 : 0, dt, isSnow ? 0.22 : 0.5);  // builds slowly, melts faster
+    // A6-1: the SCALAR eases use a slowed dt (de) so a low easeScale makes weather gather gradually; the
+    // particle fall physics below keep the REAL dt (rain must fall at normal speed regardless of easeScale).
+    const de = dt * _easeScale;
+    intensity = ease(intensity, active ? 1 : 0, de, 1.4);
+    overcast  = ease(overcast,  active ? 1 : 0, de, 1.2);
+    fogAmt    = ease(fogAmt,    isFog ? 1 : 0, de, 0.9);
+    cloudAmt  = ease(cloudAmt,  (active && !isFog) ? 1 : 0, de, 1.0);
+    snowAccum = ease(snowAccum, isSnow ? 1 : 0, de, isSnow ? 0.22 : 0.5);  // builds slowly, melts faster
 
     // --- RAIN: fall + wind shear, recycle, and feed the water sim ---
     const rainAmt = isRain ? intensity : 0;
@@ -106,7 +117,7 @@ export function createWeatherRig({ extent = 7 } = {}) {
   }
 
   return {
-    group, update, cycle, setKind, rainDrops,
+    group, update, cycle, setKind, setEaseScale, rainDrops,
     get kind() { return kind; },
     get intensity() { return intensity; },
     get overcast() { return overcast; },     // 0 clear → 1 any weather (sun dim / ambient lift)

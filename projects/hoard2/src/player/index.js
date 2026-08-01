@@ -37,6 +37,14 @@ const GUN = { dmg: 20, speed: 72, gravity: 2, cooldownS: 0.15, maxLive: 32, maxL
 // range-limited, and the escalating horde still overwhelms you. Also makes TOUCH viable (no precise aim).
 const ASSIST = { cosHalf: 0.8, range: 30, chestY: 0.95 }; // cos(37°) — reward facing the threat, no precision needed (works for mouse AND touch)
 const MELEE = { dmg: 34, range: 1.15, arcCosMin: 0.2, cooldownS: 0.42 };  // v1 MELEE_DMG/RANGE/CD + dot>0.2
+// A8-3 WEAPON BEATS — a cosmetic magazine gives firing a RHYTHM: fire → recoil settle → (mag empty) reload
+// dip → ready. FEEL values (owner to tune): a roomy 14-round mag so the reload is an occasional beat, not a
+// constant interruption, and a brisk 0.85 s dip. Presentation + a fire-rate gate only — the sim (seeded
+// zombie step) is untouched, so the determinism trace is unmoved (it drives no player fire). DRAW = the
+// un-holster raise when you enter the FP dive (the embodiment moment). No ammo HUD — the DIP animation +
+// the gun coming off aim IS the feedback (kept to the animation beat the brief asked for, not a UI add).
+const MAG = { size: 14, reloadS: 0.85 };
+const DRAW_S = 0.5;
 const MOVE = { walkSpeed: 3.0, sprintSpeed: 5.2, accel: 14, playerRadius: 0.28 };
 // LEAD look-pass fix: the survivor.glb (Quaternius "Animated Human") exports ~5.26 units tall — NOT
 // ~1.8m as assumed. At scale 1 it dwarfs the arena + zombies (~1.07 tall) and the iso cam frames its
@@ -50,6 +58,10 @@ export function createPlayer(ctx) {
   // Determinism: the player consumes NO seeded rolls — the gun fires straight (no spread), so it never
   // touches ctx.rng. If cosmetic spread is added later, use ctx.rng.fork('player') (never the sim stream).
 
+  // A8-1: survivor foot-lock opt-in — the SAME ?footik=1 flag the zombie horde reads (sim/index.js), so one
+  // switch A/B-s the plant on both the horde and the hero. Default OFF pending the owner's by-feel review.
+  const _footIkOn = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('footik') === '1');
+
   /* ---- the ground pose (the pinned facade field SIM/FX read) ---- */
   const player = { x: 0, z: 0, facing: 0, vx: 0, vz: 0 };
 
@@ -60,14 +72,28 @@ export function createPlayer(ctx) {
   // survivor visibly chops/works instead of standing idle at a node. (Clip inventory: Idle/Walk/Run/Punch/
   // Death/Jump/Working — no reload or eat clip, and those events don't exist in the sim, so they're out of
   // scope this arc; fire-recoil + melee are the existing B4 procedural gestures.)
-  const charRig = createCharacterRig({ url: 'models/survivor.glb', states: { idle: 'Idle', walk: 'Walk', run: 'Run', attack: 'Punch', hit: 'HitReact', death: 'Death', work: 'Working' } });
+  // A8-1: ?locoease=<n> A/B lever for the blend-ease rate (1/s). Omitted → the rig default (10). A large
+  // value (?locoease=200) ≈ the pre-A8 instant blend, so the transition probe can measure the pop it removes.
+  const _locoEaseFlag = ctx.flags && ctx.flags.q && ctx.flags.q.get('locoease');
+  const charRig = createCharacterRig({ url: 'models/survivor.glb', states: { idle: 'Idle', walk: 'Walk', run: 'Run', attack: 'Punch', hit: 'HitReact', death: 'Death', work: 'Working' }, locoEase: _locoEaseFlag != null ? +_locoEaseFlag : undefined });
   charRig.ready.then(() => {
-    survivor = charRig.spawn({ castShadow: true });
+    // M1 MOBILE TRUTH: the survivor opts OUT of shadow-casting on mobile. The shadow map is near-frozen there
+    // (static casters only — see world.setShadowThrottle), and a MOVING caster under a frozen map would drag a
+    // detached ghost shadow. The arena reads via the static ruins/building shadows; the hero loses only its own
+    // (which in the phone-proven v1 was a frozen ghost anyway). Desktop keeps the survivor's real cast shadow.
+    survivor = charRig.spawn({ castShadow: !ctx.mobile });
     survivor.object.scale.setScalar(CHAR_SCALE);
     survivor.object.position.set(player.x, GROUND_Y, player.z);
     scene.add(survivor.object);
     survivor.setState('idle');
     survivor.setIdleRelax(true);   // A2: soften the survivor's braced 'lunge' idle when standing calm
+    // A8-1 SURVIVOR FOOT-LOCK — the A7-2 plant-and-hold, now on the survivor (the owner's own character).
+    // Same engine seam (setFootIK), same flag family as the horde: ?footik=1 opts in (DEFAULT OFF pending the
+    // owner's by-feel review — his 2026-07-29 ruling; the slip probe reports the plant delta either way).
+    // Params are SCALE-AWARE: the survivor renders at 0.32 (a ~1.68-unit body), so its foot-lift + stride in
+    // WORLD metres are ~0.32× a full-scale rig — plantBand/maxStride scale with CHAR_SCALE so the contact
+    // test tracks the survivor's actual gait, not the zombie's. Desktop-only (mobile skips the motion layers).
+    if (!ctx.mobile && _footIkOn) survivor.setFootIK({ plantBand: 0.22 * CHAR_SCALE, maxStride: 1.25 * CHAR_SCALE });
     // B4: put the forge-skinned gun in the survivor's RIGHT HAND (the bone lives in unscaled object space,
     // so the kit is scaled up to read at the 0.32 body scale; pose tuned to sit in the palm pointing fwd).
     isoGun = createWeaponKit({ material: ctx.weaponSkins ? ctx.weaponSkins.gunmetal : null });
@@ -102,14 +128,20 @@ export function createPlayer(ctx) {
 
   // B4 FP VIEWMODEL — the gun the player SEES in the dive (positioned in front of the FP eye each dived
   // frame; hidden in iso). Uses the WORN skin (so iso=gunmetal + FP=worn read as skin variants side-by-side).
-  let fpRecoil = 0;   // 0..1 fire kick; spring-decays in update()
+  let fpRecoil = 0, fpRecoilVel = 0;   // A5: fire kick as a damped SPRING (kicks back, then settles with a small bounce)
   const fpGun = createWeaponKit({ material: ctx.weaponSkins ? ctx.weaponSkins.gunmetal_worn : null });
   fpGun.group.visible = false; fpGun.group.renderOrder = 20;
   fpGun.mesh.frustumCulled = false;
   scene.add(fpGun.group);
   const _vmFwd = new THREE.Vector3(), _vmRight = new THREE.Vector3(), _vmUp = new THREE.Vector3(), _vmBasis = new THREE.Matrix4();
+  const _vmTilt = new THREE.Quaternion();   // A8-3: muzzle-down tilt while the viewmodel is lowered (reload/draw)
   const _WORLD_UP = new THREE.Vector3(0, 1, 0);
   let _vmBob = 0;
+  // A8-3 FP viewmodel LOWER — the reload DIP (drop off aim, hold, raise: dipEnvelope) + the DRAW (raise from
+  // holstered on dive-enter). 0 = at ready, 1 = fully lowered. Computed each frame in update, read here.
+  const _dipEnv = (u) => { if (u <= 0 || u >= 1) return 0; const ss = (a) => a * a * (3 - 2 * a); if (u < 0.22) return ss(u / 0.22); if (u > 0.72) return ss((1 - u) / 0.28); return 1; };
+  const _drawEnv = (u) => (u <= 0 ? 1 : u >= 1 ? 0 : 1 - (u * u * (3 - 2 * u)));  // holstered (1) → ready (0)
+  let _fpLower = 0;
 
   // B4 UNIFIED SHOT — the MUZZLE FLASH light pulse (the muzzle particles + tracer + impact decal are the fx
   // owner's, already on weapon:fire/weapon:hit; the events are the named SFX hooks B5 will listen to). A
@@ -121,17 +153,26 @@ export function createPlayer(ctx) {
   function placeViewmodel(rdt, eyePos, eyeDir, moving, sprint) {
     fpGun.group.visible = true;
     _vmFwd.copy(eyeDir).normalize();
-    _vmRight.crossVectors(_vmFwd, _WORLD_UP).normalize();
-    _vmUp.crossVectors(_vmRight, _vmFwd);
+    // A5 FP-GUN LOOK FIX (owner mobile bug #2): the gun must ROTATE with the look. The old basis used
+    // right = fwd×up and up = right×fwd, which is a REFLECTION (det −1) — `setFromRotationMatrix` on a
+    // reflection yields a DEGENERATE quaternion that stayed constant, so the gun never tracked yaw (its +Z
+    // happened to point forward-ish, hiding it). right = up×fwd + up = fwd×right is the proper right-handed
+    // rotation (det +1): right points look-right, up stays world-up (no roll), and the quaternion now yaws
+    // with the look. Verified by the touch probe (gun world-dir Δ tracks facing Δ). Desktop inherits the fix.
+    _vmRight.crossVectors(_WORLD_UP, _vmFwd).normalize();
+    _vmUp.crossVectors(_vmFwd, _vmRight);
     _vmBasis.makeBasis(_vmRight, _vmUp, _vmFwd);   // gun +Z → look direction, +Y up, +X right (upright)
     fpGun.group.quaternion.setFromRotationMatrix(_vmBasis);
     _vmBob += rdt * (moving ? (sprint ? 15 : 9) : 2.2);
     const bob = Math.sin(_vmBob) * (moving ? 0.010 : 0.0035);
     const kick = fpRecoil * 0.07;                  // recoil pulls the gun back + up
+    // A8-3: the reload dip + draw LOWER the gun toward the hip (down + back + a slight muzzle-down tilt) so it
+    // reads as coming off aim to work the mag / being raised on the draw. _fpLower is 0 at ready.
+    if (_fpLower > 0.001) { _vmTilt.setFromAxisAngle(_vmRight, _fpLower * 0.55); fpGun.group.quaternion.premultiply(_vmTilt); }  // muzzle dips
     fpGun.group.position.copy(eyePos)
-      .addScaledVector(_vmFwd, 0.30 - kick)
+      .addScaledVector(_vmFwd, 0.30 - kick - _fpLower * 0.12)
       .addScaledVector(_vmRight, 0.11)
-      .addScaledVector(_vmUp, -0.15 + bob + kick * 0.6);
+      .addScaledVector(_vmUp, -0.15 + bob + kick * 0.6 - _fpLower * 0.26);
   }
 
   /* ---- iso follow-cam framed on the survivor (v1 enterHoard pattern) ---- */
@@ -311,6 +352,7 @@ export function createPlayer(ctx) {
       walker.setPosition(player.x, player.z);
       walker.setYaw(player.facing);
       walker.recenterPitch();
+      _fpDrawT = DRAW_S;                             // A8-3: DRAW the gun up into view as you embody the survivor
       tryPointerLock();
     } else {
       tryExitPointerLock();
@@ -369,13 +411,26 @@ export function createPlayer(ctx) {
     _fireEvt.dir.x = dirx; _fireEvt.dir.y = diry; _fireEvt.dir.z = dirz; _fireEvt.seed = _seed++;
     events.emit('weapon:fire', _fireEvt);
     if (survivor) survivor.recoil();          // B4: iso gun-arm recoil snap on the B3 layer seam
-    fpRecoil = 1;                             // B4: kick the FP viewmodel (spring-recovers in update)
+    fpRecoilVel += 9;                         // A5: impulse the FP-viewmodel recoil spring (settles in update)
     muzzleFlash.position.copy(_muzWP); flashT = 1;   // B4: flash light at the same muzzle (was pulseMuzzle)
+  }
+  // A8-3 MAGAZINE — a cosmetic ammo count that drives the reload beat. Presentation + fire gate only.
+  let _ammo = MAG.size, _reloadT = 0, _fpDrawT = 0;
+  const _reloadEvt = { };
+  function startReload() {
+    if (_reloadT > 0) return;
+    _reloadT = MAG.reloadS;
+    if (survivor) survivor.reloadBeat();          // iso: the survivor's gun-arm drops + racks (rig layer)
+    events.emit('weapon:reload', _reloadEvt);      // named hook (future SFX); no listener required
   }
   function doFire() {
     if (fireCd > 0 || getSim().state.dead) return;
+    if (_reloadT > 0) return;                      // mid-reload → the gun is down, can't fire (the rhythm)
+    if (_ammo <= 0) { startReload(); return; }     // empty → begin the reload dip
     fireCd = GUN.cooldownS;
+    _ammo--;
     fireShot();
+    if (_ammo <= 0) startReload();                 // that was the last round → dip to ready
   }
 
   const _swingEvt = { origin: { x: 0, y: 0, z: 0 }, arc: 0 };
@@ -425,8 +480,22 @@ export function createPlayer(ctx) {
       fireCd = Math.max(0, fireCd - rdt);
       meleeCd = Math.max(0, meleeCd - rdt);
       attackLock = Math.max(0, attackLock - rdt);
-      fpRecoil = fpRecoil > 0 ? Math.max(0, fpRecoil - rdt * 7) : 0;   // B4 FP recoil spring-decay
+      // A5 FP recoil SPRING — a lightly-damped 2nd-order settle (ζ≈0.66): the gun kicks back then eases home
+      // with a small overshoot, instead of a linear ramp-to-zero. k=stiffness, c=damping; clamped for safety.
+      if (fpRecoil !== 0 || fpRecoilVel !== 0) {
+        fpRecoilVel += (-130 * fpRecoil - 15 * fpRecoilVel) * rdt;
+        fpRecoil += fpRecoilVel * rdt;
+        if (fpRecoil > 1.2) { fpRecoil = 1.2; fpRecoilVel = 0; }
+        if (Math.abs(fpRecoil) < 1e-4 && Math.abs(fpRecoilVel) < 1e-3) { fpRecoil = 0; fpRecoilVel = 0; }
+      }
       if (!dive.active) fpGun.group.visible = false;                   // viewmodel is dive-only (placed in the eye source)
+      // A8-3: tick the reload + draw timers (wall-clock, pause-aware); refill the mag when the dip completes;
+      // compute the FP viewmodel lower amount (max of the reload dip + the draw raise).
+      if (_reloadT > 0) { _reloadT = Math.max(0, _reloadT - rdt); if (_reloadT === 0) _ammo = MAG.size; }
+      _fpDrawT = Math.max(0, _fpDrawT - rdt);
+      const _reloadLower = _reloadT > 0 ? _dipEnv(1 - _reloadT / MAG.reloadS) : 0;
+      const _drawLower = _fpDrawT > 0 ? _drawEnv(1 - _fpDrawT / DRAW_S) : 0;
+      _fpLower = Math.max(_reloadLower, _drawLower);
       flashT = flashT > 0 ? Math.max(0, flashT - rdt * 16) : 0;        // B4 muzzle-flash decay (~2 frames)
       muzzleFlash.intensity = flashT * flashT * 16;
       if (collidersDirty) rebuildColliders();
@@ -496,7 +565,9 @@ export function createPlayer(ctx) {
         // cone (so it points at what it'll actually hit), else points down the cursor/facing ray at chest
         // height — the arm no longer relaxes to the walk pose when nothing's near. iso only (the survivor is
         // hidden in the dive; the FP viewmodel already points down the camera/reticle).
-        if (!dive.active && !dead) {
+        // A8-3: drop the aim layer while reloading so the gun-arm actually comes OFF aim for the dip (the rig
+        // reloadBeat lowers it; a held aim would fight that). It re-aims the instant the reload completes.
+        if (!dive.active && !dead && !survivor.reloading) {
           const ad = computeAim();
           const tgt = getSim().queryCone(player.x, player.z, ad.x, ad.z, ASSIST.cosHalf, ASSIST.range);
           survivor.setAim(tgt
@@ -524,6 +595,8 @@ export function createPlayer(ctx) {
   /* ---- probe hooks (harness-driven; no silent caps) ---- */
   ctx.probe.fire = () => fireShot(); // the REAL fire path (aim-assist incl.) — probes measure reality
   ctx.probe.melee = () => doMelee();
+  ctx.probe.survivorBlend = () => (survivor ? survivor.locoBlend : null);   // A8-1: transition-probe reads the blend weights
+  ctx.probe.weaponState = () => ({ ammo: _ammo, reloading: _reloadT > 0, drawing: _fpDrawT > 0, fpLower: +_fpLower.toFixed(3) });   // A8-3: reload/draw beat probe
 
   /* ============================================================
      TOUCH CONTROLS (mobile) — v2 was WASD/mouse-only; this is the v1-style touch layer so a phone tap
@@ -548,11 +621,14 @@ export function createPlayer(ctx) {
         #h2-touch .btn { pointer-events: auto; width: 78px; height: 78px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.22);
           background: rgba(30,20,16,0.55); color: #e8dcc2; letter-spacing: 0.04em; display: grid; place-items: center; }
         #h2-touch .fire { width: 96px; height: 96px; background: rgba(150,40,30,0.6); border-color: rgba(255,120,90,0.5); font-size: 15px; }
-        #h2-touch .row { display: flex; gap: 12px; }
+        #h2-touch .btn.sm { width: 62px; height: 62px; font-size: 11px; }
+        #h2-touch .confirm { width: 96px; height: 62px; border-radius: 14px; background: rgba(40,120,50,0.62); border-color: rgba(120,230,120,0.5); display: none; }
+        #h2-touch .build.on { background: rgba(40,120,50,0.55); border-color: rgba(120,230,120,0.45); }
+        #h2-touch .row { display: flex; gap: 12px; align-items: flex-end; }
         #h2-touch .btn:active { filter: brightness(1.4); }
       </style>
       <div class="stick"><div class="knob"></div></div>
-      <div class="btns"><div class="fire btn">FIRE</div><div class="row"><div class="melee btn">MELEE</div><div class="dive btn">DIVE</div></div></div>`;
+      <div class="btns"><div class="confirm btn">✓ PLACE</div><div class="fire btn">FIRE</div><div class="row"><div class="melee btn sm">MELEE</div><div class="build btn sm">BUILD</div><div class="dive btn sm">DIVE</div></div></div>`;
     document.body.appendChild(root);
     const stick = root.querySelector('.stick'), knob = root.querySelector('.knob'), R = 48;
     let sid = null;
@@ -567,7 +643,12 @@ export function createPlayer(ctx) {
     fireBtn.addEventListener('touchend', (e) => { e.preventDefault(); firing = false; }, { passive: false });
     fireBtn.addEventListener('touchcancel', () => { firing = false; });
     root.querySelector('.melee').addEventListener('touchstart', (e) => { e.preventDefault(); doMelee(); }, { passive: false });
-    root.querySelector('.dive').addEventListener('touchstart', (e) => { e.preventDefault(); dive.toggle(); }, { passive: false });
+    // A5 (owner bug #1): DIVE is a clear TOGGLE — label + tint flip so touch users know it surfaces. onDiveToggle
+    // seeds/exits the walker (same path the desktop key uses) then flips the controller; the label follows the events.
+    const diveBtn = root.querySelector('.dive');
+    diveBtn.addEventListener('touchstart', (e) => { e.preventDefault(); onDiveToggle(); }, { passive: false });
+    events.on('dive:enter', () => { diveBtn.textContent = 'EXIT'; diveBtn.style.background = 'rgba(40,90,110,0.62)'; });
+    events.on('dive:exit', () => { diveBtn.textContent = 'DIVE'; diveBtn.style.background = ''; });
 
     // FP TOUCH LOOK (owner defect #3 + "look only works in landscape"): ANY drag on the canvas while dived
     // → walker.addLook. The old "right half of innerWidth" test was orientation-fragile (portrait's narrow
@@ -580,6 +661,53 @@ export function createPlayer(ctx) {
     dom.addEventListener('touchmove', (e) => { if (!dive.active || lookId === null) return; for (const t of e.changedTouches) if (t.identifier === lookId) { walker.addLook((t.clientX - lx) * LOOK_SENS, (t.clientY - ly) * LOOK_SENS); lx = t.clientX; ly = t.clientY; e.preventDefault(); } }, { passive: false });
     const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
     dom.addEventListener('touchend', endLook); dom.addEventListener('touchcancel', endLook);
+
+    // A5 ISO PINCH-ZOOM (owner bug #3): two fingers on the canvas in ISO → pinch to zoom. rig.zoomBy CLAMPS to
+    // the rig's zoomMin/zoomMax (1.5–16 world half-height; iso default 6) so the read stays intact. Never fights
+    // the FP look above (that path is single-touch AND dive-gated; pinch is two-touch AND iso-gated), and the
+    // stick/buttons are separate elements so their touches never reach the canvas. Spreading apart = zoom in.
+    const ptrs = new Map();
+    let pinchPrev = 0;
+    const pinchDist = () => { const p = [...ptrs.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); };
+    dom.addEventListener('touchstart', (e) => {
+      if (dive.active) return;
+      for (const t of e.changedTouches) ptrs.set(t.identifier, { x: t.clientX, y: t.clientY });
+      if (ptrs.size === 2) { pinchPrev = pinchDist(); e.preventDefault(); }
+    }, { passive: false });
+    dom.addEventListener('touchmove', (e) => {
+      if (dive.active || ptrs.size < 2) return;
+      let moved = false;
+      for (const t of e.changedTouches) if (ptrs.has(t.identifier)) { ptrs.set(t.identifier, { x: t.clientX, y: t.clientY }); moved = true; }
+      if (moved && ptrs.size === 2) { const d = pinchDist(); if (pinchPrev > 0 && d > 0) rig.zoomBy(pinchPrev / d); pinchPrev = d; e.preventDefault(); }
+    }, { passive: false });
+    const endPinch = (e) => { for (const t of e.changedTouches) ptrs.delete(t.identifier); if (ptrs.size < 2) pinchPrev = 0; };
+    dom.addEventListener('touchend', endPinch); dom.addEventListener('touchcancel', endPinch);
+
+    // A5 TOUCH BUILD-MODE (owner's original item 5): the desktop ghost build-mode (B toggles · cursor previews ·
+    // click places) has no touch path. Here: BUILD toggles it, a single TAP on the ground moves the ghost
+    // preview (coarse pointers skip the per-frame aim raycast, so we set _aimPt from the tap), and ✓ PLACE
+    // commits — the same placeGhost/updateGhost/anti-stack line-extend the desktop path uses. Iso only.
+    const buildBtn = root.querySelector('.build'), confirmBtn = root.querySelector('.confirm');
+    const showBuildUi = (on) => { buildBtn.classList.toggle('on', on); buildBtn.textContent = on ? 'CANCEL' : 'BUILD'; confirmBtn.style.display = on ? 'grid' : 'none'; };
+    // raycast a client point to the ground → _aimPt + aimValid (the ghost tracks _aimPt every frame while valid)
+    const touchAimAt = (cx, cy) => { setPointer(cx, cy); raycaster.setFromCamera(pointerNdc, rig.camera); aimValid = !!raycaster.ray.intersectPlane(groundPlane, _aimPt); };
+    buildBtn.addEventListener('touchstart', (e) => { e.preventDefault(); if (dive.active) return; setBuildMode(!buildMode); showBuildUi(buildMode); }, { passive: false });
+    confirmBtn.addEventListener('touchstart', (e) => { e.preventDefault(); if (buildMode && aimValid) placeGhost(); }, { passive: false });   // keep build-mode ON → place several (line-extends)
+    // single-finger TAP on the canvas while building → move the ghost preview to the tapped ground point
+    let tapId = null, tapX = 0, tapY = 0, tapMoved = false;
+    dom.addEventListener('touchstart', (e) => {
+      if (!buildMode || dive.active || ptrs.size > 1) return;
+      const t = e.changedTouches[0]; tapId = t.identifier; tapX = t.clientX; tapY = t.clientY; tapMoved = false;
+      touchAimAt(t.clientX, t.clientY); e.preventDefault();   // tap-to-preview: immediate
+    }, { passive: false });
+    dom.addEventListener('touchmove', (e) => {
+      if (tapId === null) return;
+      for (const t of e.changedTouches) if (t.identifier === tapId) { if (Math.hypot(t.clientX - tapX, t.clientY - tapY) > 6) tapMoved = true; touchAimAt(t.clientX, t.clientY); }   // drag to fine-tune the preview
+    }, { passive: false });
+    const endTap = (e) => { for (const t of e.changedTouches) if (t.identifier === tapId) tapId = null; };
+    dom.addEventListener('touchend', endTap); dom.addEventListener('touchcancel', endTap);
+    // leaving iso (dive) force-exits build-mode + its UI (build is iso-only; setBuildMode already guards)
+    events.on('dive:enter', () => { if (buildMode) { setBuildMode(false); showBuildUi(false); } });
   }
   if (coarse) createTouchControls();
 

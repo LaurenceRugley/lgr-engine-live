@@ -8,7 +8,7 @@
    loop (engine.updateWorld keeps the glass city alive → render the room). C++ anchor: a second
    executable linking the same engine lib, wiring only the office subsystem.
    ============================================================ */
-import { THREE, createEngine, PROFILES, createAppShell, readAppFlags } from '@lgr/engine-core';
+import { THREE, createEngine, PROFILES, createAppShell, readAppFlags, createDebugOverlay, createRecorder } from '@lgr/engine-core';
 import { createOffice } from './office.js';
 
 // L114: the APP-half flags parsed ONCE by the shell helper (was a hand-rolled URLSearchParams + demo rule here).
@@ -20,6 +20,10 @@ let profileIndex = 0;
 
 const engine = createEngine({ demo: DEMO, citySeed, profileIndex });
 const { renderer, rig, sunRig, city, cityLife, waterMaterial, fitShadowFrustum, landmarkFactory, renderCityBeautyTo } = engine;
+// A10 FIELD-DEBUG overlay — ?debug=gl, default-inert (byte-identical when off).
+if (app.q.get('debug') === 'gl') createDebugOverlay({ renderer, scene: engine.scene, getPath: () => window.__renderPath || window.__mode });
+// A10 REEL RECORDER — ?rec=1 arms the engine recorder (R toggles a video of the office demo); opt-in → byte-identical off.
+if (app.q.get('rec') === '1') { const _rec = createRecorder({ canvas: renderer.domElement, name: 'office' }); window.addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') { _rec.toggleRec(); e.preventDefault(); } }); }
 
 const office = createOffice({ tier: 'corner' });
 // L114 app-shell: office adopts the SHARED seam (loop brackets + pause-on-hidden + ready + footer + hints + resize).

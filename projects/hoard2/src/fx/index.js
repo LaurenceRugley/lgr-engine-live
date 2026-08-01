@@ -31,6 +31,7 @@ import {
 import { createFxCore } from './fx-graph.js';
 
 const ZBASE = 0.9;   // world scale for the Quaternius zombie (~1.8 tall → ~1.6 in-game) — matches v1 main.js:74
+const DEATH_RATE = { walker: 1.0, runner: 1.4, tank: 0.7 };   // A8-4: per-type death-fall speed (tank slow/heavy, runner fast/limp)
 
 export function createFx(ctx) {
   const { THREE, scene, renderer, registry, config } = ctx;
@@ -78,6 +79,7 @@ export function createFx(ctx) {
   // pool bookkeeping runs headless; syncActive() catches the horde up the moment it is built.
   let horde = null;
   let _nfLastFill = -1;   // A2: last night-factor the corpse horde's night-fill was set to
+  let _corpsesShed = false;   // M1 item 5: governor panic tier can shed the whole corpse pool (draw + mixers)
   const _camPos = new THREE.Vector3();
   const corpseRig = createCharacterRig({ url: 'models/zombie.glb' });
   const sink = {
@@ -85,11 +87,18 @@ export function createFx(ctx) {
     apply(i, s) {
       horde.setActive(i, true);
       horde.setType(i, { scale: ZBASE * ((config.ZTYPE[s.type] && config.ZTYPE[s.type].scale) || 1) });
+      // A8-4 DEATH-FALL VARIETY — the fall plays at a per-TYPE rate (a tank collapses slowly + heavily, a
+      // runner drops fast + limp, a walker in between) times a deterministic per-SLOT jitter (golden-ratio
+      // index hash, ~[0.85,1.15], NO rng) so a pile of the same type doesn't fall in lockstep. Presentation
+      // only — corpses are cosmetic, off the sim trace. The clip still clamps on its last frame at any rate.
+      const rate = (DEATH_RATE[s.type] || 1) * (0.85 + 0.3 * (((i + 1) * 0.6180339887) % 1));
+      horde.get(i).setTimeScale(rate);
       horde.setState(i, 'death');                       // pinned to the death pose (plays once, clamps)
       horde.setTransform(i, s.x, s.y, s.z, s.yaw);
     },
     recycle(i) { horde.setActive(i, false); },
     step(dt) {
+      if (_corpsesShed) return;                          // M1: governor shed the corpse pool → skip its mixers
       const cam = ctx.rig && ctx.rig.camera;
       if (cam) cam.getWorldPosition(_camPos); else _camPos.set(0, 0, 0);
       horde.update(dt, _camPos.x, _camPos.y, _camPos.z);
@@ -132,6 +141,7 @@ export function createFx(ctx) {
   const core = createFxCore({
     events: ctx.events, rng: ctx.rng, time: ctx.time, config, groundY: GROUND_Y,
     particles, decals, sfx, sink, getListener,
+    corpseCap: ctx.mobile ? config.CORPSE_CAP_MOBILE : config.CORPSE_CAP,   // M1: mobile shrinks the corpse pool (must match the horde size)
   });
 
   // B5 CONTINUOUS AUDIO — the dread keying + the positional-groan scheduler run here (glue with registry
@@ -164,7 +174,11 @@ export function createFx(ctx) {
 
   // Build the horde once the GLB is ready, then catch up any corpses that already died during the load.
   corpseRig.ready.then(() => {
-    horde = createCharacterHorde(corpseRig, { size: config.CORPSE_CAP, lodDistance: 16, lodHz: 2, baseScale: ZBASE });
+    // M1 MOBILE TRUTH: mobile shrinks the corpse pool to config.CORPSE_CAP_MOBILE (40 live + 8 corpses = 48
+    // skinned = v1 class), and corpses opt out of shadow-casting + the procedural motion layers (they're
+    // pinned to a static death pose anyway — nothing to head-look at, and they must not bloat the shadow pass).
+    const corpseCap = ctx.mobile ? config.CORPSE_CAP_MOBILE : config.CORPSE_CAP;
+    horde = createCharacterHorde(corpseRig, { size: corpseCap, lodDistance: 16, lodHz: 2, baseScale: ZBASE, castShadow: !ctx.mobile, motionLayers: !ctx.mobile });
     scene.add(horde.group);
     core.syncActive();
   }).catch((e) => { if (typeof console !== 'undefined') console.warn('[fx] corpse rig failed to load — corpses disabled (game runs):', e); });
@@ -185,6 +199,9 @@ export function createFx(ctx) {
       }
     },
     counts() { return core.counts(); },
+    // M1 item 5 — governor panic shed: hide + stop stepping the corpse pool (draws + ~8 death-pose mixers).
+    // Reversible (the governor restores it when headroom returns). Gameplay is untouched — corpses are cosmetic.
+    setCorpsesActive(on) { _corpsesShed = !on; if (horde) horde.group.visible = !!on; },
     dispose() { core.dispose(); if (ambient) ambient.stop(); if (gpu) gpu.dispose(); dec.dispose(); if (horde) horde.dispose(); corpseRig.dispose(); },
   };
   registry.register('fx', facade);

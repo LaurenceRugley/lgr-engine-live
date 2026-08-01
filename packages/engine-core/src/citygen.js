@@ -234,14 +234,39 @@ function buildCoastline(seed, blockHalf, coast) {
 /* dispose a material (or material array) — free its GPU program-side resources. */
 function disposeMat(m) { (Array.isArray(m) ? m : [m]).forEach((x) => x && x.dispose && x.dispose()); }
 
-export function createCity({ seed = 1, profileIndex = 0, profile = null, landmarkFactory = null, windowGlow }) {
+/* ARC A21 — block LAYOUT dispatch. 'grid' (default, UNCHANGED) tiles an N×N square, exactly as citygen.js
+   always has. 'radial' (new, additive) is a PURE function of `half` (no rng, no seed) — same principle as
+   the grid: block POSITIONS are fixed by geometry, only per-block CONTENT (height/tint/park-choice) varies
+   by seed downstream. Concentric rings spaced PITCH apart, `sectors` per ring sized so blocks along the
+   ring's circumference land roughly PITCH apart too (matching the grid's block-to-block spacing); a small
+   per-ring rotation offset staggers the spokes so they don't all align on one radial line. Returns the SAME
+   shape the grid path does: an array of [bx, bz] world-space block centres. */
+function computeRadialBlockCenters(half) {
+  const centers = [];
+  const nRings = Math.max(1, Math.round(half / PITCH));
+  for (let ring = 1; ring <= nRings; ring++) {
+    const radius = ring * PITCH;
+    const sectors = Math.max(6, Math.round((2 * Math.PI * radius) / PITCH));
+    for (let s = 0; s < sectors; s++) {
+      const theta = (s / sectors) * Math.PI * 2 + ring * 0.15;
+      centers.push([radius * Math.cos(theta), radius * Math.sin(theta)]);
+    }
+  }
+  return centers;
+}
+
+export function createCity({ seed = 1, profileIndex = 0, profile = null, landmarkFactory = null, windowGlow, blockPattern = 'grid', spawnClearR = 0 }) {
   // Lesson CITYGEN-PROFILE-OBJECT: `profile` lets a consumer pass a CUSTOM profile OBJECT (same shape as a
   // PROFILES entry) instead of indexing the three baked ones — so a project can re-skin the city's rules
   // with its own palette/character without adding a baked profile. When omitted (null), the generator falls
   // back to PROFILES[profileIndex] EXACTLY as before → the three existing cities render byte-identical. The
   // override is sticky across reroll/regenerate (the custom skin persists); it's a parameterized ability
   // only — NO content baked here.
+  // ARC A21: `blockPattern` is the SAME kind of additive, sticky-across-reroll override. Default 'grid' takes
+  // the ORIGINAL, byte-for-byte unchanged code path — every existing caller (manhattan/paris/neoTokyo, every
+  // structures.clusters backdrop) never passes this, so nothing about them can change.
   const customProfile = profile;
+  const pattern = blockPattern;
   const group = new THREE.Group();
   // Two sub-groups with different teardown rules: PROCEDURAL meshes own their geometry (we
   // dispose it on regenerate); LANDMARK clones share cached GLB geometry (dispose materials only).
@@ -315,22 +340,38 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
     island.rotation.x = -Math.PI / 2;
     island.position.y = PLINTH_TOP - 2;               // top cap lands at PLINTH_TOP; body sinks to -1.7
     island.userData.ground = true;                    // the landmass top RECEIVES shadows
+    island.userData.groundKind = 'island';            // ARC A21: purely-additive metadata (no pixel change) — lets a consumer target ground SUB-TYPES (e.g. glint/forge on streets only) without guessing by colour
     procedural.add(island);
     // STREET layer: one square slab covering JUST the block field (a touch beyond the outer blocks,
     // but well INSIDE the shoreline, so the exposed land between street grid and water reads as a
     // green coastal margin). Blocks (sidewalk squares) sit on top → the gaps read as the grid.
     const streetSize = 2 * (blockHalf + 0.12);
-    procedural.add(slab(streetSize, streetSize, PLINTH_TOP + 0.02, prof.street));
+    const streetMesh = slab(streetSize, streetSize, PLINTH_TOP + 0.02, prof.street);
+    streetMesh.userData.groundKind = 'street';         // ARC A21: see the island tag above
+    procedural.add(streetMesh);
     // L25 HARBOR DOCKS — a couple of timber piers reaching out over the inlet on the +X edge, plus
     // a quay plank along the shore. The seam L26 boats + harbor life will tie up to. Deterministic.
     buildDocks(coast.harborX, prof);
 
+    // BLOCK LAYOUT — where block centres sit. 'grid' (default) is the ORIGINAL N×N square grid, computed
+    // here exactly as it always was (same values, just built eagerly instead of derived inside the forEach
+    // below — a pure reordering, zero rng calls either way, so the rng SEQUENCE from here on is untouched
+    // for every existing caller). 'radial' (ARC A21, additive) places the same-size blocks along concentric
+    // rings instead — see computeRadialBlockCenters. 'organic' is ACCEPTED but NOT YET implemented (said
+    // honestly, not faked): falls back to 'grid' with a console warning.
+    let blockCenters;
+    if (pattern === 'radial') {
+      blockCenters = computeRadialBlockCenters(half);
+    } else {
+      if (pattern === 'organic') console.warn('[citygen] blockPattern "organic" is not yet implemented — falling back to "grid".');
+      blockCenters = [];
+      for (let gx = 0; gx < N; gx++) for (let gz = 0; gz < N; gz++) blockCenters.push([(gx - (N - 1) / 2) * PITCH, (gz - (N - 1) / 2) * PITCH]);
+    }
+
     // choose park blocks (~8%, min 1) up front so buildings skip them.
-    const blocks = [];
-    for (let gx = 0; gx < N; gx++) for (let gz = 0; gz < N; gz++) blocks.push([gx, gz]);
     const parkSet = new Set();
-    const nParks = Math.max(1, Math.round(blocks.length * 0.08));
-    while (parkSet.size < nParks) parkSet.add(rng.int(0, blocks.length - 1));
+    const nParks = Math.max(1, Math.round(blockCenters.length * 0.08));
+    while (parkSet.size < nParks) parkSet.add(rng.int(0, blockCenters.length - 1));
 
     // downtown centre (a small seeded offset so the core isn't always dead-centre).
     const cxC = rng.range(-PITCH * 0.6, PITCH * 0.6);
@@ -340,14 +381,16 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
     // collect candidate landmark lots (tall, large, near core) while we build.
     const candidates = [];
 
-    blocks.forEach(([gx, gz], bi) => {
-      const bx = (gx - (N - 1) / 2) * PITCH;
-      const bz = (gz - (N - 1) / 2) * PITCH;
+    blockCenters.forEach(([bx, bz], bi) => {
       // each block gets a sidewalk square (its base); buildings inset within.
-      procedural.add(slab(BLOCK, BLOCK, PLINTH_TOP + 0.03, prof.sidewalk).translateX(bx).translateZ(bz));
+      const sidewalkMesh = slab(BLOCK, BLOCK, PLINTH_TOP + 0.03, prof.sidewalk).translateX(bx).translateZ(bz);
+      sidewalkMesh.userData.groundKind = 'sidewalk';   // ARC A21: see the island tag above
+      procedural.add(sidewalkMesh);
 
       if (parkSet.has(bi)) {                         // PARK block: green + a few trees
-        procedural.add(slab(BLOCK - SIDEWALK * 2, BLOCK - SIDEWALK * 2, PLINTH_TOP + 0.05, prof.park).translateX(bx).translateZ(bz));
+        const parkMesh = slab(BLOCK - SIDEWALK * 2, BLOCK - SIDEWALK * 2, PLINTH_TOP + 0.05, prof.park).translateX(bx).translateZ(bz);
+        parkMesh.userData.groundKind = 'park';
+        procedural.add(parkMesh);
         const nT = rng.int(3, 5);
         for (let i = 0; i < nT; i++) tree(bx + rng.range(-0.6, 0.6), bz + rng.range(-0.6, 0.6), prof, rng);
         return;
@@ -404,6 +447,14 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
         }
       }
     }
+
+    // ARC A21 — SPAWN CLEARING (additive, opt-in): a walkable primary city (unlike the flying camera
+    // projects/city was built for) needs its centre kept open, the SAME way `forest.clearings` already
+    // keeps the natural-arena maps' spawn point clear — otherwise a building can land directly on the
+    // origin and box the player's camera in on frame one. Reuses the EXACT eviction the landmark-plaza
+    // logic above already does; `spawnClearR` default 0 → this never runs for any existing caller
+    // (manhattan/paris/neoTokyo/decrepit/intact never pass it) — byte-identical.
+    if (spawnClearR > 0) evictBuildings(-spawnClearR, spawnClearR, -spawnClearR, spawnClearR);
 
     // L16 SHADOWS: set cast/receive per mesh kind. Flat ground RECEIVES only; buildings/props/
     // landmarks CAST + RECEIVE (so the Eiffel's shadow falls across rooftops); the emissive

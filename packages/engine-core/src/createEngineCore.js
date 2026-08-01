@@ -222,6 +222,9 @@ export function createEngineCore(opts = {}) {
       uRaysTex:      { value: _tex(raysRT) },
       uRays:         { value: 0.0 },
       uBeautyExp:    { value: 1.0 },
+      uSunException: { value: 0.0 },   // A6-0b: sun-survives-the-cool-grade amount (0 = off/byte-identical; hoard2 opts in)
+      uSunScreenPos: { value: new THREE.Vector2(-1, -1) },  // A6-0b: the sun's projected screen UV (off-screen default)
+      uSunRadius:    { value: 0.0 },    // A6-0b: sun-exception disc radius in aspect-corrected screen units
     },
   });
 
@@ -486,6 +489,12 @@ export function createEngineCore(opts = {}) {
   const profiler = createEngineProfiler({ renderer });
   let _qualityShadows = true;
   let _qualityRefl = true;
+  // M1 item 5 — QUALITY LISTENERS. The engine actuator below owns the RENDERER knobs (dpr/shadows/refl);
+  // but a project may need to shed its OWN load at deep rungs (hoard2 mobile: hide the corpse pool, hide the
+  // backdrop cluster) — content the engine can't know about. addQualityListener lets a project subscribe to
+  // every rung change and act on the rung's project-defined fields (e.g. a `shed` level). Called after the
+  // renderer knobs are applied, guarded so a listener throw never breaks the governor loop.
+  const _qualityListeners = [];
   function applyQuality(level, rung) {
     const cap = rung.dpr == null ? BOOT_DPR_CAP : rung.dpr;
     const want = Math.min(window.devicePixelRatio, cap);
@@ -497,8 +506,11 @@ export function createEngineCore(opts = {}) {
     _qualityShadows = rung.shadows !== false;
     if (!_qualityShadows) renderer.shadowMap.needsUpdate = false;
     _qualityRefl = rung.refl !== false;
+    for (let i = 0; i < _qualityListeners.length; i++) { try { _qualityListeners[i](level, rung); } catch (_e) { /* a listener must never stall the loop */ } }
   }
-  const governor = createQualityGovernor({ profiler, apply: applyQuality });
+  // A project may pass its own quality ladder (opts.qualityLadder) — e.g. hoard2's mobile ladder whose deep
+  // rungs carry a `shed` level. Omitted → the governor uses its built-in cheapest-first dpr/shadows/refl ladder.
+  const governor = createQualityGovernor({ profiler, apply: applyQuality, ladder: opts.qualityLadder });
 
   function frameStart() { if (!_paused && !_contextLost) profiler.frameStart(); }
   function frameEnd() { if (_paused || _contextLost) return; profiler.frameEnd(); governor.update(); if (typeof window !== 'undefined') window.__frames++; }
@@ -590,6 +602,7 @@ export function createEngineCore(opts = {}) {
     resize,
     // profiler + governor
     profiler, governor, frameStart, frameEnd, setActive,
+    addQualityListener: (fn) => { if (typeof fn === 'function') _qualityListeners.push(fn); },   // M1 item 5: project sheds load at deep rungs
     get paused() { return _paused; },
     get contextLost() { return _contextLost; },
     // quality knobs (city's renderCityPipeline reads these)

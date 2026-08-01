@@ -24,6 +24,11 @@ export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.j
 export { createCameraRig, CAM } from './src/camera-rig.js';
 export { createSunRig, validateSunKeyframes } from './src/sun-rig.js';
 export { createCapture } from './src/capture.js';
+// CLIENT-CRITICAL (audit 2026-07-30): client sites consume THIS core micro-barrel via the no-build fx/ path,
+// so the field debug overlay + the recorder MUST be reachable here — they were in index.js only (barrel bug,
+// 4th/5th instance). field-debug-doctrine.md promises client sites diagnose "the same one-tap way".
+export { createDebugOverlay } from './src/debug-overlay.js';
+export { VIDEO_TYPES, createRecorder, pickVideoType, recorderExt } from './src/createRecorder.js';
 export { createViewerUI } from './src/viewer-ui.js';
 export { createHints } from './src/hints.js';
 export { createAppShell, readAppFlags } from './src/app-shell.js';
@@ -108,6 +113,8 @@ export { createAmbientBed } from './src/ambient-bed.js';
 export { createPositionalField } from './src/positional-field.js';
 export { createRotor } from './src/rotor.js';
 export { default as fullscreenVert } from './src/shaders/fullscreen.vert';
+// A19 RISO LIFT — the Risograph print effect as a core ability (lifted from lgr-image-studio; engine-first).
+export { createRiso, RISO_INKS } from './src/riso.js';
 export { default as postDiveFrag } from './src/shaders/post-dive.frag';
 export { default as postPixelkitFrag } from './src/shaders/post-pixelkit.frag';
 
@@ -154,3 +161,30 @@ export {
   traceBST, balancedKeys, degenerateKeys, measureBST, STRUCTURES,
 } from './src/data-structures.js';
 export { createTreePanel } from './src/tree-panel.js';
+
+// A12 CROSS-REPO SKY LIFT (docs/sky-lift-manifest.md) — the reusable atmosphere post-passes + the
+// EffectComposer machinery a consumer builds them into. Slim-core exports so the examples/consumers reach
+// them from lgr-engine-core.es.js. Each pass defaults to a NO-OP (byte-identical); desktop-beauty when run
+// in an HDR composer (the manifest's half-float finding).
+export { createAtmosphereGrade } from './src/createAtmosphereGrade.js';
+export { createGodRays, godRayVisibility } from './src/createGodRays.js';
+export { createMilkyWay } from './src/createMilkyWay.js';
+export { createVolumetricClouds, CLOUD_TIERS } from './src/createVolumetricClouds.js';
+// SKY LIFT #2 (manifest §8) — celestial-coordinate foundation: sidereal star spin + REAL-LOCATION sun/moon.
+// Pure math, no-op by construction; feeds createMilkyWay.starRotMatrix for rotating stars. Client-site capable.
+export { createCelestial } from './src/createCelestial.js';
+// ARC A20 — THE REAL-ASTRONOMY LIFT (from lgr-live-sky): real stars (BSC5), 88 constellations, all 7
+// planets, all 110 Messier objects, and the Bortle light-pollution model (one shared shader mechanism
+// for star/planet/Messier visibility). No-op by construction; real-location-mode only.
+export { limitingMagnitude, skyGlow, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
+export { planetPosition, PLANET_KEYS } from './src/planets.js';
+export { createTrueStars } from './src/createTrueStars.js';
+export { createConstellations } from './src/createConstellations.js';
+export { createSolarSystem } from './src/createSolarSystem.js';
+// ⚠️ createMessier renders CC BY-SA (OpenNGC) data — any consumer that ships it MUST surface
+// astronomy-credits.js's getAttribution() (docs/engine-invariants.md #8, assets/astronomy/CREDITS.md).
+export { createMessier } from './src/createMessier.js';
+export { ASTRONOMY_CREDITS, getAttribution } from './src/astronomy-credits.js';
+export { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+export { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+export { OutputPass } from 'three/addons/postprocessing/OutputPass.js';

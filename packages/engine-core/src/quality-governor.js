@@ -35,7 +35,11 @@ const LADDER = [
   { dpr: 0.75, shadows: false, refl: false },   // 4 — last resort for very weak GPUs
 ];
 
-export function createQualityGovernor({ profiler, apply, targetFps = 30, strongFps = 58 } = {}) {
+export function createQualityGovernor({ profiler, apply, targetFps = 30, strongFps = 58, ladder } = {}) {
+  // M1 item 5 — a project may inject its OWN ladder (e.g. hoard2's mobile ladder whose deep rungs carry a
+  // `shed` level a project quality-listener acts on). Default = the built-in cheapest-first dpr/shadows/refl
+  // ladder. The policy below is ladder-agnostic — it only indexes `rungs[level]` and its length.
+  const rungs = (Array.isArray(ladder) && ladder.length) ? ladder : LADDER;
   // budget = the frame-time we must stay UNDER (p95). Over this → too slow → step down.
   const DOWN_MS = 1000 / targetFps;          // e.g. 33.3 ms (30 fps) — the floor we defend
   const UP_MS = 1000 / strongFps;            // e.g. 17.2 ms — comfortably fast → headroom to restore quality
@@ -55,21 +59,21 @@ export function createQualityGovernor({ profiler, apply, targetFps = 30, strongF
     if (cooldown > 0) { cooldown--; overFrames = 0; underFrames = 0; return level; }   // post-step: let the ring flush before judging again
     if (p95 > DOWN_MS) {
       overFrames++; underFrames = 0;
-      if (overFrames >= N_DOWN && level < LADDER.length - 1) { level++; overFrames = 0; cooldown = COOLDOWN; reason = `p95 ${p95.toFixed(1)}ms > ${DOWN_MS.toFixed(0)}ms`; apply(level, LADDER[level]); publish(p95); }
+      if (overFrames >= N_DOWN && level < rungs.length - 1) { level++; overFrames = 0; cooldown = COOLDOWN; reason = `p95 ${p95.toFixed(1)}ms > ${DOWN_MS.toFixed(0)}ms`; apply(level, rungs[level]); publish(p95); }
     } else if (p95 < UP_MS) {
       underFrames++; overFrames = 0;
-      if (underFrames >= N_UP && level > 0) { level--; underFrames = 0; cooldown = COOLDOWN; reason = `p95 ${p95.toFixed(1)}ms < ${UP_MS.toFixed(0)}ms (headroom)`; apply(level, LADDER[level]); publish(p95); }
+      if (underFrames >= N_UP && level > 0) { level--; underFrames = 0; cooldown = COOLDOWN; reason = `p95 ${p95.toFixed(1)}ms < ${UP_MS.toFixed(0)}ms (headroom)`; apply(level, rungs[level]); publish(p95); }
     } else { overFrames = Math.max(0, overFrames - 1); underFrames = Math.max(0, underFrames - 1); }   // in the deadband → decay both
     return level;
   }
 
-  function publish(p95) { if (typeof window !== 'undefined') window.__quality = { level, of: LADDER.length - 1, reason, p95: +(p95 || 0).toFixed(1) }; }
+  function publish(p95) { if (typeof window !== 'undefined') window.__quality = { level, of: rungs.length - 1, reason, p95: +(p95 || 0).toFixed(1) }; }
   publish(0);
 
   return {
     update,
     get level() { return level; },
     get reason() { return reason; },
-    reset() { level = 0; overFrames = underFrames = 0; cooldown = 0; reason = 'full'; apply(0, LADDER[0]); publish(0); },
+    reset() { level = 0; overFrames = underFrames = 0; cooldown = 0; reason = 'full'; apply(0, rungs[0]); publish(0); },
   };
 }

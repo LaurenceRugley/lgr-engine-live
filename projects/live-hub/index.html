@@ -3,16 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>LGR WebGL Engine — live demos</title>
-  <meta name="description" content="Live demos of the LGR WebGL engine — the open city, the Hoard survival game, the dive tech demo, and the office scene.">
+  <title>LGR WebGL Engine — live demos &amp; shipped products</title>
+  <meta name="description" content="Live demos of the LGR WebGL engine, plus three shipped products built on it: a real-astronomy sky simulator, a client-side image/video effects studio, and an interactive AI-architecture explainer.">
   <link rel="icon" href="data:,">
   <!-- The public CAPABILITY HUB. Static (no build) — the lgr-engine-live workflow copies this to the site
        root; each card deep-links a built demo under a stable path (/live/, /hoard/, /office/). Source lives
-       in lgr-webgl-lab/projects/live-hub/ (versioned + leak-checked). Mobile-first — the owner tests on a phone. -->
+       in lgr-webgl-lab/projects/live-hub/ (versioned + leak-checked). Mobile-first — the owner tests on a phone.
+       SHOWCASE REFRESH (2026-08-01): added the three shipped lgrwebstudios.com products as first-class
+       entries, surfaced all four hoard2 worlds + the A21 metropolis city-generator map, added a real
+       thumbnail to every card (img/ — small, pre-compressed JPEGs so the page stays fast on a phone). -->
   <style>
     :root {
       --bg: #0b0e0c; --bg2: #12161230; --ink: #eaf0e2; --muted: #9aa891; --line: #ffffff1a;
-      --accent: #8fd94a; --accent2: #4aa3d9; --accent3: #d98f4a; --accent4: #b06ad9;
+      --accent: #8fd94a; --accent2: #4aa3d9; --accent3: #d98f4a; --accent4: #b06ad9; --accent5: #e0c34a;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html { -webkit-text-size-adjust: 100%; }
@@ -22,22 +25,36 @@
       min-height: 100dvh; padding: clamp(1.2rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 3rem;
       -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 1040px; margin: 0 auto; }
-    header { text-align: center; margin-bottom: clamp(1.5rem, 5vw, 2.8rem); }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: clamp(1.5rem, 5vw, 2.4rem); }
     .kicker { color: var(--accent); font: 600 0.72rem/1 ui-monospace, monospace; letter-spacing: 0.22em; text-transform: uppercase; }
     h1 { font-size: clamp(1.7rem, 6vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; margin: 0.5rem 0 0.4rem; }
-    .sub { color: var(--muted); max-width: 40ch; margin: 0 auto; font-size: clamp(0.9rem, 2.5vw, 1rem); }
+    .sub { color: var(--muted); max-width: 46ch; margin: 0 auto; font-size: clamp(0.9rem, 2.5vw, 1rem); }
+    h2.section {
+      font: 700 0.78rem/1 ui-monospace, monospace; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--muted); margin: clamp(2rem, 5vw, 2.6rem) 0 0.9rem; padding-top: clamp(0.6rem, 2vw, 1rem);
+      border-top: 1px solid var(--line);
+    }
+    h2.section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+    h2.section b { color: var(--ink); }
     .grid { display: grid; grid-template-columns: 1fr; gap: clamp(0.9rem, 2.5vw, 1.3rem); }
     @media (min-width: 720px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 1020px) { .grid.grid3 { grid-template-columns: 1fr 1fr 1fr; } }
     .card {
       position: relative; display: flex; flex-direction: column; gap: 0.7rem;
       background: linear-gradient(180deg, #ffffff0a, #ffffff03); border: 1px solid var(--line);
       border-radius: 16px; padding: clamp(1.1rem, 3.5vw, 1.5rem); overflow: hidden;
     }
-    .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--edge, var(--accent)); opacity: 0.9; }
+    .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--edge, var(--accent)); opacity: 0.9; z-index: 1; }
+    .thumb {
+      display: block; width: calc(100% + clamp(2.2rem, 7vw, 3rem)); margin: calc(-1 * clamp(1.1rem, 3.5vw, 1.5rem)) calc(-1 * clamp(1.1rem, 3.5vw, 1.5rem)) 0.2rem;
+      aspect-ratio: 16 / 9; object-fit: cover; background: #000;
+    }
     .card h2 { font-size: 1.2rem; font-weight: 750; letter-spacing: -0.01em; }
     .tag { color: var(--edge, var(--accent)); font: 600 0.68rem/1 ui-monospace, monospace; letter-spacing: 0.12em; text-transform: uppercase; }
     .card p { color: var(--muted); font-size: 0.92rem; }
+    .card .fact { color: var(--ink); font-size: 0.86rem; opacity: 0.92; border-left: 2px solid var(--edge, var(--accent)); padding-left: 0.6rem; }
+    .card .fact b { color: var(--edge, var(--accent)); font-weight: 700; }
     .card .controls { color: var(--ink); font-size: 0.84rem; opacity: 0.82; }
     .card .controls b { color: var(--edge, var(--accent)); font-weight: 700; }
     .actions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: auto; padding-top: 0.4rem; }
@@ -50,24 +67,79 @@
     a.btn:active { transform: translateY(1px); }
     a.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
     a.btn.ghost:hover { border-color: var(--edge, var(--accent)); color: var(--edge, var(--accent)); }
+    /* worlds mini-grid (hoard2 card) */
+    .worlds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+    @media (min-width: 480px) { .worlds { grid-template-columns: repeat(3, 1fr); } }
+    a.world {
+      position: relative; display: block; border-radius: 9px; overflow: hidden; text-decoration: none;
+      border: 1px solid var(--line); aspect-ratio: 16 / 10;
+    }
+    a.world img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.15s ease; }
+    a.world:hover img { transform: scale(1.05); }
+    a.world span {
+      position: absolute; left: 0; right: 0; bottom: 0; padding: 0.3rem 0.45rem;
+      background: linear-gradient(0deg, #000c, transparent); color: #fff;
+      font: 650 0.72rem/1.2 ui-sans-serif, system-ui, sans-serif;
+    }
+    a.world.new::after {
+      content: "NEW"; position: absolute; top: 0.3rem; right: 0.3rem; background: var(--accent5); color: #201a02;
+      font: 750 0.6rem/1 ui-monospace, monospace; letter-spacing: 0.06em; padding: 0.15rem 0.32rem; border-radius: 5px;
+    }
     footer { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 2.4rem; }
     footer a { color: var(--muted); }
+    footer .ext { color: var(--accent2); }
   </style>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div class="kicker">LGR WebGL Engine</div>
-      <h1>Live demos &amp; capabilities</h1>
-      <p class="sub">Every public demo of the engine in one place — tap a card and try it. Best on a real GPU; works on phones.</p>
+      <h1>Live demos &amp; shipped products</h1>
+      <p class="sub">Everything public in one place — engine demos below, three shipped products above. Tap a card and try it; best on a real GPU, works on phones.</p>
     </header>
 
+    <h2 class="section"><b>Shipped products</b> — built on this engine, live at lgrwebstudios.com</h2>
+    <div class="grid grid3">
+      <!-- LIVE SKY -->
+      <section class="card" style="--edge: var(--accent2)">
+        <img class="thumb" src="img/sky.jpg" alt="Live Sky at midnight — real stars and the Milky Way over an ocean horizon" loading="lazy" width="720" height="405">
+        <span class="tag">Real-astronomy sky sim</span>
+        <h2>Live Sky</h2>
+        <p>A physically-based atmosphere you scrub, fly through, and light-pollute: real weather, sea state, and a full real-sky mode — the Yale Bright Star Catalogue, all 7 planets from NASA JPL orbital elements, all 110 Messier objects, and a continuous Bortle 1–9 slider that fades stars in by real magnitude as the sky darkens.</p>
+        <div class="fact"><b>The interesting part:</b> all 9,096 catalog stars are re-projected every frame from real sidereal time, precession, and atmospheric refraction — not a rotating skybox texture, an actual live ephemeris.</div>
+        <div class="actions"><a class="btn" href="https://sky.lgrwebstudios.com" target="_blank" rel="noopener">Open Live Sky ↗</a></div>
+      </section>
+
+      <!-- IMAGE STUDIO -->
+      <section class="card" style="--edge: var(--accent5)">
+        <img class="thumb" src="img/studio.jpg" alt="Image Studio — a riso-print effect applied to a flower photo" loading="lazy" width="720" height="405">
+        <span class="tag">Client-side image/video FX</span>
+        <h2>Image Studio</h2>
+        <p>Seven real-time effect modes — pixel &amp; dither, blur, halftone, edge-ink, CRT, ASCII, and riso — applied to a photo, a video, or your webcam, with region masking (rectangle, brush, or preset zones) and PNG/MP4 export. Nothing ever uploads; every frame is processed on your GPU.</p>
+        <div class="fact"><b>The interesting part:</b> the riso mode models real screen-angle-offset printing (three ink plates at deliberately different halftone angles) — the same physical process that makes riso prints moiré if you get the angles wrong, simulated, not faked with a filter.</div>
+        <div class="actions"><a class="btn" href="https://studio.lgrwebstudios.com" target="_blank" rel="noopener">Open Image Studio ↗</a></div>
+      </section>
+
+      <!-- THE DESCENT -->
+      <section class="card" style="--edge: var(--accent4)">
+        <img class="thumb" src="img/learn.jpg" alt="The Descent — an interactive explainer of how AI works from chat box to silicon" loading="lazy" width="720" height="405">
+        <span class="tag">Interactive AI explainer</span>
+        <h2>The Descent</h2>
+        <p>How a large language model actually works, top to bottom: seven levels from the chat box down to GPU silicon and back up to a deployed multi-agent system — tokenization, attention, sampling, memory-bandwidth-bound inference, tool-calling, and orchestration. Includes a live "temperature lab" slider that reshapes a token-probability distribution as you drag it.</p>
+        <div class="fact"><b>The interesting part:</b> it frames the KV-cache as a physical constraint, not trivia — why context length directly sets latency, batch-size limits, and cost, as an unavoidable consequence of how transformers read their own weights.</div>
+        <div class="actions"><a class="btn" href="https://learn.lgrwebstudios.com" target="_blank" rel="noopener">Open The Descent ↗</a></div>
+      </section>
+    </div>
+
+    <h2 class="section"><b>Engine demos</b> — the WebGL engine itself, running live</h2>
     <div class="grid">
       <!-- CITY — the engine showcase -->
       <section class="card" style="--edge: var(--accent2)">
+        <img class="thumb" src="img/city.jpg" alt="The Open City — a procedural skyline at golden hour, toon-style rendering" loading="lazy" width="720" height="405">
         <span class="tag">Engine showcase</span>
         <h2>The Open City</h2>
         <p>A living procedural city: fly a craft over it, sweep day↔night, roll weather &amp; seasons, switch style tiers (beauty / toon / pixel / vector), and apply colour-grade looks. Dive into an office interior, or flip on survival mode in-city.</p>
+        <div class="fact"><b>The interesting part:</b> the whole skyline is generated from one seed — reroll it for an entirely different city — and the render style continuously morphs by camera zoom, not a toggle: toon → 16-bit → 8-bit → Game Boy.</div>
         <div class="controls"><b>Controls:</b> drag / two-finger to orbit · scroll / pinch to zoom · use the on-screen control bar for day-night, weather, tiers &amp; looks.</div>
         <div class="actions">
           <a class="btn" href="live/">Open the city →</a>
@@ -77,6 +149,7 @@
 
       <!-- HOARD — the survival game -->
       <section class="card" style="--edge: var(--accent)">
+        <img class="thumb" src="img/hoard.jpg" alt="The Hoard — a top-down survival arena with the survivor and a zombie" loading="lazy" width="720" height="405">
         <span class="tag">Survival game</span>
         <h2>The Hoard</h2>
         <p>A top-down wave-survival game showcasing the arena stack: flow-field horde AI, projectile ballistics, GPU particle FX, blood &amp; scorch decals, and a rigged zombie horde. Press <b>F</b> to DIVE into first person and <b>walk</b> the forest arena in the thick of the horde.</p>
@@ -87,19 +160,30 @@
         </div>
       </section>
 
-      <!-- HOARD v2 — the one-shot rebuild -->
+      <!-- HOARD v2 — the one-shot rebuild, now with all 5 worlds -->
       <section class="card" style="--edge: var(--accent2)">
+        <img class="thumb" src="img/hoard2-metropolis.jpg" alt="Hoard v2 — a first-person dive down a generated city street at night, real stars visible overhead" loading="lazy" width="720" height="405">
         <span class="tag">One-shot · staged</span>
         <h2>Hoard v2</h2>
-        <p>The Hoard rebuilt fresh in a single multi-agent run on the same engine: a decrepit forest-and-ruins arena, three distinct zombie types crowd-pathing a flow field, build-and-breach fortification, harvest + hunger/stamina survival, a real day↔night cycle with a harder night, and the iso→first-person dive. Staged for playtest — rough edges and all.</p>
+        <p>The Hoard rebuilt fresh in a single multi-agent run: three zombie types crowd-pathing a flow field, build-and-breach fortification, harvest + hunger/stamina survival, a real day↔night cycle, and the iso→first-person dive. Five arenas, all through <b>one shared interpreter</b> that turns a plain-text description into a playable world — forest, swamp, lakeshore, coast, and a full generated city.</p>
+        <div class="fact"><b>The interesting part:</b> the metropolis map is a real city — buildings, streets, a harbour — generated from the sentence <em>"a dense grid metropolis on a rain-slick harbour"</em>, then dropped under the same real-star sky as Live Sky above. Dive to first person at night to see it.</div>
         <div class="controls"><b>Controls:</b> WASD / arrows move · mouse aim · hold click to fire · <b>Space / V</b> melee · <b>F</b> = dive to first-person · <b>I</b> = bag &amp; crafting.</div>
+        <div class="worlds">
+          <a class="world" href="hoard2/?seed=1337&amp;map=forest"><img src="img/hoard2-forest.jpg" alt="Forest world" loading="lazy"><span>Forest</span></a>
+          <a class="world" href="hoard2/?seed=1337&amp;map=swamp"><img src="img/hoard2-swamp.jpg" alt="Swamp world" loading="lazy"><span>Swamp</span></a>
+          <a class="world" href="hoard2/?seed=1337&amp;map=lakeshore"><img src="img/hoard2-lakeshore.jpg" alt="Lakeshore world" loading="lazy"><span>Lakeshore</span></a>
+          <a class="world" href="hoard2/?seed=1337&amp;map=coastal"><img src="img/hoard2-coastal.jpg" alt="Coastal world" loading="lazy"><span>Coastal</span></a>
+          <a class="world new" href="hoard2/?seed=1337&amp;map=metropolis"><img src="img/hoard2-metropolis.jpg" alt="Metropolis world — a generated city" loading="lazy"><span>Metropolis</span></a>
+        </div>
         <div class="actions">
-          <a class="btn" href="hoard2/?seed=1337">Play Hoard v2 →</a>
+          <a class="btn" href="hoard2/?seed=1337&amp;map=metropolis">Play the Metropolis →</a>
+          <a class="btn ghost" href="hoard2/?seed=1337">Play Hoard v2 (forest) →</a>
         </div>
       </section>
 
       <!-- CAVERN — dive tech demo -->
       <section class="card" style="--edge: var(--accent3)">
+        <img class="thumb" src="img/cavern.jpg" alt="Cavern Dive — a treasure hoard glowing in a dark cave" loading="lazy" width="720" height="405">
         <span class="tag">Tech demo</span>
         <h2>Cavern Dive</h2>
         <p>The iso→first-person "dive" seam as a focused tech demo: drop from a top-down view straight into the survivor's eyes inside a treasure cavern, with time dilation on the descent.</p>
@@ -111,6 +195,7 @@
 
       <!-- OFFICE — standalone -->
       <section class="card" style="--edge: var(--accent4)">
+        <img class="thumb" src="img/office.jpg" alt="The Office — an interior with a dual-monitor view of the city and a cat" loading="lazy" width="720" height="405">
         <span class="tag">Scene</span>
         <h2>The Office</h2>
         <p>The standalone office interior — the scene the city's office-dive lands in, on its own: glass-city view through the windows, props, and the seated look-around.</p>
@@ -122,6 +207,7 @@
 
       <!-- CS VISUALIZATIONS — zero-dependency teaching viz (DOM/SVG, instant load, works on any phone) -->
       <section class="card" style="--edge: var(--accent)">
+        <img class="thumb" src="img/cs-viz.jpg" alt="Sort Race — insertion, merge, and quicksort racing on the same array" loading="lazy" width="720" height="405">
         <span class="tag">CS Visualizations</span>
         <h2>Algorithms, alive</h2>
         <p>Interactive, zero-dependency visualizations of core computer-science ideas — built to teach by watching them run. No install, no signup; each loads instantly and works on any phone.</p>
@@ -136,7 +222,12 @@
 
     <footer>
       Built with the first-party LGR WebGL engine (Vite · Three.js · GLSL). ·
-      <a href="live/">city</a> · <a href="hoard/">hoard</a> · <a href="hoard2/?seed=1337">hoard v2</a> · <a href="hoard/cavern.html">cavern</a> · <a href="office/">office</a> · <a href="cs-viz/sort-race.html">sort race</a> · <a href="cs-viz/event-loop.html">event loop</a> · <a href="cs-viz/graph-wave.html">graph wave</a>
+      <a class="ext" href="https://sky.lgrwebstudios.com" target="_blank" rel="noopener">Live Sky</a> ·
+      <a class="ext" href="https://studio.lgrwebstudios.com" target="_blank" rel="noopener">Image Studio</a> ·
+      <a class="ext" href="https://learn.lgrwebstudios.com" target="_blank" rel="noopener">The Descent</a> ·
+      <a href="live/">city</a> · <a href="hoard/">hoard</a> · <a href="hoard2/?seed=1337">hoard v2</a> ·
+      <a href="hoard2/?seed=1337&amp;map=metropolis">metropolis</a> · <a href="hoard/cavern.html">cavern</a> ·
+      <a href="office/">office</a> · <a href="cs-viz/sort-race.html">sort race</a> · <a href="cs-viz/event-loop.html">event loop</a> · <a href="cs-viz/graph-wave.html">graph wave</a>
     </footer>
   </div>
 </body>

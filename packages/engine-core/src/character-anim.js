@@ -17,6 +17,27 @@
 export const ZOMBIE_STATES = { idle: 'Idle', walk: 'Walk', run: 'Run', attack: 'Punch', hit: 'HitReact', death: 'Death' };
 export const ZOMBIE_LOOP_ONCE = ['attack', 'hit', 'death'];
 
+/* ============================================================
+   A6-2 LOCOMOTION TRUTH — the pure STRIDE-RATE math (kills foot-slide).
+   ------------------------------------------------------------
+   "Foot slide" is a stride/speed mismatch: the walk/run CLIP plays at a fixed cadence while the BODY
+   translates at gameplay speed, so the planted foot skates across the ground. The standard cheap fix (no IK):
+   scale the clip's PLAYBACK RATE by (actual world speed ÷ the clip's reference stride speed). Then the foot's
+   backward cadence matches the ground travel and the planted foot grips.
+
+   refStride = the world m/s at which the clip looks PLANTED at timeScale 1 (its inherent "designed" travel
+   speed — calibrated per rig with the measured slip probe, tools/hoard2-slip-probe.mjs). At world speed v the
+   right playback rate is v/refStride: at v=refStride → 1× (natural), slower → the legs slow with the body,
+   faster → they quicken. Clamped so a near-stop doesn't freeze the pose and a sprint doesn't judder.
+
+   C++ anchor: a pure `float strideTimeScale(float v, float ref)` — no renderer, unit-tested; the rig just
+   feeds the result to AnimationAction.setEffectiveTimeScale. ============================================================ */
+export function strideTimeScale(worldSpeed, refStride, min = 0.4, max = 2.4) {
+  const ref = refStride > 1e-4 ? refStride : 1e-4;             // guard /0
+  const ts = (worldSpeed > 0 ? worldSpeed : 0) / ref;
+  return ts < min ? min : ts > max ? max : ts;                // clamp: no frozen pose, no judder
+}
+
 export function createAnimStateMachine({ clips = ZOMBIE_STATES, loopOnce = ZOMBIE_LOOP_ONCE } = {}) {
   let current = null;
   return {

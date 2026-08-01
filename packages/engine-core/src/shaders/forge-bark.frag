@@ -20,7 +20,10 @@ void surface(vec2 uv, out vec3 albedo, out vec3 orm, out float height) {
   float crack = smoothstep(0.0, 0.08, w.y - w.x);     // dark fissures between plates
   float coarse = fbm(vec2(uv.x * 4.0, uv.y * 1.5), 4.0, 4);
 
-  height = clamp(0.5 * grain + 0.3 * coarse + 0.2 * crack, 0.0, 1.0);
+  // A6-3 tree refinement: deepen the plate fissures a touch (0.2→0.26) so the Sobel-normal reads more relief
+  // on the trunk — the dead bark catches the raking sun instead of looking sanded flat. (Low-freq inputs →
+  // still well above the forge Nyquist floor at size 768 / worldSize 0.9.)
+  height = clamp(0.46 * grain + 0.28 * coarse + 0.26 * crack, 0.0, 1.0);
 
   // CRITIC R1: bark was too dark (holes in the frame). Lift the whole ramp to a weathered dead-birch
   // grey-brown so trunks READ as trees at gameplay distance, and soften the fissure darkening.
@@ -33,6 +36,17 @@ void surface(vec2 uv, out vec3 albedo, out vec3 orm, out float height) {
   // living trees grow lichen: a low-freq green mottle pooled in the crevices (only when healthy).
   float lichen = uHealth * smoothstep(0.45, 0.8, fbm(uv * vec2(5.0, 3.0), 5.0, 3)) * (1.0 - height);
   col = mix(col, vec3(0.22, 0.28, 0.14), lichen * 0.5);
+  // A6-3: dead trunks WEATHER too — a desaturated grey-green ROT/mould pools in the deepest fissures (pooled
+  // by (1-height)*crack), stronger the DEADER the tree (1-uHealth). So a dead trunk reads decayed + organic
+  // instead of a uniform grey; a living trunk keeps mostly its warm bark + lichen. One low-freq mottle layer.
+  float rot = smoothstep(0.5, 0.86, fbm(uv * vec2(4.0, 2.5), 4.0, 3)) * (1.0 - height) * crack;
+  col = mix(col, vec3(0.20, 0.215, 0.175), rot * (0.30 + 0.30 * (1.0 - uHealth)));
+  // A6-3: weathered vertical DRIP-STAINS — a slow-up, banded-around fbm reads as rain-streaked dead wood
+  // running DOWN the trunk. This is a LARGER-scale feature than the fine grain (bands ~0.13 m wide), so it
+  // breaks the uniform-pole look at GAMEPLAY distance, not just at nose range. Kept subtle so it darkens the
+  // stains without re-introducing the "black hole" trunks the R1 critic fixed.
+  float streak = fbm(vec2(uv.x * 7.0, uv.y * 0.8), 7.0, 3);
+  col *= mix(0.84, 1.08, streak);
   albedo = col;
 
   float ao = mix(0.6, 1.0, height) * mix(0.72, 1.0, crack);

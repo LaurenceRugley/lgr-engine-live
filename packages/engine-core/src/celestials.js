@@ -97,6 +97,25 @@ function vectorDisc(fill, rim, craters = false) {
   return canvasTex(c, true);                                                          // smooth → clean flat edge
 }
 
+/* A5 SUN CORE-FILL — a SOLID, OPAQUE, hot disc that fills the sun's centre so it reads as a bright body, not a
+   soft/hollow ring. WHY this is needed: the L52+ `sun` disc is a mostly-transparent radial gradient (a soft glow-
+   style falloff); alpha-blended over a bright sky its centre mutes toward the sky colour, so in hoard2's FP dive
+   the sun read as a dull hollow circle (a faint warm rim, sky-toned middle) instead of a hot sun. This core is a
+   HARD-filled disc: near-white hot centre, opaque out to ~0.8r, then a quick soft edge to hide the sprite square.
+   It's OPT-IN (setSunCore, default off → sprite excluded from the draw list → provably byte-identical for the city,
+   the same trick sunCorona uses). C++ anchor: the glow disc is an alpha texture (mostly translucent); this is a
+   near-opaque one — think a filled circle vs a soft brush stamp. */
+function coreDisc() {
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
+  const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  g.addColorStop(0.0, '#ffffff'); g.addColorStop(0.55, '#fffdf4');   // near-white hot core, fully opaque
+  g.addColorStop(0.80, '#ffe6b4');                                   // warm shoulder, still opaque
+  g.addColorStop(0.92, 'rgba(255,214,138,0.85)');                    // begin the falloff
+  g.addColorStop(1.0, 'rgba(255,196,102,0)');                        // quick soft edge (kills the sprite square)
+  x.fillStyle = g; x.beginPath(); x.arc(S / 2, S / 2, S / 2, 0, TAU); x.fill();
+  return canvasTex(c, true);
+}
+
 function softGlow() {
   const S = 128, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
   const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
@@ -174,18 +193,21 @@ export function createCelestials({ R = 88, sunSize = 6.0, moonSize = 5.5 } = {})
   };
   const glowTex = softGlow();
   const haloTex = darkHalo();
+  const coreTex = coreDisc();               // A5: the opt-in solid hot-core fill (below)
 
   const sunHalo = sprite(haloTex, false);   // L55: NORMAL blend (darkens sky) — daytime contrast ring
   const sunCorona = sprite(glowTex, true);  // L108 (Deliverable B): a wide, faint atmospheric corona — realistic-tier ONLY (0 opacity elsewhere → stylized byte-identical); the empty beauty sky gets a focal point
   const sunGlow = sprite(glowTex, true);
   const sun = sprite(SUN.realistic);
+  const sunCore = sprite(coreTex);          // A5 SUN CORE-FILL: solid hot centre, OPT-IN (setSunCore); .visible=false by default → OUT of the draw list → byte-identical (same proof as sunCorona)
   const moonCorona = sprite(glowTex, true);  // L112 B: cool atmospheric corona — realistic-tier ONLY (.visible=false elsewhere → OUT of the stylized draw list → provably byte-identical, same trick as sunCorona)
   const moonGlow = sprite(glowTex, true);
   const moon = sprite(MOON.realistic);
   // L98c: NO negative renderOrder — the celestials render in the normal transparent pass (AFTER opaque), so the
   // depth buffer holds the buildings and occlusion works. (The intra-group layering halo→glow→disc still holds
   // because they're added in that order at the same depth/renderOrder.)
-  group.add(sunHalo, sunCorona, sunGlow, sun, moonCorona, moonGlow, moon);   // each corona BEHIND its glow+disc (additive, order-independent, but visually under)
+  group.add(sunHalo, sunCorona, sunGlow, sun, sunCore, moonCorona, moonGlow, moon);   // each corona BEHIND its glow+disc; sunCore AFTER sun → draws ON TOP of the soft disc (same depth/renderOrder)
+  sunCore.visible = false;                  // A5: default OFF (city never opts in) → excluded from the draw list → byte-identical
 
   // L57 NIGHT SKY — stars + constellations + nebula, composed here so every celestials consumer (the
   // city sky AND the office-window RTT) inherits it. Driven below by the same SunRig clock.
@@ -234,6 +256,13 @@ export function createCelestials({ R = 88, sunSize = 6.0, moonSize = 5.5 } = {})
   const _sunDir = new THREE.Vector3(0, 1, 0);
   const _moonDir = new THREE.Vector3(0, -1, 0);
   const _cp = new THREE.Vector3();
+
+  // A5 SUN CORE-FILL — opt-in intensity (0 = OFF, city default → byte-identical). A consumer (hoard2) calls
+  // setSunCore(amount) to fill the sun's dull centre with a solid hot core. `amount` scales both the core's
+  // opacity and its size (a bigger, brighter core at higher values); ~0.9 reads as a crisp hot sun in the beauty dive.
+  const SUN_CORE_HOT = new THREE.Color('#fff5e6');   // near-white hot core tint (pushed HDR on realistic so ACES rolls it back up)
+  let _coreFill = 0;
+  function setSunCore(amount) { _coreFill = Math.max(0, +amount || 0); }
 
   function update(dt, elapsed, sunRig, weatherRig, tier = 'realistic', cam = null) {
     setTier(tier);
@@ -284,6 +313,22 @@ export function createCelestials({ R = 88, sunSize = 6.0, moonSize = 5.5 } = {})
     sunHalo.scale.setScalar(ss * bScale * 1.7);
     sunHalo.material.opacity = realisticTier ? 0 : sVis * (1 - horizonK) * cfg.sunHaloOp;   // L98c: no sprite halo on realistic (the corona replaces it)
 
+    // A5 SUN CORE-FILL — fill the dull centre so the sun reads as a hot body. OPT-IN: OFF (visible=false) unless a
+    // consumer set _coreFill>0 → the city never does → this sprite is out of the draw list → BYTE-IDENTICAL. Sized as
+    // a fraction of the disc (a tight solid core, not the whole soft disc), opacity + size scale with _coreFill.
+    // On realistic (the beauty dive), push the core to HDR so the frame's ACES tonemap rolls it back to hot-white
+    // (the same trick the disc uses) — else a plain-white sprite reads dim against the beauty grade.
+    sunCore.visible = _coreFill > 0 && sVis > 0.001;
+    if (sunCore.visible) {
+      sunCore.scale.setScalar(ss * bScale * (0.42 + 0.14 * Math.min(1, _coreFill)));   // ~0.5× the disc → a solid hot core inside the softer disc/glow
+      sunCore.material.color.copy(SUN_CORE_HOT);
+      // On realistic the whole beauty frame is ACES-tonemapped AND (in hoard2) cool-GRADED — a warm mid-bright sprite
+      // reads dull green. Push the core hard into HDR so ACES clips it to near-WHITE (white survives the desaturating
+      // cool grade), giving a crisp hot sun that clearly out-punches the ~0.6 sky. Dusk-damped like the disc.
+      if (realisticTier) sunCore.material.color.multiplyScalar(7.0 * (1 - 0.45 * lowSunWashK(arc.y)));
+      sunCore.material.opacity = sVis * Math.min(1, _coreFill);
+    }
+
     // MOON — the OPPOSITE direction; cool, bright core, soft cool glow.
     const mUp = -arc.y;
     const mVis = smoothstep(mUp, -0.04, 0.1) * (1 - 0.65 * cover);
@@ -328,6 +373,7 @@ export function createCelestials({ R = 88, sunSize = 6.0, moonSize = 5.5 } = {})
     sun.position.copy(_cp).addScaledVector(_sunDir, R);
     sunGlow.position.copy(sun.position);
     sunCorona.position.copy(sun.position);   // L108: the corona rides the disc
+    sunCore.position.copy(sun.position);     // A5: the core rides the disc (skipped-render-safe: harmless when .visible=false)
     sunHalo.position.copy(sun.position);
     moon.position.copy(_cp).addScaledVector(_moonDir, R);
     moonGlow.position.copy(moon.position);
@@ -335,5 +381,5 @@ export function createCelestials({ R = 88, sunSize = 6.0, moonSize = 5.5 } = {})
     nightSky.place(cam);   // L111: the star dome rides THIS render camera too (compose, don't wire → the office-window RTT inherits it via the two existing place() call sites)
   }
 
-  return { group, update, place };
+  return { group, update, place, setSunCore };
 }

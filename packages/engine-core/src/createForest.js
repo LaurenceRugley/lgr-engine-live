@@ -55,19 +55,48 @@ function mergeParts(geos) {
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   return out;
 }
-function makeConifer() {   // a pine: short trunk + two stacked cones (origin at base, y=0 = ground)
-  const trunk = bakeColor(new THREE.CylinderGeometry(0.05, 0.07, 0.4, 6).translate(0, 0.2, 0).toNonIndexed(), '#4a3423');
-  const c1 = bakeColor(new THREE.ConeGeometry(0.36, 0.72, 7).translate(0, 0.68, 0).toNonIndexed(), '#33502f');
-  const c2 = bakeColor(new THREE.ConeGeometry(0.26, 0.54, 7).translate(0, 1.06, 0).toNonIndexed(), '#3d6238');
-  return mergeParts([trunk, c1, c2]);
+/* A5 — place a tapered branch: a cone (base→tip) built along +Y with its BASE at the origin, tilted `tilt`
+   from vertical, aimed at azimuth `az`, then anchored at (attach point on the parent). Returns the geo so a
+   twig can be forked off its TIP (we return the tip world-pos too). Low-poly (4–5 radial segs). */
+function branch(r0, r1, len, tilt, az, ax, ay, az2, hex, segs = 5) {
+  const g = new THREE.CylinderGeometry(r1, r0, len, segs).translate(0, len / 2, 0).toNonIndexed();
+  g.rotateZ(tilt).rotateY(az).translate(ax, ay, az2);
+  bakeColor(g, hex);
+  // tip position after the same transform (for forking twigs): base(0,len,0) → rotZ → rotY → translate.
+  // rotateZ(θ) sends (0,len,0) → (-len·sinθ, len·cosθ, 0); rotateY(az) then spins x into x/z. rx MUST be
+  // NEGATIVE or the twig anchors mirrored across the trunk (caught in the tip-vs-geometry check).
+  const s = Math.sin(tilt), c = Math.cos(tilt), rx = -len * s;
+  const tx = rx * Math.cos(az) + ax, ty = len * c + ay, tz = -rx * Math.sin(az) + az2;
+  return { g, tip: [tx, ty, tz] };
 }
-function makeBare() {       // a bare deciduous: a taller trunk + a few angled bare branch stubs (no canopy)
-  const parts = [bakeColor(new THREE.CylinderGeometry(0.05, 0.08, 1.1, 6).translate(0, 0.55, 0).toNonIndexed(), '#4b3c2c')];
-  const B = ['#52412f', '#493827', '#584936'];
-  for (let i = 0; i < 4; i++) {
-    const a = i * 1.9, br = new THREE.CylinderGeometry(0.022, 0.035, 0.5, 5).toNonIndexed();
-    br.rotateZ(0.9).rotateY(a).translate(Math.cos(a) * 0.16, 0.78 + i * 0.09, Math.sin(a) * 0.16);
-    parts.push(bakeColor(br, B[i % B.length]));
+function makeConifer() {   // a pine: short trunk + THREE stacked cones (fuller, pointier canopy) — reads as a pine
+  const trunk = bakeColor(new THREE.CylinderGeometry(0.05, 0.08, 0.44, 6).translate(0, 0.22, 0).toNonIndexed(), '#4a3423');
+  // A5: a third, tighter top cone + slightly overlapping skirts so the silhouette is a full conifer, not two discs.
+  const c1 = bakeColor(new THREE.ConeGeometry(0.40, 0.66, 8).translate(0, 0.60, 0).toNonIndexed(), '#2f4a2b');
+  const c2 = bakeColor(new THREE.ConeGeometry(0.30, 0.56, 8).translate(0, 0.92, 0).toNonIndexed(), '#37592f');
+  const c3 = bakeColor(new THREE.ConeGeometry(0.19, 0.46, 8).translate(0, 1.24, 0).toNonIndexed(), '#3f6a38');
+  return mergeParts([trunk, c1, c2, c3]);
+}
+function makeBare(seed = 0x0cae) {   // A5: a SKELETAL dead tree — tapered trunk + forking primary branches +
+  const rng = mulberry32(seed);      // secondary twigs, so it reads as a bare tree, not a TV-antenna of straight stubs.
+  const B = ['#52412f', '#493827', '#584936', '#463829', '#4d3d2d'];
+  const bh = (i) => B[i % B.length];
+  // tapered trunk (thicker base → thin top), a touch taller than v1's so the crown sits above eye-line.
+  const parts = [bakeColor(new THREE.CylinderGeometry(0.04, 0.095, 1.35, 6).translate(0, 0.675, 0).toNonIndexed(), '#4b3c2c')];
+  const PRIM = 6;   // primary branches fork off the upper trunk at varied heights/angles/lengths
+  for (let i = 0; i < PRIM; i++) {
+    const az = (i / PRIM) * Math.PI * 2 + rng() * 0.9;
+    const h = 0.62 + (i / PRIM) * 0.62 + rng() * 0.1;         // climb the trunk as we go around
+    const len = 0.34 + rng() * 0.34;
+    const tilt = 0.55 + rng() * 0.55;                          // up-and-out
+    const ar = 0.045;                                          // anchor just off the trunk axis
+    const b = branch(0.03, 0.014, len, tilt, az, Math.cos(az) * ar, h, Math.sin(az) * ar, bh(i));
+    parts.push(b.g);
+    // a secondary twig forks off the primary's tip ~60% of the time (skeletal fullness)
+    if (rng() > 0.4) {
+      const tl = len * (0.5 + rng() * 0.25), t2 = tilt + (rng() - 0.5) * 0.9, a2 = az + (rng() - 0.5) * 1.1;
+      parts.push(branch(0.013, 0.006, tl, t2, a2, b.tip[0], b.tip[1], b.tip[2], bh(i + 2), 4).g);
+    }
   }
   return mergeParts(parts);
 }

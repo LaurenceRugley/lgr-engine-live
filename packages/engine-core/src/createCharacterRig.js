@@ -37,8 +37,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './character-anim.js';
-import { flinchEnvelope, headYawDelta, wrapPi } from './character-layers.js';
+import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE, strideTimeScale } from './character-anim.js';
+import { flinchEnvelope, headYawDelta, wrapPi, swingEnvelope, dipEnvelope } from './character-layers.js';
+import { resolveRig } from './character-rig-profiles.js';
 import { applyNightFill, collectMaterials } from './character-night-fill.js';
 import { damp } from './math.js';
 
@@ -62,16 +63,124 @@ export const LAYER_DEFAULTS = {
   hitReact: { amp: 1, dur: 0.4, lean: 0.5, arm: 0.7 }, // impulse gain · seconds · spine lean rad · arm fling rad
   recoil:   { amp: 1, dur: 0.16, arm: 0.5 },          // B4 fire kick: a sharp gun-arm snap-back + slight torso
   swing:    { amp: 1, dur: 0.42, arm: 1.7 },          // B4 melee: the gun-arm swings a forward arc then back
+  lunge:    { amp: 1, dur: 0.34, lean: 0.55, head: 0.35 }, // A5 zombie attack: a forward upper-body LUNGE + head thrust
+  reload:   { amp: 1, dur: 0.85, arm: 1.15, off: 0.9, lean: 0.12 }, // A8-3 reload dip: gun-arm drops off aim, off-hand racks, torso settles
 };
 
-export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
+// ── A7-2 FOOT IK — a PLANT-AND-HOLD foot lock. The zombie shamble's real defect (A6-2 MEASURED: stride-rate
+// scaling does NOT beat the heuristic for this clip) is foot SLIDE — the "planted" foot skates as the body
+// translates. The fix the slip probe pointed at is to LOCK the support foot's world position during its
+// contact phase and HOLD it while the hips move over, so its world speed → ~0 (the probe's plantRatio metric).
+//
+// WHY A POSITION LOCK, NOT A ROTATION 2-BONE SOLVER (the honest engineering reason): the shipped zombie is the
+// Quaternius CC0 rig, and its skeleton is FLAT — the foot bone (Foot.L) is parented to the armature Root, NOT
+// to the lower-leg (whose chain dead-ends at a tip). Measured directly (Foot.L.parent === 'Root'). So rotating
+// the hip/knee cannot move the foot bone the metric (and the mesh's foot verts) track — a classic leg IK is a
+// no-op on this rig. The topology-agnostic hold that DOES work is to override the foot bone's own transform so
+// its world position stays pinned. A knee-follow bend to hide any shin stretch is a separate future polish;
+// this ships the plant the metric demands. Presentation-only (bone transform after the mixer; the sim owns the
+// body position) → determinism-safe. Module scratch (runs synchronously at the tail of one _applyLayers).
+const _ikTgt = new THREE.Vector3(), _ikLocal = new THREE.Vector3(), _ikMat = new THREE.Matrix4();
+// A8-2 two-bone knee-follow scratch (module-level, synchronous, alloc-free — one leg solved at a time).
+const _kR = new THREE.Vector3(), _kM = new THREE.Vector3(), _kE = new THREE.Vector3();
+const _kThigh = new THREE.Vector3(), _kShin = new THREE.Vector3(), _kAxis = new THREE.Vector3();
+const _kDir = new THREE.Vector3(), _kThighDir = new THREE.Vector3(), _kShinDir = new THREE.Vector3(), _kNewM = new THREE.Vector3();
+const _kAlt = new THREE.Vector3();
+const _kQ = new THREE.Quaternion(), _kQw = new THREE.Quaternion(), _kQpar = new THREE.Quaternion(), _kUp = new THREE.Vector3(0, 1, 0);
+const _clampN = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+// Rotate a bone by a WORLD-space delta quaternion qDelta: newWorld = qDelta·oldWorld, written back to LOCAL
+// as parentWorld⁻¹·newWorld. Refreshes the bone's world first (its parents moved this frame). Alloc-free.
+function _applyWorldDelta(bone, qDelta, qWorldScratch, qParentScratch) {
+  bone.updateWorldMatrix(true, false);
+  bone.getWorldQuaternion(qWorldScratch);          // old world orientation
+  qWorldScratch.premultiply(qDelta);               // qDelta · old
+  if (bone.parent) { bone.parent.getWorldQuaternion(qParentScratch); bone.quaternion.copy(qParentScratch.invert().multiply(qWorldScratch)); }
+  else bone.quaternion.copy(qWorldScratch);
+  bone.updateWorldMatrix(true, false);             // refresh so the child bone solves against the new pose
+}
+
+// A8-2 TWO-BONE KNEE-FOLLOW — rotate the thigh (upleg) + knee so the ANKLE reaches world (tx,ty,tz) while
+// PRESERVING both bone lengths (the analytic law-of-cosines IK). This is the correct plant for an articulated
+// leg: the shin never stretches (unlike shoving the foot bone's local offset). Two steps: (1) aim the thigh so
+// the knee lands where a triangle of sides (thigh, shin) reaching the target puts it, keeping the knee on its
+// CLIP-pose bend side (the pole); (2) point the shin at the target. All world-space, converted to local via
+// _applyWorldDelta. Foot bone keeps its natural local pose, so it follows the shin. Alloc-free (module scratch).
+function _solveTwoBone(lg, tx, ty, tz) {
+  const R = lg.upleg, M = lg.knee, E = lg.foot;
+  R.updateWorldMatrix(true, false); R.getWorldPosition(_kR);
+  M.updateWorldMatrix(true, false); M.getWorldPosition(_kM);
+  E.updateWorldMatrix(true, false); E.getWorldPosition(_kE);
+  _kThigh.subVectors(_kM, _kR); const a = _kThigh.length();
+  _kShin.subVectors(_kE, _kM); const b = _kShin.length();
+  if (a < 1e-5 || b < 1e-5) return;
+  _kDir.set(tx - _kR.x, ty - _kR.y, tz - _kR.z);
+  let d = _kDir.length(); if (d < 1e-5) return;
+  d = _clampN(d, Math.abs(a - b) + 1e-4, a + b - 1e-4);   // never over-extend or fold through
+  _kDir.normalize();                                       // unit R→T
+  // bend axis = normal of the CLIP-pose leg plane (keeps the knee bending its natural way).
+  _kAxis.crossVectors(_kThigh, _kShin);
+  if (_kAxis.lengthSq() < 1e-8) { _kAxis.crossVectors(_kDir, _kUp); if (_kAxis.lengthSq() < 1e-8) _kAxis.set(1, 0, 0); }
+  _kAxis.normalize();
+  const thighAngle = Math.acos(_clampN((a * a + d * d - b * b) / (2 * a * d), -1, 1));
+  // thigh dir = R→T rotated by ±thighAngle around the bend axis — pick the sign whose knee lands nearer the
+  // clip knee (so the pole/bend direction matches the animation, no knee-pop-through).
+  _kThighDir.copy(_kDir).applyQuaternion(_kQ.setFromAxisAngle(_kAxis, thighAngle));
+  _kNewM.copy(_kThighDir).multiplyScalar(a).add(_kR);
+  _kAlt.copy(_kDir).applyQuaternion(_kQ.setFromAxisAngle(_kAxis, -thighAngle)).multiplyScalar(a).add(_kR);
+  if (_kAlt.distanceToSquared(_kM) < _kNewM.distanceToSquared(_kM)) { _kThighDir.copy(_kDir).applyQuaternion(_kQ.setFromAxisAngle(_kAxis, -thighAngle)); _kNewM.copy(_kAlt); }
+  // (1) rotate the thigh so its bone vector maps to the desired thigh dir.
+  _kThigh.normalize();
+  _kQ.setFromUnitVectors(_kThigh, _kThighDir);
+  _applyWorldDelta(R, _kQ, _kQw, _kQpar);
+  // (2) re-read the (now-moved) knee + foot, then point the shin at the target.
+  M.updateWorldMatrix(true, false); M.getWorldPosition(_kM);
+  E.updateWorldMatrix(true, false); E.getWorldPosition(_kE);
+  _kShin.subVectors(_kE, _kM); if (_kShin.lengthSq() < 1e-8) return;
+  _kShinDir.set(tx - _kM.x, ty - _kM.y, tz - _kM.z); if (_kShinDir.lengthSq() < 1e-8) return;
+  _kShinDir.normalize(); _kShin.normalize();
+  _kQ.setFromUnitVectors(_kShin, _kShinDir);
+  _applyWorldDelta(M, _kQ, _kQw, _kQpar);
+}
+
+export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraClips = [],
+  walkStride = 0, runStride = 0, strideMin = 0.4, strideMax = 2.4, locoEase = 10 } = {}) {
   const STATES = states || ZOMBIE_STATES;
   const LOOP_ONCE = loopOnce || ZOMBIE_LOOP_ONCE;
   const defaultFade = fade != null ? fade : 0.22;
+  // A8-1 LOCOMOTION BLEND EASE — the rate (1/s) at which the blend scalar the weights read EASES toward the
+  // speed the consumer sets. THE FLUIDITY FIX: setLocomotion(speed) can jump (the survivor stops dead, a
+  // pooled zombie recycles) — feeding that raw into the idle/walk/run weight split POPS the blend on every
+  // start/stop/direction change. Easing the SHOWN scalar makes every state-pair transition melt instead
+  // (idle↔walk↔run all ride the one continuous scalar, so the ease covers every pair for free). ~10/s ≈ a
+  // 0.1 s time-constant: still refaces a sprinting stop in a few frames, but never a single-frame snap.
+  // Presentation-only (weights + playback rate; never the sim) and byte-safe for any consumer that never
+  // calls setLocomotion (the city). C++ anchor: a critically-ish-damped low-pass on the gait parameter.
+  const _locoEase = locoEase;
+  // A6-2 STRIDE RATE — the reference world speed (m/s) at which each clip looks PLANTED at 1× (calibrated by
+  // the slip probe). 0 = OFF → the rig keeps the old speed01 heuristic (byte-safe for any consumer that
+  // doesn't opt in). When set AND the consumer passes a real world speed to setLocomotion, the walk/run
+  // actions play at strideTimeScale(worldSpeed / refStride) so the feet grip instead of skating.
+  const _walkStride = walkStride, _runStride = runStride || walkStride, _strideMin = strideMin, _strideMax = strideMax;
   let source = gltf || null;
   const recs = [];   // { mixer, rate, acc } per live character
+  let _warnedRig = false;   // A9: warn once (not per-spawn) if the detected profile names a bone this rig lacks
 
-  const ready = source ? Promise.resolve(source) : new GLTFLoader().loadAsync(url).then((g) => (source = g));
+  // A17 CUSTOM-CLIP SEAM (the asset-pipeline payoff). `extraClips` is a list of ADDITIONAL glTF sources
+  // whose animation clips get merged into this rig's clip pool, so a Blender-authored clip (a clip we made
+  // ourselves — no longer stuck with the handful a CC0 rig shipped, the A8 wall) plays through the SAME
+  // setState/findClip path as any built-in state. Each entry is a URL string (loaded here) OR a pre-loaded
+  // gltf-like ({ animations:[…] }, for tests). three binds a clip's tracks to the live skeleton BY NAME, so
+  // a clip authored against this rig's real bone names just drops on (see docs/asset-pipeline.md + the
+  // build_reach.py authoring convention). DEFAULT [] → the merge loop is a no-op → byte-identical to before.
+  const _loader = (extraClips.length || !source) ? new GLTFLoader() : null;
+  const _baseReady = source ? Promise.resolve(source) : _loader.loadAsync(url).then((g) => (source = g));
+  const ready = _baseReady.then(async () => {
+    for (const clip of extraClips) {
+      const g = typeof clip === 'string' ? await _loader.loadAsync(clip) : clip;
+      if (g && g.animations) for (const a of g.animations) source.animations.push(a);   // name-keyed → findClip picks it up
+    }
+    return source;
+  });
 
   // Clip lookup that tolerates the two naming variants Blender/Quaternius export ('Idle' AND
   // 'CharacterArmature|Idle') — resolve by exact name, else by the '<armature>|<name>' suffix.
@@ -105,33 +214,77 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
     // make the corresponding layer a no-op — a non-Quaternius rig degrades gracefully) ----
     const bones = {};
     object.traverse((n) => { if (n.isBone && !bones[n.name]) bones[n.name] = n; });
-    const boneHead = bones.Head || null, boneNeck = bones.Neck || null;
-    const boneSpine = bones.Spine2 || bones.Spine1 || bones.Spine || null;
-    const boneArmL = bones.LeftArm || null, boneArmR = bones.RightArm || null;
+    // A9 RIG ADAPTER — resolve the procedural-layer bones through the canonical bone-map (character-rig-
+    // profiles.js) instead of inline `||` fallback chains. It detects the skeleton's exporter PROFILE (the
+    // survivor is mixamo: Spine2/LeftArm/LeftFoot; the Quaternius zombie is Torso/UpperArmL/FootL — the two
+    // families whose name mismatch made the A5→A8 lunge + hit-react SILENT NO-OPS: boneSpine resolved null
+    // → the whole block skipped) and maps both onto ONE canonical role set. The node red-test
+    // (character-rig-profiles.test.mjs) fails if any layer a consumer drives targets a role its rig can't
+    // provide, so that silent-no-op class can't be reintroduced. A rig matching NEITHER profile still degrades
+    // to null bones (no-op) — but LOUDLY: a detected profile that names an absent bone warns once (Rule 12).
+    // C++ anchor: an alias table (the profile) papering over two exporters' skeleton conventions.
+    const _rig = resolveRig(bones);
+    if (_rig.missing.length && !_warnedRig) { _warnedRig = true; console.warn(`[rig] profile '${_rig.profile && _rig.profile.id}' names bone(s) this skeleton lacks: ${_rig.missing.join(', ')} — those layers will no-op`); }
+    const B = _rig.bones;   // canonical role → Bone|null (head/neck/spine/armL/armR/foreArmR/footL/footR/hips)
+    const boneHead = B.head, boneNeck = B.neck;
+    const boneSpine = B.spine;
+    const boneArmL = B.armL, boneArmR = B.armR;
     let lookTarget = null;             // {x,y,z} or null (null = no head-look → layer idle, zero cost)
     let headYaw = 0;                   // the smoothed applied head-turn (rad), eased toward the desired
     let flinchT = -1, flinchSign = 0;  // hit-react timer (-1 = inactive) + which side the hit came from
-    let recoilT = -1, swingT = -1;     // B4 fire-recoil + melee-swing impulse timers (-1 = inactive)
+    let recoilT = -1, swingT = -1, lungeT = -1, reloadT = -1;  // B4 recoil + melee-swing + A5 zombie-lunge + A8-3 reload-dip impulse timers (-1 = inactive)
     // A1 LOCOMOTION BLEND — idle/walk/run play SIMULTANEOUSLY, weights from a speed param (not state snaps);
     // one-shot actions (attack/hit/death) fade OVER the blend and restore it when the clip clamps. Legs keep
     // walking under the aim layer. All the per-frame weight work lives in _applyLayers (one place, gets dt).
     const locoActions = {};            // 'idle'/'walk'/'run' → AnimationAction (built lazily on first setLocomotion)
-    let _locoOn = false, _locoSpeed = 0;                       // speed01 ∈ [0,1] (0 idle · ~0.5 walk · 1 run)
+    let _locoOn = false, _locoSpeed = 0, _locoShown = 0, _worldSpeed = null;   // speed01 ∈ [0,1]; _locoShown = the A8-1 EASED scalar the weights read; _worldSpeed = real m/s (A6-2 stride-rate) or null
     let _actAction = null, _actClip = null, _actActive = false, _actW = 0;   // the one-shot overlay
     let _headingTarget = null;         // A1: smoothed body yaw (rad) or null (caller sets the yaw directly)
-    const boneArmForeR = bones.RightForeArm || null;          // A1 aim-IK: the forearm (gun end of the chain)
+    const boneArmForeR = B.foreArmR;          // A1 aim-IK: the forearm (gun end of the chain; canonical foreArmR)
     let aimTarget = null, aimW = 0, _aimActive = false;       // A1 aim-IK: {x,y,z} to track + a blend weight
     let _idleRelax = false, _relaxW = 0, _relaxClock = 0;     // A2 idle-relax: opt-in softening of a braced idle
-    const boneArmL2 = bones.LeftArm || null;                  // A2 idle-relax: the off-hand arm to lower
+    const boneArmL2 = B.armL;                  // A2 idle-relax: the off-hand arm to lower (canonical left arm)
+    // ── A7-2 FOOT IK state (opt-in via setFootIK; resolved once). plant-and-hold: each frame the LOWER foot
+    // (the support) locks its world pos when near the ground; while locked, the foot bone's transform is
+    // overridden to HOLD that world pos while the hips move over → the planted foot stops skating. Feet resolve
+    // by the Quaternius (Foot.L → sanitised FootL) AND mixamo (LeftFoot) name families. `_footIK` null = off.
+    let _footIK = null, _footIKActive = true, _ikFloorY = null;
+    const _ikHips = B.hips;   // body-travel reference for the over-reach release (canonical hips)
+    // A8-2 KNEE-FOLLOW — resolve each leg's CHAIN (foot ← knee ← upper-leg). If the foot has a real knee +
+    // thigh above it (an ARTICULATED biped like the survivor's LeftFoot→LeftLeg→LeftUpLeg), the plant re-solves
+    // the two upper bones to REACH the locked target with bone lengths PRESERVED (a two-bone IK) instead of
+    // shoving the foot bone's local offset — which on a proper chain stretches the shin like a rubber band
+    // (MEASURED +346% before this). On a FLAT rig (the Quaternius zombie, Foot→Root) there is no shin to
+    // stretch, so it keeps the topology-agnostic position override (articulated=false → the A7-2 path).
+    const _legChain = (foot) => {
+      const knee = foot && foot.parent && foot.parent.isBone ? foot.parent : null;
+      const upleg = knee && knee.parent && knee.parent.isBone ? knee.parent : null;
+      const articulated = !!(knee && upleg && knee !== _ikHips && upleg !== _ikHips && knee !== foot && upleg !== knee);
+      return { foot, knee, upleg, articulated, lockOn: false, lx: 0, ly: 0, lz: 0, w: 0, fx: 0, fy: 0, fz: 0 };
+    };
+    const _ikLegL = _legChain(B.footL);   // canonical footL (Quaternius FootL / mixamo LeftFoot)
+    const _ikLegR = _legChain(B.footR);   // canonical footR
+    // both feet must resolve (+ have a parent to convert against) or the rig isn't one we can plant → no-op.
+    const _ikLegs = (_ikLegL.foot && _ikLegL.foot.parent && _ikLegR.foot && _ikLegR.foot.parent) ? [_ikLegL, _ikLegR] : null;
     const lp = {
       headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact },
-      recoil: { ...LAYER_DEFAULTS.recoil }, swing: { ...LAYER_DEFAULTS.swing },
+      recoil: { ...LAYER_DEFAULTS.recoil }, swing: { ...LAYER_DEFAULTS.swing }, lunge: { ...LAYER_DEFAULTS.lunge },
+      reload: { ...LAYER_DEFAULTS.reload },
     };
 
     const handle = {
       object,
       position: object.position, quaternion: object.quaternion, scale: object.scale,
       get state() { return sm.current; },
+      // A8-1: read-only snapshot of the locomotion blend — the eased SHOWN scalar + the three actions'
+      // effective weights. Presentation-only; used by the transition probe to prove the blend has no
+      // single-frame pop (a snap would spike a weight's per-frame delta toward 1). Cheap, allocates one object.
+      get locoBlend() {
+        return { shown: +_locoShown.toFixed(4), speed: +_locoSpeed.toFixed(4),
+          idle: locoActions.idle ? +locoActions.idle.getEffectiveWeight().toFixed(4) : 0,
+          walk: locoActions.walk ? +locoActions.walk.getEffectiveWeight().toFixed(4) : 0,
+          run: locoActions.run ? +locoActions.run.getEffectiveWeight().toFixed(4) : 0 };
+      },
       // ---- B3 procedural-layer API (all opt-in; unused → the layer pass is a no-op) ----
       setLookTarget(x, y, z) { if (!lookTarget) lookTarget = { x: 0, y: 0, z: 0 }; lookTarget.x = x; lookTarget.y = y; lookTarget.z = z; },
       clearLookTarget() { lookTarget = null; },
@@ -141,13 +294,18 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
         const cy = _eu.y, side = Math.cos(cy) * dx - Math.sin(cy) * dz;  // >0 = hit came from the right
         flinchSign = side >= 0 ? 1 : -1;
       },
-      setLayerParams(p = {}) { if (p.headLook) Object.assign(lp.headLook, p.headLook); if (p.hitReact) Object.assign(lp.hitReact, p.hitReact); if (p.recoil) Object.assign(lp.recoil, p.recoil); if (p.swing) Object.assign(lp.swing, p.swing); },
+      setLayerParams(p = {}) { if (p.headLook) Object.assign(lp.headLook, p.headLook); if (p.hitReact) Object.assign(lp.hitReact, p.hitReact); if (p.recoil) Object.assign(lp.recoil, p.recoil); if (p.swing) Object.assign(lp.swing, p.swing); if (p.lunge) Object.assign(lp.lunge, p.lunge); if (p.reload) Object.assign(lp.reload, p.reload); },
       recoil() { recoilT = 0; },        // B4: fire kick (gun-arm snap-back)
       meleeSwing() { swingT = 0; },     // B4: melee arc (gun-arm forward swing)
+      lunge() { lungeT = 0; },          // A5: zombie attack — a forward upper-body lunge + head thrust
+      reloadBeat() { reloadT = 0; },    // A8-3: reload dip — gun-arm drops off aim, off-hand racks, then ready
+      get reloading() { return reloadT >= 0; },   // A8-3: so the consumer can gate the aim layer during the dip
+      reloadDur() { return lp.reload.dur; },
       // A1 LOCOMOTION: drive idle/walk/run by a continuous speed (0..1). Builds the 3 actions once (all
       // playing at weight 0; the per-frame blend is in _applyLayers). Supersedes setState for locomotion.
-      setLocomotion(speed01) {
+      setLocomotion(speed01, worldSpeed = null) {
         _locoSpeed = speed01 < 0 ? 0 : speed01 > 1 ? 1 : speed01;
+        _worldSpeed = worldSpeed;   // A6-2: real m/s for stride-rate (null → keep the speed01 heuristic)
         if (!_locoOn) {
           for (const key of ['idle', 'walk', 'run']) {
             const clip = findClip(STATES[key]); if (!clip) continue;
@@ -161,11 +319,13 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
       },
       // A1: play a one-shot (attack/hit/death) OVER the locomotion blend; it fades in, plays once, and the
       // blend restores when it clamps. Use this instead of setState once setLocomotion is driving the legs.
-      playAction(name) {
+      // A8-4: `timeScale` plays the clip faster/slower (per-type attack/death variety — a runner strikes fast,
+      // a tank ponderously; the clamp detector reads action.time so it still fires at any rate).
+      playAction(name, timeScale = 1) {
         const clip = findClip(STATES[name]); if (!clip) return;
         const a = mixer.clipAction(clip);
         a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
-        a.reset().setEffectiveTimeScale(1).setEffectiveWeight(_actW).play();
+        a.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(_actW).play();
         _actAction = a; _actClip = clip; _actActive = true;
       },
       // A1: a SMOOTHED body heading (slerped in _applyLayers) — the caller passes the target yaw instead of
@@ -177,11 +337,26 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
       // A2: opt in to the idle-relax layer (softens a braced 'lunge' idle → a settled stand + slow sway when
       // truly idle). The survivor enables it; zombies stay braced/menacing (default off).
       setIdleRelax(on) { _idleRelax = !!on; },
+      // A7-2 FOOT IK: pass a config to ENABLE plant-and-hold (or false to disable → feet follow the clip). cfg:
+      //   plantBand — metres above the tracked contact floor a foot must be within to count as planted (0.14)
+      //   lockRate/unlockRate — damp rates easing the hold weight in/out (18 / 12)
+      //   maxStride — metres the hips may travel past a locked foot before it releases to take a step (0.55)
+      // Opt-in: a rig whose consumer never calls this keeps the pure clip pose (byte-safe for city/etc).
+      //   kneeFollow — on an ARTICULATED chain, re-solve the two upper bones (two-bone IK) so the shin never
+      //     stretches (A8-2). Default true; false → the raw foot-position override even on a proper chain (A/B).
+      setFootIK(cfg) {
+        if (!cfg) { _footIK = null; if (_ikLegs) for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } return; }
+        if (!_ikLegs) return;   // not a biped we can plant — stays a no-op
+        _footIK = { plantBand: cfg.plantBand != null ? cfg.plantBand : 0.14, lockRate: cfg.lockRate != null ? cfg.lockRate : 18, unlockRate: cfg.unlockRate != null ? cfg.unlockRate : 12, maxStride: cfg.maxStride != null ? cfg.maxStride : 0.55, kneeFollow: cfg.kneeFollow !== false };
+      },
+      // A7-2: the horde's distance LOD toggles this — foot IK only runs on near characters (skip the solver
+      // + its updateWorldMatrix cost beyond the IK distance; far feet aren't legible anyway).
+      setFootIKActive(on) { _footIKActive = !!on; },
       // A1: clear the anim state so a RECYCLED pool slot re-arms cleanly. The horde's setActive(i,false) calls
       // mixer.stopAllAction() (stops the loco actions) but the handle is reused — without this reset _locoOn
       // stays true and the next setLocomotion just sets weights on STOPPED actions → the respawn freezes in
       // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
-      resetAnim() { _locoOn = false; _actActive = false; _actAction = null; _actClip = null; _actW = 0; aimW = 0; _aimActive = false; _headingTarget = null; },
+      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; aimW = 0; _aimActive = false; _headingTarget = null; if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
@@ -207,12 +382,26 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
           if (_actActive && _actClip && _actAction.time >= _actClip.duration - 0.02) _actActive = false;  // clip clamped → release
           _actW = damp(_actW, _actActive ? 1 : 0, _actActive ? 20 : 9, dt);
           if (_actAction) { _actAction.setEffectiveWeight(_actW); if (_actW < 0.02 && !_actActive) { _actAction.stop(); _actAction = null; _actClip = null; } }
-          const s = _locoSpeed, base = 1 - _actW;                 // the action steals weight from the legs' blend
+          // A8-1: ease the SHOWN gait scalar toward the (possibly-jumped) requested speed, then split the
+          // idle/walk/run weights off the EASED value — so a dead stop or a pooled recycle melts through the
+          // states instead of popping. One low-pass covers every state-pair transition (the weight fn is
+          // continuous in s), so idle↔walk, walk↔run and the reverse all ease with no per-pair bookkeeping.
+          _locoShown = damp(_locoShown, _locoSpeed, _locoEase, dt);
+          const s = _locoShown, base = 1 - _actW;                 // the action steals weight from the legs' blend
           let wi = 0, ww = 0, wr = 0;
           if (s < 0.5) { wi = 1 - s * 2; ww = s * 2; } else { ww = 2 - s * 2; wr = s * 2 - 1; }
+          // A6-2 STRIDE RATE — scale the leg playback so the planted foot GRIPS instead of skating. When a
+          // refStride is set AND the consumer passed a real world speed, timeScale = strideTimeScale(v/ref)
+          // (per clip: the run clip covers more ground, so its own refStride). Otherwise fall back to the old
+          // speed01 heuristic (byte-safe). The character's world SCALE stretches its stride, so refStride is
+          // scaled by object.scale — a bigger (tank) rig grips at the same v with a lower rate.
+          const strideOn = _walkStride > 0 && _worldSpeed != null;
+          const sc = object.scale.x || 1;
+          const walkTS = strideOn ? strideTimeScale(_worldSpeed, _walkStride * sc, _strideMin, _strideMax) : (0.85 + 0.5 * s);
+          const runTS = strideOn ? strideTimeScale(_worldSpeed, _runStride * sc, _strideMin, _strideMax) : 1;
           if (locoActions.idle) locoActions.idle.setEffectiveWeight(wi * base);
-          if (locoActions.walk) { locoActions.walk.setEffectiveWeight(ww * base); locoActions.walk.setEffectiveTimeScale(0.85 + 0.5 * s); }  // match stride to speed → less foot-slide
-          if (locoActions.run) locoActions.run.setEffectiveWeight(wr * base);
+          if (locoActions.walk) { locoActions.walk.setEffectiveWeight(ww * base); locoActions.walk.setEffectiveTimeScale(walkTS); }
+          if (locoActions.run) { locoActions.run.setEffectiveWeight(wr * base); locoActions.run.setEffectiveTimeScale(runTS); }
         }
         // ── A2 IDLE-RELAX — the survivor.glb idle is a braced 'lunge' (owner note); when TRULY idle (no aim,
         // no action, not moving) ease the arms down off the chest and add a slow weight-shift sway so it reads
@@ -290,11 +479,99 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade } = {}) {
             if (boneSpine) { _q.setFromAxisAngle(_AX_X, -e * lp.recoil.arm * 0.3); boneSpine.quaternion.multiply(_q); }
           }
         }
-        // B4 MELEE SWING — the gun-arm swings a forward arc (sin peak mid-swing) then returns.
+        // A5 MELEE SWING — a real strike, not one pose: wind-up (cock back) → impact (whip forward) →
+        // recovery (settle), via swingEnvelope. The torso TWISTS + leans into the impact for weight, and the
+        // off arm counter-swings for balance — so the whole body reads the blow, not just the forearm.
         if (swingT >= 0 && boneArmR) {
           swingT += dt; const u = swingT / lp.swing.dur;
           if (u >= 1) { swingT = -1; }
-          else { const e = Math.sin(Math.PI * u) * lp.swing.amp; _q.setFromAxisAngle(_AX_X, e * lp.swing.arm); boneArmR.quaternion.multiply(_q); }
+          else {
+            const e = swingEnvelope(u) * lp.swing.amp;
+            _q.setFromAxisAngle(_AX_X, e * lp.swing.arm); boneArmR.quaternion.multiply(_q);   // gun-arm whips down/forward
+            if (boneSpine) {
+              _q.setFromAxisAngle(_AX_Y, e * 0.3); boneSpine.quaternion.multiply(_q);          // twist into the strike
+              _q.setFromAxisAngle(_AX_X, Math.max(0, e) * 0.22); boneSpine.quaternion.multiply(_q);  // lean forward on the forward half
+            }
+            if (boneArmL) { _q.setFromAxisAngle(_AX_X, -e * lp.swing.arm * 0.28); boneArmL.quaternion.multiply(_q); } // off-arm counter
+          }
+        }
+        // A5 ZOMBIE LUNGE — a forward upper-body thrust on attack (cheap, same seam): the spine pitches
+        // FORWARD and the head thrusts toward you, then settles (flinchEnvelope). Reads as the zombie lashing
+        // in over its Attack clip — no root translation (the sim owns position), so it never fights the crowd sim.
+        if (lungeT >= 0 && boneSpine) {
+          lungeT += dt; const u = lungeT / lp.lunge.dur;
+          if (u >= 1) { lungeT = -1; }
+          else {
+            const e = flinchEnvelope(u) * lp.lunge.amp;
+            _q.setFromAxisAngle(_AX_X, e * lp.lunge.lean); boneSpine.quaternion.multiply(_q);   // pitch forward (+X)
+            if (boneHead) { _q.setFromAxisAngle(_AX_X, e * lp.lunge.head); boneHead.quaternion.multiply(_q); } // head thrusts in
+          }
+        }
+        // A8-3 RELOAD DIP — a procedural reload beat (no clip exists): the gun-arm drops off aim toward the
+        // belt, the off-hand comes IN to work the magazine, and the torso settles as if glancing down at the
+        // weapon — held at the bottom, then raised back to ready (dipEnvelope). The consumer drops the aim
+        // layer while reloadBeat is active (handle.reloading) so the arm actually comes off target. Composes
+        // on the same seam as recoil/swing; offsets never accumulate (the mixer resets to the clip each frame).
+        if (reloadT >= 0 && boneArmR) {
+          reloadT += dt; const u = reloadT / lp.reload.dur;
+          if (u >= 1) { reloadT = -1; }
+          else {
+            const e = dipEnvelope(u) * lp.reload.amp;
+            _q.setFromAxisAngle(_AX_X, e * lp.reload.arm); boneArmR.quaternion.multiply(_q);        // gun-arm lowers off aim
+            if (boneArmL) { _q.setFromAxisAngle(_AX_X, e * lp.reload.off); boneArmL.quaternion.multiply(_q); }  // off-hand racks in
+            if (boneSpine) { _q.setFromAxisAngle(_AX_X, e * lp.reload.lean); boneSpine.quaternion.multiply(_q); }  // glance down at the weapon
+          }
+        }
+        // ── A7-2 FOOT IK (plant-and-hold) — runs LAST, after every clip + layer has posed the legs. The mixer
+        // reset the foot bones to the clip pose this frame, so the hold reads a fresh pose and writes an
+        // absolute local position (no accumulation). Presentation-only: it moves a bone, never the sim position.
+        if (_footIK && _footIKActive && _ikLegs) {
+          // The heading slew + setTransform changed object.* this frame but matrixWorld is stale mid-layer;
+          // refresh each foot's world (updateParents=true walks the object→armature→root→foot chain fresh).
+          let minFootY = 1e9;
+          for (const lg of _ikLegs) {
+            lg.foot.updateWorldMatrix(true, false);
+            const fe = lg.foot.matrixWorld.elements;
+            lg.fx = fe[12]; lg.fy = fe[13]; lg.fz = fe[14];   // clip-pose foot world pos (before any hold)
+            if (lg.fy < minFootY) minFootY = lg.fy;
+          }
+          // leaky-min contact floor: on the flat arena it converges to the stance height; it can only rise
+          // slowly (0.5 m/s) so a lifted-both-feet frame never sticks the floor high. No terrain raycast (A3: flat).
+          if (_ikFloorY == null) _ikFloorY = minFootY;
+          else _ikFloorY = Math.min(minFootY, _ikFloorY + 0.5 * dt);
+          // SUPPORT is STICKY: once a foot plants it STAYS the support (held still) until it LIFTS above the band
+          // or the leg OVER-REACHES (the hips walked a full stride past the lock → take a step). Only ONE foot is
+          // ever locked (single support); a new plant is allowed only for the lower foot while none is locked.
+          // Stickiness is the whole game — in the shamble both feet hover near the ground, so picking the
+          // lower foot per-frame flickers L/R and the lock never sustains (the foot drags instead of holding).
+          let hx = 0, hz = 0;
+          if (_ikHips) { _ikHips.updateWorldMatrix(true, false); const he = _ikHips.matrixWorld.elements; hx = he[12]; hz = he[14]; }
+          const anyLocked = _ikLegs[0].lockOn || _ikLegs[1].lockOn;
+          const lower = _ikLegs[0].fy <= _ikLegs[1].fy ? _ikLegs[0] : _ikLegs[1];
+          for (const lg of _ikLegs) {
+            const low = (lg.fy - _ikFloorY) < _footIK.plantBand;
+            const overReach = lg.lockOn && Math.hypot(lg.lx - hx, lg.lz - hz) > _footIK.maxStride;   // leg maxed → step
+            const wantLock = lg.lockOn ? (low && !overReach) : (low && lg === lower && !anyLocked);
+            if (wantLock && !lg.lockOn) { lg.lockOn = true; lg.lx = lg.fx; lg.ly = lg.fy; lg.lz = lg.fz; }  // pin the world pos
+            else if (!wantLock && lg.lockOn) { lg.lockOn = false; }
+            lg.w = damp(lg.w, lg.lockOn ? 1 : 0, lg.lockOn ? _footIK.lockRate : _footIK.unlockRate, dt);
+            if (lg.w > 0.01) {
+              // HOLD: blend the foot's TARGET world pos from the clip pose toward the pinned lock by the hold
+              // weight (w=0 → target IS the clip pose → no move; auto-eased, no separate solver weight).
+              _ikTgt.set(lg.fx + (lg.lx - lg.fx) * lg.w, lg.fy + (lg.ly - lg.fy) * lg.w, lg.fz + (lg.lz - lg.fz) * lg.w);
+              if (_footIK.kneeFollow && lg.articulated) {
+                // A8-2 ARTICULATED: re-solve the two-bone leg to REACH the target with the shin length kept
+                // (no rubber-band stretch). The foot bone keeps its natural local pose → follows the shin.
+                _solveTwoBone(lg, _ikTgt.x, _ikTgt.y, _ikTgt.z);
+              } else {
+                // FLAT rig (e.g. the Quaternius zombie, Foot→Root): no shin to stretch → the topology-agnostic
+                // override — set the foot bone's LOCAL pos so its world lands on the target (parent⁻¹·targetWorld).
+                _ikMat.copy(lg.foot.parent.matrixWorld).invert();
+                _ikLocal.copy(_ikTgt).applyMatrix4(_ikMat);
+                lg.foot.position.copy(_ikLocal);   // mixer re-poses this next frame → never accumulates
+              }
+            }
+          }
         }
       },
       setState(name, opts = {}) {

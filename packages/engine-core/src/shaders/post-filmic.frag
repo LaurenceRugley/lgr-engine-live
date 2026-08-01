@@ -63,6 +63,13 @@ uniform float     uTonemap;       // L83: 0 = ACES, 1 = AgX — only consulted o
 uniform sampler2D uRaysTex;       // L107: god-ray shafts (half-res). Added in HDR before tonemap.
 uniform float     uRays;          // L107: god-ray strength — 0 on stylized/pre-pass frames → the add is a no-op → byte-identical.
 uniform float     uBeautyExp;     // L108: beauty-only post-exposure trim (1 = none). INSIDE the uGrade gate → NEVER touches the pixel pre-pass's uExposure → byte-identical.
+uniform vec2      uSunScreenPos;   // A6-0b: the sun's projected screen UV (off-screen when the exception is off)
+uniform float     uSunRadius;      // A6-0b: sun-exception disc radius (aspect-corrected screen units; 0 = off)
+uniform float     uSunException;   // A6-0b: 0 = OFF (byte-identical) → the grade darkens/cools the sun like everything
+                                   // else. >0 (hoard2 opts in) → the SUN survives the cool grade as an exception: the
+                                   // bright+warm sun disc keeps its post-ACES HOT look while the rest of the frame stays
+                                   // cool-graded. City default 0 → this whole path is a no-op → pixel/toon/vector + city
+                                   // beauty byte-identical (DESIGN ruling: sun is the exception, the cool palette stays).
 
 /* Cheap screen-space hash (the classic sin-dot trick): one pseudo-random number
    per pixel per frame. Not statistically perfect — perfectly fine for grain. */
@@ -149,7 +156,19 @@ void main() {
   col *= uExposure;                              // L09 time-of-day exposure
   // L66/L83: filmic tonemap on the beauty tiers only (uAces gates it → pixel/toon pre-pass byte-identical). The
   // CURVE is ACES (default) or AgX (uTonemap=1) — both HDR→display [0,1], so the L67 grade below works under either.
+  // A6-0b SUN EXCEPTION (mask) — the sun and the bright sky CONVERGE in both colour and luma (ACES rolls both
+  // toward near-white; even pre-ACES the day sky is HDR-bright), so no per-pixel colour/brightness test can
+  // separate them. The reliable signal is the sun's SCREEN POSITION: a soft disc at uSunScreenPos, gated by
+  // pre-ACES HDR brightness so DARK geometry in front of the sun (a tree/ruin) is NOT protected → occlusion for
+  // free. The bright sky inside the disc stays warm too → a soft hot halo around the sun (desirable). Everything
+  // is × uSunException, so uSunException=0 → mask 0 → fully unused → byte-identical.
+  vec2  sunD      = (vUv - uSunScreenPos) * vec2(aspect, 1.0);
+  float sunDisc   = smoothstep(uSunRadius, uSunRadius * 0.35, length(sunD));   // 1 at the sun → 0 past the radius
+  float sunBright = smoothstep(0.9, 1.6, dot(col, vec3(0.2126, 0.7152, 0.0722)));   // pre-ACES HDR: sky/sun bright, lit ground dark → occludes
+  float sunMask   = sunDisc * sunBright * uSunException;
+
   if (uAces > 0.5) col = (uTonemap > 0.5) ? agx(col) : aces(col);
+  vec3 sunHot = col;   // A6-0b: the post-ACES HOT sun, blended back over the cool-graded frame at the end
 
   /* L67 COLOUR GRADE (display-referred, AFTER ACES, beauty-tier only) — pulls every surface into ONE
      art-directed mood: a saturation tweak, a hue-tinted gain, and a small shadow lift. Keyframed by the
@@ -213,6 +232,11 @@ void main() {
        top of the universal base vignette above. Beauty-tier ONLY (this block is uGrade-gated) → pixel/vector/
        toon keep their byte-identical base vignette. (r = the aspect-corrected radius computed up top.) */
     col *= 1.0 - smoothstep(0.62, 1.20, r) * 0.11;
+
+    // A6-0b SUN EXCEPTION (apply) — blend the post-ACES HOT sun back over the cool-graded frame where the sun mask
+    // is active, so the sun keeps its bright/warm ACES look while the cool palette holds everywhere else. sunMask
+    // already folds in uSunException, so this is EXACTLY a no-op when the consumer hasn't opted in → byte-identical.
+    col = mix(col, sunHot, sunMask);
   }
 
   /* L80 OUTPUT DITHER (beauty only) — smooth gradients (the Preetham sky, fog, soft lighting) quantize into

@@ -201,7 +201,10 @@ export function createSunRig({ t = 0.5, keyframes = KEYFRAMES } = {}) {   // boo
        arc flipped through the origin) by night. The colour/intensity keyframes
        already carry the moon's cool dim look at t≈0, so here we only pick the
        direction. (At the horizon crossing the two are nearly equal and the light is
-       dim, so the swap is invisible.) */
+       dim, so the swap is invisible — VERIFIED A6-0a: with the IBL env removed the
+       frame is byte-stable across sunArc.y=0, so this direction flip causes no pop.
+       The dusk "flash-to-dark" is the env-quantization snap in createCityWorld's
+       ensureEnv, NOT this swap — see setEnvSegments there.) */
     if (sunArc.y >= 0) sunDir.copy(sunArc);          // sun is up → light from the sun
     else               sunDir.copy(sunArc).negate(); // sun is down → moon, opposite side
   }

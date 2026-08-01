@@ -15,6 +15,11 @@ export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.j
 export { createCityWorld } from './src/createCityWorld.js';
 export { createCameraRig, CAM } from './src/camera-rig.js';
 export { createCity, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32 } from './src/citygen.js';
+// A9 text→world + A18 portable bundle — so a no-build consumer can build a world from a recipe/bundle.
+export { defaultRecipe, normalizeRecipe, mergeRecipes, RECIPE_BIOMES } from './src/world-recipe.js';
+export { createWorldFromRecipe } from './src/createWorldFromRecipe.js';
+export { recipeFromText, describeVocabulary } from './src/world-recipe-text.js';
+export { BUNDLE_FORMAT, BUNDLE_VERSION, buildManifest, validateManifest, isVersionCompatible, parseVersion } from './src/world-bundle.js';
 export { createSunRig, validateSunKeyframes } from './src/sun-rig.js';
 export { createCityLife, buildGraph } from './src/agents.js';
 export { createStreetLights } from './src/street-lights.js';
@@ -46,6 +51,69 @@ export { createGyroLook, mapGyroToLook } from './src/gyro-look.js';
 export { createTracer }                  from './src/tracer.js';
 export { createTracePlayer }             from './src/trace-player.js';
 export { createCellField, CELL_COLORS }  from './src/cell-field.js';
+
+// ── BARREL-COVERAGE FIX (2026-07-30) ─────────────────────────────────────────
+// These engine abilities were in the workspace `index.js` but reachable from NO built lib barrel, so any
+// no-build / cross-repo / examples consumer importing `lgr-engine.es.js` could not use them — the same class
+// of gap that hid createRecorder (A10) and createWorldFromRecipe (A18); see the audit doc. Completing the
+// full lib per its documented "identical to index.js except createCodePanel" contract costs ~50 KB (most is
+// already pulled transitively). tools/barrel-coverage.test.mjs fails RED if a future export slips this net.
+export { createContactShadows } from './src/contact-shadow.js';
+export { createCorpsePool } from './src/corpse-pool.js';
+export { createDiveController } from './src/createDiveController.js';
+export { applyGlint, createGlintMaterial } from './src/createGlintMaterial.js';
+export { createIndirectField } from './src/createIndirectField.js';
+export { planSpawn } from './src/createParticles.js';
+export { VIDEO_TYPES, createRecorder, pickVideoType, recorderExt } from './src/createRecorder.js';
+export { createSfxKit } from './src/createSfxKit.js';
+export { FORGE_MIN_TEXELS, createTextureForge, nyquistFeatureFloor, repeatFor } from './src/createTextureForge.js';
+export { createTorchLight, torchFlicker } from './src/createTorchLight.js';
+export { createWaterSurface } from './src/createWaterSurface.js';
+export { createWeaponKit } from './src/createWeaponKit.js';
+export { createDebugOverlay } from './src/debug-overlay.js';
+export { HOARD_SURFACES, WEAPON_SKINS, forgeHoardMaterials } from './src/forge-recipes.js';
+export { SIM_DEFAULTS } from './src/graph-sim.js';
+export { applyGroundMacro } from './src/ground-macro.js';
+export { DECREPIT_TOWERS, buildDecrepitProfile, buildIntactProfile } from './src/world-profiles.js';
+export { deriveHarvest, placeCoverBuildings, scatterProps, scatterRuins, citySolidsToObstacles } from './src/world-scatter.js';
+export { cityProfileFromUrban, URBAN_ERAS } from './src/urban-profile.js';
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── BARREL-COVERAGE FIX #2 (2026-07-31, A20 audit) ───────────────────────────
+// The owner independently verified the A20 astronomy lift and found this file had drifted from its
+// OWN documented "identical to index.js except createCodePanel" contract — not just the 5 astronomy
+// exports this arc added, but 30 MORE pre-existing gaps (the whole sky-lift FX family + a batch of
+// character/combat abilities). tools/barrel-coverage.test.mjs passed throughout because it only
+// asserted "reachable from lib OR core" (index-core-lib.js already had all of these) — a WEAKER
+// property than what this file's header promises. Guard-scope blindness, 4th instance (see
+// docs/second-consumer-audit-2026-07-29.md). Fixed by completing the lib, not by excusing the gap —
+// same remediation style as the 2026-07-30 fix block above. `planSpawn` (createParticles.js) already
+// exported above — omitted here to avoid a duplicate export.
+export { createAtmosphereGrade } from './src/createAtmosphereGrade.js';
+export { createGodRays, godRayVisibility } from './src/createGodRays.js';
+export { createMilkyWay } from './src/createMilkyWay.js';
+export { createVolumetricClouds, CLOUD_TIERS } from './src/createVolumetricClouds.js';
+export { createCelestial } from './src/createCelestial.js';
+export { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+export { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+export { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+export { limitingMagnitude, skyGlow, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
+export { planetPosition, PLANET_KEYS } from './src/planets.js';
+export { createTrueStars } from './src/createTrueStars.js';
+export { createConstellations } from './src/createConstellations.js';
+export { createSolarSystem } from './src/createSolarSystem.js';
+export { createMessier } from './src/createMessier.js';
+export { ASTRONOMY_CREDITS, getAttribution } from './src/astronomy-credits.js';
+export { createForest, placeForest } from './src/createForest.js';
+export { createFlowField } from './src/createFlowField.js';
+export { createBallistics } from './src/createBallistics.js';
+export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
+export { createParticles } from './src/createParticles.js';
+export { createDecals } from './src/createDecals.js';
+export { createCharacterRig } from './src/createCharacterRig.js';
+export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/character-anim.js';
+export { createCharacterHorde } from './src/createCharacterHorde.js';
+// ─────────────────────────────────────────────────────────────────────────────
 // createCodePanel OMITTED — its shiki dynamic import emits 200+ grammar chunks that lib consumers never load.
 export { damp, clamp, angleDelta } from './src/math.js';
 export { createScrollDirector } from './src/scroll-director.js';
@@ -97,6 +165,8 @@ export { createAmbientBed } from './src/ambient-bed.js';
 export { createPositionalField } from './src/positional-field.js';
 export { createRotor } from './src/rotor.js';
 export { default as fullscreenVert } from './src/shaders/fullscreen.vert';
+// A19 RISO LIFT — the Risograph print effect as a core ability (lifted from lgr-image-studio; engine-first).
+export { createRiso, RISO_INKS } from './src/riso.js';
 export { default as postDiveFrag } from './src/shaders/post-dive.frag';
 export { default as postPixelkitFrag } from './src/shaders/post-pixelkit.frag';
 

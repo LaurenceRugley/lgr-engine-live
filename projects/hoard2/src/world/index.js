@@ -29,18 +29,26 @@
    No per-frame allocation in update() (scratch hoisted; the daynight payload is reused).
    ============================================================ */
 import {
-  createCity, createForest, createTorchLight,
-  generateTerrain, buildTerrainMesh,
-  createTextureForge, forgeHoardMaterials, WEAPON_SKINS,
+  createTorchLight, createTextureForge, forgeHoardMaterials, WEAPON_SKINS,
+  createWorldFromRecipe, recipeFromText, mergeRecipes, createContactShadows,
+  createIndirectField, applyGlint,
+  // ARC A21 — THE REAL SKY: a generated city under the actual sky for its actual coordinates (the A20
+  // astronomy lift, wired here for the FIRST time to a playable map). No-op unless a map's recipe sets
+  // `city.location` (metropolisBase does; every other map's location stays null).
+  createCelestial, createTrueStars, createSolarSystem, createConstellations,
 } from '@lgr/engine-core';
-import { buildDecrepitProfile, buildIntactProfile } from './profile.js';
-import { phaseAt, resolveNight, phaseForNight, nightFactorAt } from './daynight.js';
-import { scatterRuins, deriveHarvest } from './scatter.js';
+import { phaseAt, resolveNight, phaseForNight, nightFactorAt, weatherKindAt, rainAmountAt } from './daynight.js';
+import { forestRecipe, swampBase, SWAMP_DESC, lakeshoreBase, LAKESHORE_DESC, coastalBase, COASTAL_DESC, metropolisBase, METROPOLIS_DESC } from './recipes.js';
 
 export function createWorld(ctx) {
-  const { THREE, engine, scene, sunRig, config, events, registry, rng, CAM, renderer } = ctx;
+  const { THREE, engine, scene, sunRig, config, events, registry, rng, CAM, renderer, rig } = ctx;
   const { GROUND_Y, PLAY_RADIUS, ARENA_EXTENT, SUN, DAY_LENGTH_S } = config;
   const seed = (rng && rng.masterSeed) != null ? rng.masterSeed : config.DEFAULT_SEED;
+  // M1 MOBILE TRUTH — the canonical mobile-tier flag (main.js: coarse pointer OR ?mobile=1). The world owner
+  // uses it to shed the v2-only load: point-light torches → emissive glow sprites, no moon directional, no
+  // second (intact) city cluster, fewer trees, and characters/trees/backdrop opt out of the shadow pass so
+  // the sun shadow map's caster set stays STATIC (then engine.setShadowThrottle near-freezes it — cheaply).
+  const MOBILE = !!ctx.mobile;
 
   // Hide the default baked city — the decrepit world takes its place. BEAUTY tier; the lead's coupled-
   // look pass tunes the grade on top.
@@ -58,6 +66,26 @@ export function createWorld(ctx) {
   // + fades at the band edges). City clouds untouched (default multiplier 1). Re-enabled + lifted:
   engine.setCloudsEnabled?.(true);
   engine.setCloudAltitude?.(3.5);
+  // A6-0a: finer IBL-env cadence so the env tracks the descending sun instead of holding NOON into dusk then
+  // snapping dark at the horizon (the measured dusk "flash-to-dark"). City default 4 → byte-identical; hoard2
+  // opts into more buckets. ?envseg=<n> is the A/B knob while tuning.
+  const _envSeg = ctx.flags?.q?.has('envseg') ? +ctx.flags.q.get('envseg') : 96;
+  engine.setEnvSegments?.(_envSeg);
+  // A5 FP SUN CORE (rider #3): the engine-shared celestials sun disc is a soft glow-style gradient that read as a
+  // dull HOLLOW ring in the FP dive (A4 flag). setSunCore adds an opt-in solid hot-core sprite; city default 0/off
+  // → byte-identical, hoard2 opts in. ?suncore=<0..1> is the A/B knob (default 0.9). Visible only in the FP dive.
+  // ⚠ MEASURED CAVEAT (see HANDOFF A5 item 3): under hoard2's owner-chosen COOL beauty grade the sun sprite renders
+  // at ≈sky brightness and CANNOT out-punch it (HDR push clamps to the same output; warm→muddy; cool→sky-blue), so
+  // the core is currently near-INERT here. Making the FP sun read HOT needs a shared-pipeline change (post-grade
+  // overlay / filmic sun-exception) entangled with the cool-grade ruling — flagged to DESIGN. The byte-identical
+  // API is wired + ready; the knob stays so DESIGN/owner can A/B once that pipeline call is made.
+  const _sunCore = ctx.flags?.q?.has('suncore') ? +ctx.flags.q.get('suncore') : 0.9;
+  engine.setSunCore?.(_sunCore);
+  // A6-0b (DESIGN ruling): the FP sun survives the cool grade as an EXCEPTION — a sprite can't out-punch the
+  // grade (measured A5-item-3), so the fix is in the filmic pass: the bright+warm sun disc keeps its post-ACES
+  // HOT look while the cool palette holds everywhere else. City default 0 → byte-identical. ?sunexc=<0..1> A/B.
+  const _sunExc = ctx.flags?.q?.has('sunexc') ? +ctx.flags.q.get('sunexc') : 1.0;
+  engine.setSunException?.(_sunExc);
   // B2 finding #6 — dial the beauty chromatic-aberration WAY down (the loud rainbow fringing on thin tree
   // trunks both B1 critics flagged). 0.3 keeps a filmic hint without the rainbow. City CA untouched (1.0).
   engine.setChromaScale?.(0.3);
@@ -103,15 +131,176 @@ export function createWorld(ctx) {
     gunmetal_worn: forge.makeMaterial(WEAPON_SKINS.gunmetal_worn),
   };
 
-  /* ---- flat arena ground (opaque disc; covers the terrain rim's centre → play area reads FLAT) ---- */
-  // FORGE: decrepit forest floor (dead-leaf litter over trodden dirt), tiled ~groundExtent/4 across the
-  // disc. Fallback flat colour 0x5f5a4a (recipe) on iOS-p0. receiveShadow on so the sun grounds actors.
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(ARENA_EXTENT + 6, 64).rotateX(-Math.PI / 2),
-    surfaces.ground,
-  );
-  ground.position.y = GROUND_Y; ground.receiveShadow = true;
-  scene.add(ground);
+  /* ---- A9 TEXT→WORLD: compose the arena from RECIPE #1 (the decrepit forest) via the engine interpreter ----
+     Map generation is now a LIBRARY. createWorldFromRecipe composes the engine modules the recipe names —
+     terrain rim · flat ground (de-tiled) · forest · createCity structure clusters · interactive ruins ·
+     cover buildings · decorative scatter — and returns the sim's collision set (obstacles / buildingCylinders
+     / harvest / playRadius). This REPLACES the ~250 lines of hand-wired content that used to live here; the
+     atmosphere + lighting + facade below WRAP the returned content (the "project just wires it" seam).
+     TRACE IDENTITY: recipe #1's params reproduce the original createForest / scatterRuins / cover-building
+     calls at the same seed + fork names, in the same concat order → the sim trace is byte-identical (the
+     migration proof, verified vs seed 1337). ?groundmacro=0 A/B is folded into the recipe's ground.macro
+     decision (which still needs forge.supported for the desktop-only de-tiling). */
+  const macroOff = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('groundmacro') === '0');
+  const _scatterOff = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('scatter') === '0');   // A8-5 A/B lever (before/after)
+  const _macro = forge.supported && !macroOff;
+  // A14 GLINT A/B lever (?glint=0 kills the whole arc for the before/after). WATER glint rides the mobile
+  // direct path (bespoke ShaderMaterial) so it is NOT forge-gated; GROUND glint is desktop-tier (needs the
+  // forge's lit material — the mobile Lambert path has no specular lobe to host an NDF), gated like _macro.
+  const _glintOff = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('glint') === '0');
+  const _glintWater = !_glintOff;
+  const _glintGround = forge.supported && !_glintOff;
+  // A9 ?map — select the recipe. Default (or ?map=forest) is recipe #1, TRACE-PINNED byte-identical at seed
+  // 1337. ?map=swamp runs the swamp DESCRIPTION through the TEXT front-end (recipeFromText) and merges the
+  // parsed biome semantics (sparse · dead · foggy · pond) over the swamp's config scaffolding → recipe #2, a
+  // genuinely different arena through the SAME interpreter (the second-consumer LIBRARY proof).
+  const _map = ((ctx.flags && ctx.flags.q && ctx.flags.q.get('map')) || 'forest').toLowerCase();
+  // The water maps (swamp · lakeshore) run their DESCRIPTION through the text front-end + merge it over a
+  // config base (the text→world path). The default forest stays forestRecipe direct (trace-pinned).
+  const _waterMaps = {
+    swamp: { base: swampBase, desc: SWAMP_DESC },
+    lakeshore: { base: lakeshoreBase, desc: LAKESHORE_DESC },
+    coastal: { base: coastalBase, desc: COASTAL_DESC },
+    // ARC A21 — THE CITY GENERATOR's own proof map: a full playable city, generated from a sentence
+    // (METROPOLIS_DESC), through this SAME interpreter every other map already uses.
+    metropolis: { base: metropolisBase, desc: METROPOLIS_DESC },
+  };
+  let recipeInput;
+  if (_waterMaps[_map]) {
+    const m = _waterMaps[_map];
+    const parsed = recipeFromText(m.desc);
+    recipeInput = mergeRecipes(m.base({ seed, playRadius: PLAY_RADIUS, macro: _macro, glintWater: _glintWater, glintGround: _glintGround }), parsed.recipe);
+    recipeInput.meta = { ...(recipeInput.meta || {}), description: m.desc };
+  } else {
+    recipeInput = forestRecipe({ seed, playRadius: PLAY_RADIUS, macro: _macro });
+  }
+  if (_scatterOff) recipeInput.scatter = { enabled: false };
+  const content = createWorldFromRecipe({ scene, rng, config, surfaces, mobile: MOBILE }, recipeInput);
+  const _backdropGroup = content.backdropGroups[0] || null;   // M1: the governor panic tier hides this backdrop cluster
+  const water = content.water;   // A12: the contextual water body (pond/lake) — driven per-frame in update()
+
+  /* ---- ARC A21 — WET CITY STREETS (A14's glint, wired to a NEW consumer): the `groundWetness` recipe field
+     applies the SAME glint mechanism that already sparkles wet sand/lake surfaces onto the city's own STREET
+     mesh specifically (tagged `userData.groundKind === 'street'` — see citygen.js; sidewalks/parks/the island
+     itself are untouched, keeping their own flat profile colour). Desktop-tier (needs the forge-lit material,
+     matching every other glint consumer's own gate). `groundWetness` 0 (every other map; forest/swamp/etc
+     never set `recipe.city`) → this block never runs. */
+  let cityStreetGlint = null;
+  if (content.city && forge.supported) {
+    const wetness = content.recipe.city.groundWetness || 0;
+    if (wetness > 0) {
+      content.city.group.traverse((o) => {
+        if (o.isMesh && o.userData.groundKind === 'street' && !cityStreetGlint) {
+          cityStreetGlint = applyGlint(o.material, { density: wetness * 2.4, rough: 0.5, micro: 0.16, gain: 0.55 });
+        }
+      });
+    }
+  }
+
+  /* ---- ARC A21 — THE REAL SKY: a generated city under the ACTUAL sky for its ACTUAL coordinates (the A20
+     astronomy lift's first wiring into a playable map). Additive, no-op unless a map's recipe sets
+     `city.location` (only metropolisBase does). Real stars/planets/constellations (createTrueStars/
+     createSolarSystem/createConstellations) sit ALONGSIDE the engine's existing artistic sun/moon/cloud sky
+     — this doesn't replace hoard2's day/night cycle (which stays the fast, ARTISTIC clock everything else
+     reads), it adds "what's REALLY up there" as an independent layer, gated by the SAME night factor (_nf,
+     defined below in the closure) so the real stars fade in/out in sync with the world's own dusk/dawn. The
+     real sky's own clock is the ACTUAL wall-clock date/time — genuinely "the sky over this city, right now",
+     not the sped-up game clock (which would make the stars visibly spin at an absurd rate). `rig.camera`
+     (ctx.rig — added to this file's own destructure for this) rides the star/planet shell to zero parallax
+     every frame, same trick the procedural night-sky dome already uses.
+     HONEST GAP: constellation NAME LABELS (the projected DOM overlay `createConstellations.update()` can
+     return) are not rendered anywhere — hoard2 has no such HUD layer, and building one was out of this arc's
+     scope (the lines themselves still draw; only the text labels are unused). Messier objects were not
+     wired either (createTrueStars + createSolarSystem + createConstellations is the combination the brief
+     named; a Messier layer is a small, obvious follow-up, not attempted here to keep this addition scoped). */
+  let realSky = null;
+  const _cityLoc = content.city ? content.recipe.city.location : null;
+  if (_cityLoc) {
+    const celestial = createCelestial({ latitudeDeg: _cityLoc.latDeg });
+    const trueStars = createTrueStars({ celestial });
+    const solarSystem = createSolarSystem({ celestial });
+    const constellations = createConstellations();
+    scene.add(trueStars.group, solarSystem.group, constellations.group);
+    let resolved = false;
+    Promise.all([trueStars.ready, constellations.ready]).then(() => {
+      constellations.resolve(trueStars.hrToIndex);
+      trueStars.setVisible(true); solarSystem.setVisible(true);
+      resolved = true;
+    });
+    realSky = { celestial, trueStars, solarSystem, constellations, get resolved() { return resolved; } };
+  }
+
+  /* ---- A11 THE LIGHT CEILING — CONTACT GROUNDING (item 1): a soft dark patch under every static object so
+     trees/ruins/buildings read as PLACED, not floating (measured: contact darkening ≈ 0.02 at night = they
+     float). Chosen over SSAO by cost — one InstancedMesh, no beauty-pipeline entanglement, no compile risk,
+     and it grounds regardless of the sun (works at night where the directional shadow can't). DESKTOP-ONLY:
+     mobile keeps its M1 direct-path scene UNTOUCHED (contact patches are basic-material and COULD ride it,
+     but the invariant is mobile-untouched — a future opt-in). ?contact=0 is the A/B lever. Characters get a
+     dynamic pool (survivor + horde) updated per frame from the sim positions (below, in update()). ---- */
+  const _contactOff = ctx.flags && ctx.flags.q && ctx.flags.q.get('contact') === '0';
+  let contactShadows = null;
+  if (!MOBILE && !_contactOff) {
+    contactShadows = createContactShadows({ groundY: GROUND_Y, strength: 0.42, softness: 1.5, dynamicPool: 64 });
+    // GROUND THE SUBSTANTIAL FLOATERS: the big flat-bottomed objects (cover buildings + ruins) whose wide
+    // footprint reads as pasted-on without a contact shadow, PLUS the moving characters (dynamic, below). We
+    // deliberately do NOT patch the ~100 thin trees — their trunk is a point contact grounded by the now-
+    // covered directional shadow (A11 frustum fit), and ~100 overlapping patches collectively over-darken the
+    // forest FLOOR (measured: the whole arena dimmed) rather than grounding individual objects. Rocks likewise
+    // sit flush + are tiny. So contact AO = buildings + ruins + characters; trees = the (fixed) sun shadow.
+    const items = [];
+    for (const rn of content.ruins) items.push({ x: rn.x, z: rn.z, r: rn.r * 1.1 });   // interactive ruins
+    for (const b of content.buildings) items.push({ x: b.x, z: b.z, r: b.r * 0.95 });   // cover buildings
+    // ARC A21: a city map's obstacles ARE its buildings (forest/ruins/cover-buildings are all zeroed in
+    // metropolisBase) — ground every one so the skyline reads as PLACED, not floating, exactly like the
+    // ruins/cover-buildings above. No-op for every other map (content.city is null there).
+    if (content.city) for (const o of content.obstacles) items.push({ x: o.x, z: o.z, r: o.r * 0.9 });
+    contactShadows.setStatic(items);
+    scene.add(contactShadows.group);
+  }
+
+  /* ---- A15 BAKED RADIANCE PROBES (opt-in, default OFF) — the engine's FIRST indirect-light term.
+     A build-time bake (tools/bake-probes.mjs) path-traced one bounce over the play ring and wrote a
+     sparse RGBA8 irradiance volume; here we fetch it for THIS map+seed and add the bounce to the
+     static receivers (ground/buildings/ruins/trees share the forge `surfaces` bundle). The ability
+     lives in engine-core (createIndirectField); the project only WIRES + configures it.
+
+     Default OFF ⇒ no fetch, no material patch ⇒ hoard2/city/hub/showcase render byte-identical. It
+     rides the mobile DIRECT path by construction: the atlas is RGBA8 and we add to Three's diffuse
+     `irradiance` (not a specular lobe), so both MeshStandard (desktop + mobile-direct) receive it —
+     unlike glint (desktop-only). NOTE the true-LOWP iOS path swaps materials to MeshLambert at render
+     (main.js _toLambert), which drops onBeforeCompile → GI is absent there; a future lift can inject
+     into that swap. ?gi=1 turns it on; ?gistr=<n> overrides the master strength (A/B + taste dial). ---- */
+  const _giOn = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('gi') === '1');
+  let indirectField = null;
+  if (_giOn) {
+    const _giStr = parseFloat((ctx.flags && ctx.flags.q && ctx.flags.q.get('gistr')) || '');
+    const strength = Number.isFinite(_giStr) ? _giStr : 0.5;   // subtle additive bounce over the existing hemi fill
+    ctx._giReady = fetch(`./probes/${_map}-${seed}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) { console.warn(`[gi] no baked atlas for ${_map}-${seed} — bake it: node tools/bake-probes.mjs ${_map} --seed ${seed}`); return; }
+        indirectField = createIndirectField({ data, strength });
+        // Apply to each UNIQUE MeshStandard receiver material once (dedupe — the forge bundle is shared,
+        // and double-applying would chain the injection twice → duplicate-symbol compile error). Scope to
+        // the play-ring content groups + forest; the distant backdrop cluster sits outside the grid.
+        const seen = new Set();
+        const roots = [...(content.groups || []), content.forest].filter(Boolean);
+        for (const root of roots) {
+          root.traverse?.((o) => {
+            if (!o.isMesh || !o.material) return;
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (const m of mats) {
+              // lit receivers only (both classes use Three's `irradiance` term): MeshStandard on desktop +
+              // mobile-direct-at-build; the render-time Lambert twins are re-patched via the userData tag.
+              if (m && (m.isMeshStandardMaterial || m.isMeshLambertMaterial) && !seen.has(m)) { seen.add(m); indirectField.apply(m); }
+            }
+          });
+        }
+        ctx.indirectField = indirectField;   // handle for tools / future per-frame tint
+      })
+      .catch((e) => { console.warn('[gi] atlas load failed:', e && e.message); });
+  }
+  if (typeof window !== 'undefined') window.__giReady = () => (ctx._giReady || Promise.resolve());
 
   /* ---- A4 CLOUD SHADOWS: sell the MOVING SKY in the iso view (which never shows the sky) through its
      EVIDENCE — soft dark patches drifting across the arena floor, as if clouds were passing overhead
@@ -166,9 +355,11 @@ export function createWorld(ctx) {
   // (not warm daylight) that ramps in with nightFactor and rakes the arena from a high side angle, giving
   // zombies a lit silhouette-edge at combat range — SEEN but scary, the dread stays (the lantern remains the
   // warm anchor). No shadow map (the sun owns shadows; a 2nd caster is costly). Intensity driven in update().
-  const moon = new THREE.DirectionalLight(0x7f95c4, 0);   // cool moonlight; intensity = _moonBase × nightFactor
-  moon.position.set(-14, 20, 10); moon.target.position.set(0, 0, 0);
-  scene.add(moon); scene.add(moon.target);
+  // M1 MOBILE TRUTH: the moon DIRECTIONAL is DESKTOP-ONLY. On mobile it's FOLDED INTO THE HEMISPHERE — the
+  // fill light already cools to _moonFill (cold moonlight) at night below, so the night stays cool + legible
+  // WITHOUT a second directional light in the forward rig (one fewer light evaluated per fragment).
+  const moon = MOBILE ? null : new THREE.DirectionalLight(0x7f95c4, 0);   // cool moonlight; intensity = _moonBase × nightFactor
+  if (moon) { moon.position.set(-14, 20, 10); moon.target.position.set(0, 0, 0); scene.add(moon); scene.add(moon.target); }
   const _moonBase = _mobileFloor ? 0.6 : 1.1;   // enough to rake an APPROACHING zombie's silhouette at mid-range
 
   // FOG is ENGINE-OWNED: updateWorld writes scene.fog.density (from weather) + scene.fog.color (from the
@@ -177,142 +368,13 @@ export function createWorld(ctx) {
   // fog. (A cooler decrepit fog TINT, if DESIGN wants it, is a grade/keyframe follow-up — flagged, not a
   // project-local stomp.) The engine already created scene.fog, so there is nothing to create here.
 
-  /* ---- terrain HILL RIM (bowl backdrop; sunk below the flat disc so only the far hills show) ---- */
-  // LOOK-PASS (art critic): the 'valley' biome rim rendered LUSH GREEN — jarring against the decrepit
-  // brown arena the wide cam now shows. Re-material the rim to a flat DESAT dead-earth so the horizon
-  // reads as blighted hills, not a golf course. (Distant backdrop → a flat material is plenty.)
-  try {
-    const terrain = generateTerrain({ seed, size: 96, preset: 'valley' });
-    const rim = buildTerrainMesh(terrain, { worldSize: ARENA_EXTENT * 2.6, baseY: GROUND_Y - 6, chunks: 4 });
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x3f3a30, roughness: 1, metalness: 0, vertexColors: false, flatShading: true });
-    rim.traverse((o) => { if (o.isMesh) o.material = rimMat; });
-    scene.add(rim);
-  } catch (e) { console.warn('[world] terrain rim skipped:', e && e.message); }
-
-  /* ---- the RUINED SETTLEMENT: createCity with the DECREPIT profile (ratified route) ---- */
-  // Placed as a backdrop cluster BEYOND the play radius so the arena heart stays open + flat, and its
-  // buildings need no colliders (the survivor is clamped inside PLAY_RADIUS). Strip its bundled lights.
-  //
-  // LEAD INTEGRATION FIX (crash on the dive): createCity's buildings carry the engine's shared
-  // MeshStandardMaterial patch (onBeforeCompile with the planar-REFLECTION uniform). Standalone —
-  // without createCityWorld's reflection wiring — that uniform is UNBOUND, and the beauty pipeline's
-  // renderReflection() pass (which does NOT hide this second, game-added city) uploads it as `undefined`
-  // → "reading 'needsUpdate'" on the first dived (perspective) frame. v1's forest dive never hit this
-  // because it never called createCity. FIX: keep the ratified profile-driven GEOMETRY (the ruined
-  // skyline) but RE-MATERIAL it with a plain decrepit-concrete material — no engine patch, no unbound
-  // reflection uniform, so the reflection pass renders it harmlessly. (Distant grey ruins read fine.)
-  try {
-    const city = createCity({ profile: buildDecrepitProfile(0.7), seed });
-    if (city.key) city.group.remove(city.key);
-    if (city.fill) city.group.remove(city.fill);
-    // FORGE stone (ruin concrete/plaster) — a PLAIN MeshStandardMaterial (no engine reflection patch),
-    // so the beauty reflection pass renders these distant ruins harmlessly (the crash-fix constraint
-    // that required re-materialing off the engine patch still holds; we just swap flat grey → real stone).
-    city.group.traverse((o) => { if (o.isMesh) { o.material = surfaces.stone; o.castShadow = true; o.receiveShadow = true; } });
-    // shove the compact (~15u) city out to a corner past the play radius → a distant ruined quarter.
-    city.group.position.set(-(PLAY_RADIUS + 6), 0, -(PLAY_RADIUS + 2));
-    city.group.scale.setScalar(1.25);
-    scene.add(city.group);
-  } catch (e) { console.warn('[world] decrepit city skipped:', e && e.message); }
-
-  /* ---- A3 BUILDING VARIETY: a SECOND cluster of INTACT structures (taller, roofed, a few lit windows) at
-     the OPPOSITE corner, so the skyline reads "dying, not uniformly destroyed" — some buildings still stand
-     among the collapsed stumps (same doctrine as the live trees among the dead). Seeded off (seed+1) so it's
-     deterministic and DIFFERENT from the ruined cluster. Same crash-safe re-material + light-strip as above. */
-  try {
-    const intact = createCity({ profile: buildIntactProfile(0.7), seed: (seed + 1) >>> 0 });
-    if (intact.key) intact.group.remove(intact.key);
-    if (intact.fill) intact.group.remove(intact.fill);
-    intact.group.traverse((o) => { if (o.isMesh) { o.material = surfaces.stone; o.castShadow = true; o.receiveShadow = true; } });
-    intact.group.position.set(PLAY_RADIUS + 5, 0, -(PLAY_RADIUS + 4));   // opposite corner from the ruins
-    intact.group.scale.setScalar(1.25);
-    scene.add(intact.group);
-  } catch (e) { console.warn('[world] intact city skipped:', e && e.message); }
-
-  /* ---- DEAD FOREST: bare trees + rocks (no green conifers), central clearing open ---- */
-  // B2 finding #3 — LIVE TREES among the dead ("dying, not dead"): a FEW green conifers (weight 0.14 = the
-  // mix ratio) seeded through the many dead trunks, their trunks + canopy textured by the HEALTHY forge
-  // bark (barkLive, warm + lichen). rocks keep vertex-colour; dead 'bare' keep the weathered forge bark.
-  const forest = createForest({
-    seed, radius: ARENA_EXTENT - 2, arenaR: PLAY_RADIUS, count: 96, minSpacing: 1.9,
-    clearings: [{ x: 0, z: 0, r: 6 }],
-    archetypes: [
-      { key: 'bare', weight: 0.62, r: 0.34 },
-      { key: 'rock', weight: 0.24, r: 0.3 },
-      { key: 'conifer', weight: 0.14, r: 0.38 },   // the live minority
-    ],
-    groundY: GROUND_Y,
-    materials: { bare: surfaces.bark, conifer: surfaces.barkLive },
-    // A3 (owner: 1.8× still reads low): trees toward ~2.5× the TANK zombie (tank ≈ 1.28 u). Y-only 2.5× →
-    // bare ≈ 2.8 u, conifer ≈ 3.3 u (≈2.2–2.6× the tank; rocks exempt) — a real canopy over the fight.
-    // Colliders (horizontal, from placeForest) are footprint-only, so a Y-scale leaves them correct.
-    heightScale: 2.5,
-  });
-  scene.add(forest.group);
-
-  /* ---- INTERACTIVE RUINS: sparse primitive rubble in the play ring (seeded via the WORLD fork) ---- */
-  const worldRng = rng.fork('world');
-  const ruins = scatterRuins({ rng: worldRng, count: 14, innerR: 8, outerR: PLAY_RADIUS - 2, minSpacing: 3.2 });
-  const ruinGroup = new THREE.Group(); ruinGroup.raycast = () => {};
-  for (const rn of ruins) {
-    // a crude broken mass: a low STONE box + a leaning SCRAP-metal slab (salvage). The scrap slab makes
-    // the scrap surface a real second consumer, and matches the fiction (ruins yield scrap to harvest).
-    const h = rn.kind === 'husk' ? 2.2 : rn.kind === 'wall' ? 1.4 : 0.6;
-    const box = new THREE.Mesh(new THREE.BoxGeometry(rn.r * 1.8, h, rn.r * 1.6), surfaces.stone);
-    box.position.set(rn.x, GROUND_Y + h / 2, rn.z);
-    box.rotation.y = rn.yaw; box.castShadow = true; box.receiveShadow = true;
-    ruinGroup.add(box);
-    if (rn.kind !== 'rubble') {
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(rn.r * 1.4, h * 0.9, 0.18), surfaces.scrap);
-      slab.position.set(rn.x, GROUND_Y + h * 0.45, rn.z + rn.r * 0.7);
-      slab.rotation.set(0.22, rn.yaw, 0.12); slab.castShadow = true;
-      ruinGroup.add(slab);
-    }
-  }
-  scene.add(ruinGroup);
-
-  /* ---- A4 INTACT BUILDINGS INSIDE THE ARENA (owner: real cover, scavenge, new tactics). Two SEEDED intact
-     structures in the play ring: they register as obstacles EVERYWHERE — the flow-field routes zombies
-     around them, the walker pushes out, and ballistics stops shots on their walls (see buildingCylinders() +
-     makeCastWorld) — so they're real cover you fight behind, not decoration. Each has a richer SCAVENGE node
-     at its base (risk/reward: the loot sits in the chokepoint). Interiors are OUT of scope (solid blocks —
-     flagged). Seeded off worldRng → deterministic (same seed → same buildings → same paths). ---- */
-  const _buildings = [];
-  const bRng = rng.fork ? rng.fork('buildings') : Math.random;
-  for (let i = 0; i < 2; i++) {
-    const ang = (i / 2) * Math.PI * 2 + bRng() * 1.1 + 0.7;
-    const rad = 11 + bRng() * 5;                       // off-centre, inside the play ring
-    const bx = Math.cos(ang) * rad, bz = Math.sin(ang) * rad;
-    const w = 4.4 + bRng() * 1.6, d = 3.6 + bRng() * 1.3, h = 3.9 + bRng() * 1.1;
-    _buildings.push({ x: bx, z: bz, r: Math.max(w, d) * 0.5, h });   // cover cylinder (footprint × height)
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), surfaces.stone);
-    body.position.set(0, h / 2, 0); body.castShadow = true; body.receiveShadow = true;
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 1.08, 0.42, d * 1.08), surfaces.stone);
-    roof.position.set(0, h + 0.21, 0); roof.castShadow = true; roof.receiveShadow = true;
-    g.add(body); g.add(roof); g.position.set(bx, GROUND_Y, bz);
-    scene.add(g);
-  }
-
-  /* ---- OBSTACLES + HARVEST NODES (built once; facade returns the cached arrays — no per-call alloc) ---- */
-  // obstacles = tree trunks (within the play radius, from the forest) + interactive-ruin footprints + A4 buildings.
-  const _obstacles = forest.colliders
-    .concat(ruins.map((r) => ({ x: r.x, z: r.z, r: r.r })))
-    .concat(_buildings.map((b) => ({ x: b.x, z: b.z, r: b.r })));
-  // wood grows on the dead trees inside the play radius; scrap salvages from the ruins.
-  const treeNodes = [];
-  for (const key of ['bare', 'conifer']) {
-    for (const p of (forest.placements[key] || [])) {
-      if (p.x * p.x + p.z * p.z <= PLAY_RADIUS * PLAY_RADIUS) treeNodes.push({ x: p.x, z: p.z });
-    }
-  }
-  const _harvest = deriveHarvest(treeNodes, ruins, { woodAmount: 6, scrapAmount: 8 });
-  // A4 SCAVENGE: a RICHER node at each building's base — the risk/reward is that the good loot sits at the
-  // structure, which is also the chokepoint the horde funnels toward. (open field = 6/8; building = 14/18.)
-  for (const b of _buildings) {
-    _harvest.wood.push({ x: b.x + b.r * 0.85, z: b.z, amount: 14 });
-    _harvest.scrap.push({ x: b.x - b.r * 0.85, z: b.z, amount: 18 });
-  }
+  /* ---- gameplay arrays from the interpreter (the sim's collision + harvest sets) ----
+     The forest · terrain rim · structure clusters · interactive ruins · cover buildings · decorative scatter
+     are all built + added to the scene by createWorldFromRecipe above; these are the arrays the sim/player/
+     build read via the facade. They're byte-identical to the old hand-wired arrays at seed 1337 (recipe #1). */
+  const _obstacles = content.obstacles;            // tree trunks (in play radius) + ruin footprints + cover buildings
+  const _buildings = content.buildingCylinders;    // A4 cover cylinders [{x,z,r,h}] — ballistics stops shots on them
+  const _harvest = content.harvest;                // { wood:[{x,z,amount}], scrap:[{x,z,amount}] } (build reads this)
 
   /* ---- CELESTIALS · SKY · CLOUDS · WEATHER — INHERITED from the engine (not project-local) ----
      LIGHT-THE-HOARD: createCityWorld already builds celestials (sun/moon/stars/constellations), the
@@ -326,16 +388,37 @@ export function createWorld(ctx) {
      so they can't fuzz the FP eyeline. */
 
   /* ---- TORCHES: a ring of guttering warm pools so night is DARK-BUT-LEGIBLE ---- */
-  const torches = [];
+  // DESKTOP: real flickering PointLights (warm pools that light the arena floor). MOBILE: EMISSIVE GLOW
+  // SPRITES — the SAME ring, but each torch is an additive warm quad instead of a PointLight. This is the
+  // single largest per-fragment win on the mobile forward path (8 point lights → 0: three.js evaluates every
+  // point light for every lit fragment). The glow still READS as a torch — it blooms in the beauty present
+  // and glows directly in the LOWP Lambert path — it just contributes no per-fragment lighting cost. The
+  // survivor's lantern (one PointLight, below) remains the single travelling warm key so night stays playable.
+  const torches = [];        // desktop PointLight torches (empty on mobile)
+  const torchGlows = [];     // mobile additive glow sprites (empty on desktop)
   const TORCH_N = 8, torchR = PLAY_RADIUS - 3;
+  const _glowTex = MOBILE ? (() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const g2 = cv.getContext('2d'); const grd = g2.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grd.addColorStop(0, 'rgba(255,205,130,1)'); grd.addColorStop(0.4, 'rgba(255,150,70,0.55)'); grd.addColorStop(1, 'rgba(255,120,50,0)');
+    g2.fillStyle = grd; g2.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(cv);
+  })() : null;
   for (let i = 0; i < TORCH_N; i++) {
     const a = (i / TORCH_N) * Math.PI * 2;
-    const t = createTorchLight({
-      color: 0xffb562, intensity: 5.5, distance: 15, decay: 2,
-      position: [Math.cos(a) * torchR, GROUND_Y + 2.3, Math.sin(a) * torchR], seed: i, amp: 0.32,
-    });
-    scene.add(t.light);
-    torches.push(t);
+    const px = Math.cos(a) * torchR, py = GROUND_Y + 2.3, pz = Math.sin(a) * torchR;
+    if (MOBILE) {
+      const mat = new THREE.SpriteMaterial({ map: _glowTex, color: 0xffb562, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+      const sp = new THREE.Sprite(mat); sp.position.set(px, py, pz); sp.scale.setScalar(2.6); sp.raycast = () => {};
+      scene.add(sp); torchGlows.push({ sprite: sp, seed: i });
+    } else {
+      const t = createTorchLight({
+        color: 0xffb562, intensity: 5.5, distance: 15, decay: 2,
+        position: [px, py, pz], seed: i, amp: 0.32,
+      });
+      scene.add(t.light);
+      torches.push(t);
+    }
   }
 
   // Hoisted colours for the per-frame mobile-floor fill lerps (no per-frame alloc, engine-invariants #7).
@@ -356,14 +439,42 @@ export function createWorld(ctx) {
   /* ---- day/night boot: manual sweep over DAY_LENGTH_S (engine eases sunRig toward our goTo target) ---- */
   sunRig.setAuto?.(false);
   sunRig.goTo?.(SUN.startT);
+  // A11 THE LIGHT CEILING — cover the PLAY RING with the sun shadow (desktop). The engine frustum defaults to
+  // the small hidden-city extent (±~12u), so objects past r≈12 in our r=26 arena cast NO shadow at all — the
+  // measured "floating" cause (4/6 sampled objects had no shadow). Fit the ortho frustum to the play ring so
+  // the whole fight area grounds. DESKTOP-ONLY: mobile keeps its M1 shadow class (small frustum, 1024, frozen)
+  // UNTOUCHED. ?shadowfit=0 is the A/B lever. (Resolution stays 2048; the frustum-fit is the measured win.)
+  // ARC A21: content.playRadius (not the static PLAY_RADIUS constant) — a city map widens the play ring to
+  // the generated city's own extent (citySolidsToObstacles/city.scale in createWorldFromRecipe.js), so the
+  // shadow frustum must cover THAT, not the old fixed radius. Byte-identical for every other map
+  // (content.playRadius === PLAY_RADIUS there — no recipe sets playRing.radius or city.enabled).
+  if (!MOBILE && !(ctx.flags?.q?.get('shadowfit') === '0')) engine.setShadowFrustumExtent?.(content.playRadius + 4);
   engine.fitShadowFrustum?.();
+  // M1 MOBILE TRUTH: near-freeze the sun shadow map on mobile. Its casters are now STATIC (only the in-arena
+  // ruins + cover buildings cast — characters, trees, and the backdrop all opted out above), so a ~15 s
+  // refresh keeps their shadows aligned with the visibly-moving A4 sun (≤~3° drift between updates) while
+  // killing the per-frame 2048² re-render the diagnosis clocked at ~every 1.4 s. Desktop re-renders every move.
+  if (MOBILE) engine.setShadowThrottle?.(15);
 
   // hoisted state + reusable event payload (no per-frame allocation, engine-invariants #7).
+  const _dynContacts = [];   // A11: reused per-frame scratch for the contact-shadow dynamic pool (no alloc)
   let _elapsed = 0;
   let _phase = SUN.startT;
   let _override = null;                        // probe.setNight override (null → clock-driven)
   let _nf = resolveNight(_override, _phase, SUN);
   const _phasePayload = { t: _phase, night: false };
+  // A6-1 SKY SHOW — weather schedule state. ?weather=<clear|rain|snow|fog> PINS a kind (A/B + capture);
+  // otherwise the RECIPE's atmosphere.weather drives it: 'schedule' → the day-phase schedule (weatherKindAt),
+  // or a pinned kind (A9 swamp pins 'fog' → the arena stays foggy). We only push to the engine on CHANGE.
+  const _recipeWeather = content.recipe.atmosphere.weather;
+  const _weatherPin = ctx.flags?.q?.has('weather') ? ctx.flags.q.get('weather')
+    : (_recipeWeather !== 'schedule' ? _recipeWeather : null);
+  let _weatherKind = null;                     // last kind pushed to the engine rig (null → force first push)
+  // A6-1: weather GATHERS gradually in this arena — a slow ease so overcast/rain/fog roll in over several
+  // seconds (atmospheric, and it keeps the real-clock cycle-smoothness gate green; a fast onset was a
+  // measured discontinuity). City default 1 → byte-identical. ?weatherease=<n> tunes it while iterating.
+  const _wEase = ctx.flags?.q?.has('weatherease') ? +ctx.flags.q.get('weatherease') : 0.06;
+  engine.setWeatherEaseScale?.(_wEase);
 
   const facade = {
     groundAt: (_x, _z) => GROUND_Y,            // FLAT play area (ratified #8)
@@ -371,7 +482,10 @@ export function createWorld(ctx) {
     obstacles: () => _obstacles,               // [{x,z,r}] trees + ruins + A4 buildings (sim field + player walker)
     buildingCylinders: () => _buildings,       // A4 [{x,z,r,h}] intact cover — ballistics stops shots on them
     harvestNodes: () => _harvest,              // { wood:[{x,z,amount}], scrap:[{x,z,amount}] } (build)
-    playRadius: PLAY_RADIUS,
+    playRadius: content.playRadius,   // ARC A21: wider for a city map (see the shadow-frustum comment above); == PLAY_RADIUS elsewhere
+    // M1 item 5 — governor panic shed: hide the distant backdrop ruins cluster (draw calls). Reversible;
+    // purely cosmetic (it's beyond the play radius). No-op if the cluster failed to build.
+    setBackdropVisible: (on) => { if (_backdropGroup) _backdropGroup.visible = !!on; },
     update(dt, _t) {
       _elapsed += dt;
       _phase = phaseAt(SUN.startT, _elapsed, DAY_LENGTH_S);
@@ -395,6 +509,48 @@ export function createWorld(ctx) {
       }
       lantern.intensity = 1.3 + 4.6 * _nf;   // B2: warm night key pool (dive legibility) over the night floor
 
+      // A11 CONTACT GROUNDING (dynamic) — a soft patch under the survivor + every live zombie, so the moving
+      // characters read as grounded too (esp. at night, where the directional shadow can't reach them). A
+      // read-only position snapshot (contactSample) → no sim perturbation. Scratch array reused (no alloc).
+      if (contactShadows) {
+        _dynContacts.length = 0;
+        if (registry.has('player')) { const pp = registry.get('player').player; if (pp) _dynContacts.push({ x: pp.x, z: pp.z, r: 0.5 }); }
+        if (registry.has('sim')) { const zs = registry.get('sim').contactSample?.(); if (zs) for (let i = 0; i < zs.length; i++) _dynContacts.push(zs[i]); }
+        contactShadows.updateDynamic(_dynContacts);
+      }
+
+      // A12 WATER — advance the ripple + feed the CURRENT sun / sky-horizon / fog so the surface sits in the
+      // same atmosphere as everything else (Fresnel sky-tint + sun glint + FogExp2 match). sunRig outputs are
+      // by-ref (updated by the engine's updateWorld each frame); a 1-frame lag on a cosmetic surface is moot.
+      if (water) {
+        water.update(_elapsed);
+        water.setSun(sunRig.sunDir, sunRig.sunColor);
+        water.setSky(sunRig.horizon || sunRig.sky);
+        if (scene.fog) water.setFog(scene.fog.color, scene.fog.density);
+        // A16 LIFT#2 RAIN-ON-WATER — couple the lifted rain-ripple ability to the SAME weather schedule that
+        // drives the visible sky: dimpled impact rings dance across the sea during the afternoon-rain window
+        // and calm as it clears. A ?weather pin forces it (rain → full, clear/fog → none) for A/B captures.
+        // rain=0 → the water shader skips it (byte-identical to A13); non-water maps never reach here.
+        water.setRain(_weatherPin === 'rain' ? 1 : _weatherPin != null ? 0 : rainAmountAt(_phase, seed));
+      }
+
+      // A14 GLINT (ground consumer) — feed the live world sun dir + colour so the wet-grit sparkle sits in
+      // the sun's glare path and warms/cools with the day cycle. Desktop-tier; null when off/mobile.
+      if (content.groundGlint) content.groundGlint.setSun(sunRig.sunDir, sunRig.sunColor);
+      // ARC A21 — wet CITY street glint, same feed as the ground consumer above.
+      if (cityStreetGlint) cityStreetGlint.setSun(sunRig.sunDir, sunRig.sunColor);
+
+      // ARC A21 — THE REAL SKY: recompute real star/planet/constellation positions for the ACTUAL current
+      // instant at the recipe's real coordinates, gated by the SAME night factor (_nf) driving everything
+      // else — the real stars fade in exactly when the world's own artistic dusk says night has fallen.
+      if (realSky && realSky.resolved) {
+        const { celestial, trueStars, solarSystem, constellations } = realSky;
+        const now = new Date();
+        trueStars.update(now, _cityLoc.latDeg, _cityLoc.lonDeg, _nf, _elapsed, false, rig.camera);
+        solarSystem.update(now, _cityLoc.latDeg, _cityLoc.lonDeg, _nf, _elapsed, false, rig.camera);
+        constellations.update(trueStars.position, _nf, true, rig.camera);
+      }
+
       // DAY sky-fill: a modest hemisphere that lifts the arena so the decrepit palette reads under the sun,
       // fading toward night as the sky darkens. Directional-ish (sky-over-ground), so the sun's shaping and
       // cast shadows survive (unlike the one-shot's big flat fill). Colour cools to moonlight at night.
@@ -409,7 +565,7 @@ export function createWorld(ctx) {
       amb.intensity = _ambBase * (_mobileFloor ? (0.55 + 0.45 * _nf) : _nf);
       // LOOK-TUNE: the cool moon key ramps in with night (0 by day → _moonBase at deep night) so zombies get
       // a directional read at combat range without daylighting the arena (modest + cool; the mood holds).
-      moon.intensity = _moonBase * _nf;
+      if (moon) moon.intensity = _moonBase * _nf;   // M1: desktop-only (mobile folds the moon into the hemi)
 
       // torches gutter every frame; near-OFF by day (0.04) so they don't warm-wash the daylight arena,
       // rising to full at deep night — that's when the torch pools become the legibility (dark-but-playable).
@@ -418,10 +574,23 @@ export function createWorld(ctx) {
         torches[i].update(dt);
         torches[i].light.intensity *= torchGain;
       }
+      // M1 MOBILE: the emissive torch GLOW sprites pulse opacity with the same night gain + a cheap flicker
+      // (a couple of incommensurate sines — no allocation, no light). Off by day, glowing warm at night.
+      for (let i = 0; i < torchGlows.length; i++) {
+        const g = torchGlows[i];
+        const fl = 0.72 + 0.28 * (0.6 * Math.sin(11.0 * _elapsed + g.seed) + 0.4 * Math.sin(17.3 * _elapsed + g.seed * 1.7));
+        g.sprite.material.opacity = Math.min(1, torchGain * fl);
+      }
 
-      // CELESTIALS · SKY · CLOUDS · WEATHER · FOG are all driven by the engine's updateWorld (called from
-      // the composition root AFTER world.update each frame) — hoard2 sets only the sun PHASE (goTo above)
-      // and inherits the rest. No project-local sky/fog stepping here anymore (LIGHT-THE-HOARD).
+      // CELESTIALS · SKY · CLOUDS · FOG are all driven by the engine's updateWorld (called from the
+      // composition root AFTER world.update each frame) — hoard2 sets only the sun PHASE (goTo above) and
+      // inherits the rest. No project-local sky/fog stepping here (LIGHT-THE-HOARD).
+      // A6-1 SKY SHOW — WEATHER is the one exception hoard2 now drives: the engine builds + eases the rig,
+      // but its KIND never changed (stuck 'clear'). We push the schedule's goal (or the ?weather pin) only on
+      // CHANGE — the rig eases the visuals every frame, so this is one setter call per weather transition, not
+      // per frame. Visual-only (nightFactor above is the sun clock, untouched) → the sim trace is unperturbed.
+      const _wTarget = _weatherPin != null ? _weatherPin : weatherKindAt(_phase, seed);
+      if (_wTarget !== _weatherKind) { engine.setWeatherKind?.(_wTarget); _weatherKind = _wTarget; }
 
       _phasePayload.t = _phase;
       _phasePayload.night = _nf > 0.5;

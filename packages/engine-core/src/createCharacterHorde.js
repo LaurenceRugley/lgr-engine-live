@@ -37,12 +37,26 @@ export function createCharacterHorde(rig, opts = {}) {
   const lodDistance = opts.lodDistance != null ? opts.lodDistance : 18;
   const lodHz = opts.lodHz != null ? opts.lodHz : 2;
   const baseScale = opts.baseScale != null ? opts.baseScale : 1;
+  // M1 MOBILE TRUTH — two tier knobs (both default to the full desktop behaviour):
+  //  • castShadow:false → this whole horde stops casting sun shadows (mobile: characters opt out of the
+  //    shadow pass so the map's caster set stays STATIC and cheap — see createCityWorld's shadow throttle).
+  //  • motionLayers:false → skip the per-character procedural layer pass (A1 loco-blend refinement + B3
+  //    head-look IK / flinch). The base mixer still steps (walk/death clips play), but the extra per-bone
+  //    IK math — a real cost across ~48 mixers on a phone — is dropped. The clips carry the read alone.
+  const castShadow = opts.castShadow !== false;
+  const motionLayers = opts.motionLayers !== false;
   const lod2 = lodDistance * lodDistance;
+  // A7-2 FOOT IK — the distance beyond which the plant-and-hold solver is skipped (far feet aren't legible
+  // and the solve costs a few updateWorldMatrix + quats per leg). Defaults to the LOD distance so the two
+  // budgets line up. IK also rides motionLayers: on mobile (motionLayers:false) _applyLayers never runs, so
+  // the whole horde has no foot IK for free (mobile keeps its M1 clip-only class).
+  const ikDistance = opts.ikDistance != null ? opts.ikDistance : lodDistance;
+  const ikDist2 = ikDistance * ikDistance;
 
   const group = new THREE.Group();
   const slots = [];
   for (let i = 0; i < size; i++) {
-    const handle = rig.spawn();
+    const handle = rig.spawn({ castShadow });
     handle.object.visible = false;
     handle.scale.setScalar(baseScale);
     group.add(handle.object);
@@ -82,13 +96,14 @@ export function createCharacterHorde(rig, opts = {}) {
         const s = slots[i]; if (!s.active) continue;
         const p = s.handle.object.position;
         const d2 = (p.x - camX) * (p.x - camX) + (p.y - camY) * (p.y - camY) + (p.z - camZ) * (p.z - camZ);
+        if (motionLayers) s.handle.setFootIKActive(d2 <= ikDist2);   // A7-2: solve foot IK only on near rigs
         if (d2 > lod2) {
           s.acc += dt; const iv = 1 / lodHz;
-          if (s.acc >= iv) { s.handle.mixer.update(s.acc); s.handle._applyLayers(s.acc); s.acc = 0; }
+          if (s.acc >= iv) { s.handle.mixer.update(s.acc); if (motionLayers) s.handle._applyLayers(s.acc); s.acc = 0; }
         } else {
           if (s.acc > 0) { s.handle.mixer.update(s.acc); s.acc = 0; }
           s.handle.mixer.update(dt);
-          s.handle._applyLayers(dt);
+          if (motionLayers) s.handle._applyLayers(dt);
         }
       }
     },
@@ -97,8 +112,13 @@ export function createCharacterHorde(rig, opts = {}) {
     clearLookTargets() { for (let i = 0; i < size; i++) slots[i].handle.clearLookTarget(); },
     hitReact(i, dx, dz) { slots[i].handle.hitReact(dx, dz); },
     setLayerParams(i, params) { slots[i].handle.setLayerParams(params); },
-    setLocomotion(i, speed01) { slots[i].handle.setLocomotion(speed01); },   // A1: velocity-driven idle/walk/run blend
-    playAction(i, name) { slots[i].handle.playAction(name); },               // A1: one-shot (hit/attack) over the blend
+    setLocomotion(i, speed01, worldSpeed = null) { slots[i].handle.setLocomotion(speed01, worldSpeed); },   // A1 blend + A6-2 stride-rate m/s
+    // A7-2 FOOT IK: enable plant-and-hold on the WHOLE pool (cfg) or disable (false). Applied to every pooled
+    // handle so recycled slots inherit it; the per-frame distance gate (update) skips far rigs. no-op on a rig
+    // whose skeleton isn't a resolvable biped.
+    setFootIK(cfg) { for (let i = 0; i < size; i++) slots[i].handle.setFootIK(cfg); },
+    playAction(i, name, timeScale) { slots[i].handle.playAction(name, timeScale); },   // A1: one-shot (hit/attack) over the blend · A8-4: per-type rate
+    lunge(i) { slots[i].handle.lunge(); },                                    // A5: forward attack lunge (procedural layer; no-op if motionLayers off)
     // A2 NIGHT FILL: lift the swarm off black at night. The project OVERRIDES slot materials (setType tints),
     // so we can't use the rig's source materials — walk the ACTIVE slots' actual mesh materials, deduped, and
     // apply the night emissive to each unique one (~4 tinted materials, not 42 meshes). Cheap, zero lights.

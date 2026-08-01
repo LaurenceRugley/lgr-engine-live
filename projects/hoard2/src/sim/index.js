@@ -32,7 +32,9 @@ export function createSim(ctx) {
   const { config, rng, time, registry, events, probe, scene, rig } = ctx;
   const srng = rng.fork('sim'); // the ONLY randomness source in the sim (determinism spine)
 
-  const pool = createZombiePool(config, srng);
+  // M1 MOBILE TRUTH: mobile caps the live horde near v1's class (config.MAXZ_MOBILE). pool.max flows into the
+  // render horde size below, so this ONE number sizes both the sim pool and the skinned-rig count.
+  const pool = createZombiePool(config, srng, ctx.mobile ? config.MAXZ_MOBILE : config.MAXZ);
   const survival = createSurvival(config);
 
   let kills = 0, score = 0, _nf = 0;
@@ -43,13 +45,28 @@ export function createSim(ctx) {
   const _typeMat = { walker: null, runner: null, tank: null };
   const _zPrevFlash = new Float32Array(pool.max);      // B3: prev-frame flash per slot → hit-react on the rising edge
   const _zAtk = new Uint8Array(pool.max);              // A1: prev-frame "attacking" per slot → attack one-shot on the rising edge
+  const _zYaw = new Float32Array(pool.max).fill(999);  // A6-2 turn-in-place: displayed body yaw per slot (999 = uninit → snap on first active frame)
   // B3 per-TYPE motion personality (cheap character): runner TWITCHY (fast wide head-look, sharp flinch),
   // tank PONDEROUS (slow narrow head-look, heavy slow flinch). Zombie flinch amp is modest — they also play
   // the HitReact CLIP on flash; the layer adds a DIRECTIONAL recoil the clip lacks.
+  // A8-4 PER-TYPE ATTACK PERSONALITY — the lunge (the procedural attack beat) now differs by type so a crowd
+  // reads as a mix, not a synchronised line: a runner SNAPS in fast + shallow with a head thrust; a tank
+  // LEANS in slow + deep + heavy; a walker is the medium default. hitReact tuned as before.
   const ZLAYER = {
-    walker: { headLook: { cone: 1.3, speed: 5 },   hitReact: { amp: 0.6, dur: 0.4 } },
-    runner: { headLook: { cone: 1.6, speed: 11 },  hitReact: { amp: 0.7, dur: 0.26 } },
-    tank:   { headLook: { cone: 1.0, speed: 2.5 }, hitReact: { amp: 0.8, dur: 0.6, lean: 0.6 } },
+    walker: { headLook: { cone: 1.3, speed: 5 },   hitReact: { amp: 0.6, dur: 0.4 },  lunge: { amp: 1.0, dur: 0.34, lean: 0.55, head: 0.35 } },
+    runner: { headLook: { cone: 1.6, speed: 11 },  hitReact: { amp: 0.7, dur: 0.26 }, lunge: { amp: 0.85, dur: 0.22, lean: 0.42, head: 0.55 } },
+    tank:   { headLook: { cone: 1.0, speed: 2.5 }, hitReact: { amp: 0.8, dur: 0.6, lean: 0.6 }, lunge: { amp: 1.35, dur: 0.5, lean: 0.8, head: 0.22 } },
+  };
+  // A8-4 per-type ATTACK-CLIP rate (the Punch one-shot plays faster on a runner, ponderously on a tank).
+  const ZATK = { walker: 1.0, runner: 1.5, tank: 0.72 };
+  // A8-4 PER-INSTANCE DESYNC — a deterministic per-slot jitter (golden-ratio index hash, ~[0.85,1.15]; NO rng
+  // → determinism-safe) that stretches/compresses each rig's lunge timing, so even two adjacent walkers don't
+  // lunge in lockstep. Applied to the layer params when a slot's type is (re)assigned.
+  const _PHI = 0.6180339887;
+  const slotLayer = (i, type) => {
+    const base = ZLAYER[type] || ZLAYER.walker;
+    const jit = 0.85 + 0.3 * (((i + 1) * _PHI) % 1);
+    return base.lunge ? { ...base, lunge: { ...base.lunge, dur: base.lunge.dur * jit } } : base;
   };
 
   // ---- read-only game snapshot other owners + the HUD read (mutated in place; never reallocated) ----
@@ -162,10 +179,32 @@ export function createSim(ctx) {
   }
 
   /* ---- render mirror: 1:1 sim → rigged horde (v1 main.js:364-381 pattern). Loads async; guarded. ---- */
+  // A6-2 STRIDE-RATE — MEASURED NEGATIVE RESULT (slip probe, tools/hoard2-slip-probe.mjs): physically-correct
+  // stride-rate scaling does NOT beat the rig's existing sublinear speed→timeScale heuristic for foot-plant on
+  // this shambling zombie clip (plantRatio ~0.31 heuristic vs ~0.41 stride, consistent across seeds/tunings).
+  // The clip's stance foot doesn't hold cleanly at any playback rate → the real fix would be foot IK (the
+  // B3-skipped work), per the brief's fallback. So the zombies stay on the heuristic (walkStride unset = off);
+  // strideTimeScale stays a tested, opt-in engine ability for a future clip with a proper stance phase.
+  const _zq = ctx.flags && ctx.flags.q;
+  const _noTurn = !!(_zq && _zq.has('noturn'));   // A6-2 A/B knob: disable turn-in-place (snap facing) for the slip probe
+  const _turnRate = _zq && _zq.has('turnrate') ? +_zq.get('turnrate') : config.ZOMBIE_TURN_RATE;   // owner taste knob
+  // A7-2 FOOT IK — the MEASURED lever A6-2's slip probe pointed at (stride-rate was proven not to help this
+  // clip → foot IK is the real fix). plant-and-hold: the support foot pins to the ground while the hips move,
+  // killing the skate. Desktop-only (mobile skips the motion layers → no IK, keeps its M1 clip-only class).
+  // DEFAULT OFF pending the owner's by-feel review (his ruling 2026-07-29) — ?footik=1 opts in (the A/B lever;
+  // the slip probe measured NEAR-cohort plantRatio 0.041 → 0.005 with it on). Flip the default back once reviewed.
+  const _footIkOn = !!(_zq && _zq.get('footik') === '1');
   zRig = createCharacterRig({ url: 'models/zombie.glb' });
   zRig.ready.then(() => {
-    horde = createCharacterHorde(zRig, { size: pool.max, lodDistance: 14, lodHz: 3, baseScale: 1 });
+    // M1 MOBILE TRUTH: on mobile the horde opts OUT of shadow-casting (characters leave the shadow pass, so
+    // its caster set stays static + cheap) and skips the procedural motion layers (head-look IK / flinch) —
+    // the walk/attack/death CLIPS still play, so the swarm reads; only the extra per-bone IK math is dropped.
+    horde = createCharacterHorde(zRig, { size: pool.max, lodDistance: 14, lodHz: 3, baseScale: 1, castShadow: !ctx.mobile, motionLayers: !ctx.mobile });
     scene.add(horde.group);
+    // A7-2: enable plant-and-hold foot IK on the whole zombie pool (near rigs only — the horde's ikDistance
+    // gates it to lodDistance). Presentation-only → the determinism trace is untouched. Opt-in (?footik=1)
+    // until the owner's by-feel review; default OFF ships the pre-A7-2 clip-only locomotion.
+    if (!ctx.mobile && _footIkOn) horde.setFootIK({ plantBand: 0.14 });
     buildTypeMaterials();
   }).catch(() => { /* asset missing → sim still runs headless-correct; render is graceful (HitReact) */ });
 
@@ -183,27 +222,40 @@ export function createSim(ctx) {
     const p = _player, cr = CONTACT_R + 0.35;
     for (let i = 0; i < pool.max; i++) {
       const z = pool.get(i);
-      if (!z.alive) { if (_zType[i] !== null) { horde.setActive(i, false); _zType[i] = null; } continue; }
+      if (!z.alive) { if (_zType[i] !== null) { horde.setActive(i, false); _zType[i] = null; _zYaw[i] = 999; } continue; }
       horde.setActive(i, true);
-      if (_zType[i] !== z.type) { _zType[i] = z.type; horde.setType(i, { scale: config.ZTYPE[z.type].scale, material: _typeMat[z.type] || undefined }); horde.setLayerParams(i, ZLAYER[z.type] || ZLAYER.walker); }
+      if (_zType[i] !== z.type) { _zType[i] = z.type; horde.setType(i, { scale: config.ZTYPE[z.type].scale, material: _typeMat[z.type] || undefined }); horde.setLayerParams(i, slotLayer(i, z.type)); }
       const dx = p.x - z.x, dz = p.z - z.z, d = Math.hypot(dx, dz), sp = Math.hypot(z.vx, z.vz);
       // A1: CONTINUOUS locomotion blend replaces the discrete idle/walk/run state snaps. The rig crossfades
       // idle↔walk↔run from actual speed (0..1, runner top speed 2.65 = full run), so a walker TRUDGES, a
       // runner SPRINTS, a tank LUMBERS — the type read now lives in the gait, not just the scale. Presentation
       // only: the sim speeds are untouched (no balance drift). HIT (flash) and ATTACK (in strike range) ride
       // OVER the blend as one-shots on their rising edges, so a lunging zombie keeps its legs moving.
-      horde.setLocomotion(i, Math.min(1, sp / 2.65));
+      horde.setLocomotion(i, Math.min(1, sp / 2.65));   // A1: velocity-driven idle/walk/run blend (heuristic timeScale in the rig)
       const atk = z.attacking || d < cr;
       if (z.flash > 0.06 && _zPrevFlash[i] <= 0.06) { horde.playAction(i, 'hit'); horde.hitReact(i, z.x - p.x, z.z - p.z); }
-      else if (atk && !_zAtk[i]) horde.playAction(i, 'attack');
+      else if (atk && !_zAtk[i]) { horde.playAction(i, 'attack', ZATK[z.type] || 1); horde.lunge(i); }   // A5 attack CLIP + A8-4 per-type rate + a forward lunge on the layer seam
       _zAtk[i] = atk ? 1 : 0; _zPrevFlash[i] = z.flash;
       // B3: the body faces where it's MOVING (velocity) when in motion, else the survivor — so a walker
       // flanking around a ruin turns its BODY along its path while its HEAD cranes toward you (the dread read).
-      const yaw = sp > 0.5 ? Math.atan2(z.vx, z.vz) : Math.atan2(dx, dz);
-      horde.setTransform(i, z.x, config.GROUND_Y, z.z, yaw);
+      const tgtYaw = sp > 0.5 ? Math.atan2(z.vx, z.vz) : Math.atan2(dx, dz);
+      // A6-2 TURN-IN-PLACE: slew the displayed yaw toward the target at a capped rate instead of snapping —
+      // a snap teleport-rotates the whole body, sweeping the feet across the ground (the visible "slide" on
+      // curves). A newly-active slot (_zYaw=999) snaps once so it doesn't spin up from a stale angle.
+      let curYaw = _zYaw[i];
+      if (_noTurn || curYaw === 999) { curYaw = tgtYaw; }   // noturn → snap every frame (the pre-A6-2 behaviour)
+      else {
+        let d = tgtYaw - curYaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+        const step = _turnRate * sdt;
+        curYaw += d > step ? step : d < -step ? -step : d;   // clamp the per-frame turn to the rate
+      }
+      _zYaw[i] = curYaw;
+      horde.setTransform(i, z.x, config.GROUND_Y, z.z, curYaw);
     }
     // every live head tracks the survivor within its cone (the "walkers turn to look at you" dread layer).
-    horde.setLookTarget(p.x, config.EYE_Y, p.z);
+    // M1: skipped on mobile — the head-look layer pass is off there, so this per-frame all-slots loop would
+    // only set state nothing reads. The walk/attack/death clips still carry the swarm's read.
+    if (!ctx.mobile) horde.setLookTarget(p.x, config.EYE_Y, p.z);
     const cp = (rig && rig.camera && rig.camera.position) || null;
     horde.update(sdt, cp ? cp.x : p.x, cp ? cp.y : 2, cp ? cp.z : p.z);
     // A2 ALIVE-AT-NIGHT: lift the swarm off pure black with the night emissive fill (R1's money-shot gap).
@@ -229,6 +281,9 @@ export function createSim(ctx) {
     // B5 AUDIO: sample up to `max` LIVE zombie positions for the positional-groan scheduler (fx-audio owns
     // the pacing/panning). Read-only snapshot of {x,z}; never a sim roll (audio is decorrelated cosmetics).
     audioSample(max = 8) { const out = []; for (let i = 0; i < pool.max && out.length < max; i++) { const z = pool.get(i); if (z.alive) out.push({ x: z.x, z: z.z }); } return out; },
+    // A11 THE LIGHT CEILING: live zombie FOOTPRINTS for the contact-shadow dynamic pool (read-only snapshot,
+    // like audioSample — never a sim roll, purely cosmetic grounding). r = footprint × per-type scale.
+    contactSample() { const out = []; for (let i = 0; i < pool.max; i++) { const z = pool.get(i); if (z.alive) out.push({ x: z.x, z: z.z, r: 0.42 * z.scale }); } return out; },
     queryCone: (px, pz, dx, dz, cosHalf, range) => pool.queryCone(px, pz, dx, dz, cosHalf, range), // gun aim-assist
 
     trySpendStamina: (cost) => survival.trySpend(cost),
@@ -270,6 +325,10 @@ export function createSim(ctx) {
     probe.spawnWave = (n) => director.forceWave(n);
     probe.starve = () => survival.forceStarve();
     probe.hurt = (amount) => applyPlayerDamage(amount, 'probe');
+    // A16 sustained-load probe: refill the meters (hp/hunger/stamina) and clear death. Capture-only
+    // infrastructure (like starve/hurt) — it lets tools/hoard2-sustained.mjs hold the survivor alive
+    // for a full 15-min run so the probe measures a STEADY load, not a 3-min death. Never called in play.
+    probe.topUp = () => survival.reset();
   }
 
   registry.register('sim', facade);

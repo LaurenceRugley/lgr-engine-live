@@ -32,7 +32,7 @@ import {
   THREE, createEngine, CAM, PROFILES, PROFILE_KEYS, createCapture, createViewerUI,
   createAppShell, readAppFlags, fromURLParams, createDiveController, createDevMode,
   createAudioBus, createAmbientBed, createPositionalField, createRotor,
-  createGyroLook,
+  createGyroLook, createDebugOverlay,
 } from '@lgr/engine-core';
 // L114: the loop Timer is now owned by createAppShell (was `const { Timer } = THREE` here); createHints is wrapped by shell.hints.
 
@@ -1919,6 +1919,10 @@ const officeVerbs = {
   fitout: () => toggleFitout(),
 };
 createCapture({ renderer, rig, sunRig, poke, getState: captureState, office: officeVerbs, world: engine.world, sequences: true });   // L94: world handle → the ?capture=hero sequence drives world-enter + the flow splash. L114: sequences:true → city arms the director (unchanged); office/hoard default false.
+
+// A10 FIELD-DEBUG overlay — ?debug=gl prints the GL caps + live luminance/lights/env/tone (a client site
+// rendering wrong on a customer's phone gets the same one-tap answer). Default-inert → city stays byte-identical.
+if (_q.get('debug') === 'gl') createDebugOverlay({ renderer, scene, getPath: () => window.__renderPath || window.__mode });
 
 /* L95 CONTROL ACTIONS — the INTENT, decoupled from input. A viewer-bar button calls these DIRECTLY; the
    keydown handler calls the SAME functions. Rule: a button must never synthesize a keystroke that some other

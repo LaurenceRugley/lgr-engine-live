@@ -3,7 +3,7 @@
 // the same clip pops), must map logical states to the right clips, and must know which states hold vs loop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './character-anim.js';
+import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE, strideTimeScale } from './character-anim.js';
 
 test('resolve: the six logical states map to the GLB clip names', () => {
   const sm = createAnimStateMachine();
@@ -46,4 +46,23 @@ test('custom mapping is honoured', () => {
   assert.equal(sm.resolve('idle'), 'Stand');
   assert.equal(sm.to('walk').clip, 'Stroll');
   assert.equal(sm.resolve('run'), null, 'states outside the custom map do not resolve');
+});
+
+/* A6-2 STRIDE RATE — the anti-slide playback scaler (WHY: feet must grip, not skate). */
+test('strideTimeScale: at the reference speed the clip plays natural (1×); it scales linearly with speed', () => {
+  assert.equal(strideTimeScale(1.5, 1.5), 1, 'v == refStride → natural 1× playback');
+  assert.ok(Math.abs(strideTimeScale(0.75, 1.5) - 0.5) < 1e-9, 'half the ref speed → half rate (legs slow with the body)');
+  assert.ok(Math.abs(strideTimeScale(3.0, 1.5) - 2.0) < 1e-9, 'double the ref speed → double rate (legs quicken)');
+});
+
+test('strideTimeScale clamps: a near-stop never FREEZES the pose and a sprint never JUDDERS', () => {
+  assert.equal(strideTimeScale(0, 1.5), 0.4, 'zero speed clamps to the min (idle blend handles the actual stop)');
+  assert.equal(strideTimeScale(0.01, 1.5, 0.4, 2.4), 0.4, 'crawl clamps to min');
+  assert.equal(strideTimeScale(99, 1.5, 0.4, 2.4), 2.4, 'huge speed clamps to max');
+  assert.equal(strideTimeScale(2, 1, 0.5, 1.8), 1.8, 'custom max honoured');
+});
+
+test('strideTimeScale is defined + finite even with a degenerate refStride (guarded /0)', () => {
+  const v = strideTimeScale(1.0, 0);
+  assert.ok(Number.isFinite(v), 'refStride 0 does not divide by zero → finite (clamped to max)');
 });
