@@ -152,6 +152,18 @@ const CSS = `
   pointer-events:none; will-change:opacity,transform; color:var(--lgr-narrative-ink,#f4ece0); }
 .lgr-narrative-panel.is-center { left:50%; right:auto; width:min(40rem, calc(100vw - 3rem));
   max-width:none; text-align:center; }
+/* TWO MORE LAYOUT FAMILIES (2026-08-07). A narrative whose every chapter is a left-clamped block at
+   top:50% reads as a template no matter how good the copy is: same anchor, same measure, same rhythm,
+   six times. These give a consumer somewhere else to put a panel.
+     is-right   still vertically centred, anchored to the RIGHT gutter, ragged-left. Good for a chapter
+                whose frame wants its LEFT side open.
+     is-bottom  a wide band along the foot of the frame, no vertical centring at all. Good for a short
+                declarative line, and it leaves the whole upper frame to the render.
+   Both inherit the gutter fix above, so neither can go shrink-to-fit on a phone. */
+.lgr-narrative-panel.is-right { left:clamp(1.5rem,6vw,7rem); right:clamp(1.5rem,6vw,7rem); text-align:right;
+  margin-left:auto; }
+.lgr-narrative-panel.is-bottom { top:auto; bottom:clamp(3rem,10vh,7rem); max-width:52rem; }
+.lgr-narrative-panel.is-bottom .lgr-narrative-body { max-width:46ch; }
 .lgr-narrative-num { display:block; font:600 .74rem/1 ui-monospace,Menlo,monospace; letter-spacing:.12em;
   color:var(--lgr-narrative-dim,rgba(244,236,224,.55)); }
 .lgr-narrative-eyebrow { display:block; margin-top:1rem; font:700 .8rem/1 inherit; letter-spacing:.32em;
@@ -196,7 +208,10 @@ function ensureCSS() {
 
 function buildPanel(section, index, total) {
   const el = document.createElement('article');
-  el.className = 'lgr-narrative-panel' + (section.center ? ' is-center' : '');
+  /* `layout` is the field; `center: true` is kept working because projects already pass it. */
+  const layout = section.layout || (section.center ? 'center' : 'left');
+  el.className = 'lgr-narrative-panel' + (layout === 'left' ? '' : ` is-${layout}`);
+  el.dataset.layout = layout;
 
   const num = document.createElement('span'); num.className = 'lgr-narrative-num';
   num.textContent = `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
@@ -308,7 +323,11 @@ export function createScrollNarrative({
       if (el.inert !== hidden) el.inert = hidden;
       el.setAttribute('aria-hidden', String(hidden));
       const drift = reducedMotion ? '' : ` translateY(${((0.5 - pr) * 4).toFixed(2)}vh)`;
-      el.style.transform = (sections[i].center ? 'translate(-50%,-50%)' : 'translateY(-50%)') + drift;
+      /* Each family anchors differently, so each needs its own centring transform. is-bottom is
+         anchored to the FOOT of the frame and must not be pulled up by half its own height. */
+      const lay = el.dataset.layout;
+      const base = lay === 'center' ? 'translate(-50%,-50%)' : lay === 'bottom' ? '' : 'translateY(-50%)';
+      el.style.transform = (base + drift).trim() || 'none';
     }
     // discrete gate off the RAW target (never lag-strand the active dot/accent just under a boundary —
     // the same eased-vs-raw split scroll-director.js's docstring establishes).

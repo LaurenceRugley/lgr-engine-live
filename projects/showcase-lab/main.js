@@ -204,14 +204,14 @@ const product = createProductStage({ renderer, backdrop: '#efe9df', envIntensity
        not one was checkable; the seed is the single most falsifiable thing here, because a visitor can
        change it in the URL (?seed=) and watch a different city grow. It also finally uses the tags row
        the narrative module has always built and no section ever populated. */
-    { id: 'procedural', eyebrow: 'Procedural', title: 'One seed. A whole skyline.', accent: ACCENTS[1],
+    { id: 'procedural', eyebrow: 'Procedural', title: 'One seed. A whole skyline.', accent: ACCENTS[1], layout: 'bottom',
       tags: [`seed ${citySeed}`, 'change it in the URL'],
       body: "No baked scenery. A seed grows the whole skyline; the same engine drives every frame you're scrolling through." },
     { id: 'day', eyebrow: 'One continuous shot', title: 'The day rides your scroll.', accent: ACCENTS[2],
       body: 'Golden hour eases to dusk to night as you go. The sun is a function of your scroll position, not a clock.' },
     { id: 'style', eyebrow: 'The unforgeable signature', title: 'Every art style is real.', accent: ACCENTS[3], center: true,
       body: 'Watch the whole city morph, realistic to toon and back. A live re-render of the post pipeline, not a filter.' },
-    { id: 'scale', eyebrow: 'Built to move', title: 'Pull back. Take it in.', accent: ACCENTS[4],
+    { id: 'scale', eyebrow: 'Built to move', title: 'Pull back. Take it in.', accent: ACCENTS[4], layout: 'right',
       body: 'Reflections in the water, weather, a live simulation, all from the same real-time engine running the whole time.' },
     { id: 'controls', eyebrow: 'Your turn', title: 'Take the controls.', accent: ACCENTS[5], center: true,
       /* The copy is chosen at build-of-the-section time from the pointer type: telling a phone visitor
