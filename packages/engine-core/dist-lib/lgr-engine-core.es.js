@@ -5163,47 +5163,47 @@ function da(e) {
 }
 //#endregion
 //#region src/product-stage.js
-function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposure: i = 1.05, autoRotate: a = .25, fitMargin: o = 1.78, frameBias: s = -.52, minDist: c = .55, maxDist: l = 2.4, minPolar: u = .22, maxPolar: d = 1.45 } = {}) {
+function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposure: i = 1.05, autoRotate: a = .25, fitMargin: o = 1.78, frameBias: s = -.66, minFitAspect: c = .95, minDist: l = .55, maxDist: u = 2.4, minPolar: d = .22, maxPolar: f = 1.45 } = {}) {
 	if (!t) throw Error("createProductStage: pass the shared { renderer }");
-	let f = new e.Scene();
-	f.background = new e.Color(n);
-	let p = new e.PerspectiveCamera(35, 1, .05, 100), m = new e.PMREMGenerator(t), h = m.fromScene(new ua(), .04);
-	f.environment = h.texture, f.environmentIntensity = r, m.dispose();
-	let g = new e.DirectionalLight(16777215, 2.4);
-	g.position.set(2.5, 4.5, 2), g.castShadow = !0, g.shadow.mapSize.set(1024, 1024), g.shadow.camera.near = .5, g.shadow.camera.far = 24, Object.assign(g.shadow.camera, {
+	let p = new e.Scene();
+	p.background = new e.Color(n);
+	let m = new e.PerspectiveCamera(35, 1, .05, 100), h = new e.PMREMGenerator(t), g = h.fromScene(new ua(), .04);
+	p.environment = g.texture, p.environmentIntensity = r, h.dispose();
+	let _ = new e.DirectionalLight(16777215, 2.4);
+	_.position.set(2.5, 4.5, 2), _.castShadow = !0, _.shadow.mapSize.set(1024, 1024), _.shadow.camera.near = .5, _.shadow.camera.far = 24, Object.assign(_.shadow.camera, {
 		left: -3,
 		right: 3,
 		top: 3,
 		bottom: -3
-	}), g.shadow.bias = -4e-4, g.shadow.normalBias = .02, f.add(g, g.target);
-	let _ = new e.Mesh(new e.PlaneGeometry(60, 60), new e.ShadowMaterial({ opacity: .26 }));
-	_.rotation.x = -Math.PI / 2, _.receiveShadow = !0, f.add(_);
-	let v = new di(), y = null, b = null, x = [], S = null;
-	async function C(e) {
-		let t = await v.loadAsync(e);
-		y && (f.remove(y), z(y)), y = t.scene, b = t.parser, S = e, y.traverse((e) => {
+	}), _.shadow.bias = -4e-4, _.shadow.normalBias = .02, p.add(_, _.target);
+	let v = new e.Mesh(new e.PlaneGeometry(60, 60), new e.ShadowMaterial({ opacity: .26 }));
+	v.rotation.x = -Math.PI / 2, v.receiveShadow = !0, p.add(v);
+	let y = new di(), b = null, x = null, S = [], C = null;
+	async function w(e) {
+		let t = await y.loadAsync(e);
+		b && (p.remove(b), B(b)), b = t.scene, x = t.parser, C = e, b.traverse((e) => {
 			e.isMesh && (e.castShadow = !0, e.receiveShadow = !0);
-		}), f.add(y);
+		}), p.add(b);
 		let n = t.userData?.gltfExtensions?.KHR_materials_variants;
-		return x = n ? n.variants : [], P(), { variants: w() };
+		return S = n ? n.variants : [], F(), { variants: T() };
 	}
-	let w = () => x.map((e) => e.name);
-	async function T(e) {
-		if (!y || !b) return !1;
-		let t = x.findIndex((t) => t.name === e);
+	let T = () => S.map((e) => e.name);
+	async function E(e) {
+		if (!b || !x) return !1;
+		let t = S.findIndex((t) => t.name === e);
 		if (t < 0) return !1;
 		let n = [];
-		return y.traverse((e) => {
+		return b.traverse((e) => {
 			let r = e.isMesh && e.userData?.gltfExtensions?.KHR_materials_variants;
 			if (!r) return;
 			e.userData.__baseMaterial || (e.userData.__baseMaterial = e.material);
 			let i = r.mappings.find((e) => e.variants.includes(t));
 			n.push((async () => {
-				e.material = i ? await b.getDependency("material", i.material) : e.userData.__baseMaterial, b.assignFinalMaterial(e);
+				e.material = i ? await x.getDependency("material", i.material) : e.userData.__baseMaterial, x.assignFinalMaterial(e);
 			})());
 		}), await Promise.all(n), !0;
 	}
-	let E = {
+	let D = {
 		az: .7,
 		azG: .7,
 		pol: 1.05,
@@ -5211,38 +5211,38 @@ function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposur
 		dist: 3,
 		distG: 3,
 		target: new e.Vector3()
-	}, D = c, O = l, k = new e.Vector3(), A = 3;
-	function j() {
-		let e = p.fov * Math.PI / 180, t = 2 * Math.atan(Math.tan(e / 2) * Math.max(1e-4, p.aspect)), n = k.y * .5 / Math.tan(e / 2), r = Math.max(k.x, k.z) * .5 / Math.tan(t / 2);
+	}, O = l, k = u, A = new e.Vector3(), j = 3;
+	function M() {
+		let e = m.fov * Math.PI / 180, t = 2 * Math.atan(Math.tan(e / 2) * Math.max(c, m.aspect)), n = A.y * .5 / Math.tan(e / 2), r = Math.max(A.x, A.z) * .5 / Math.tan(t / 2);
 		return Math.max(n, r, 1e-4) * o;
 	}
-	let M = (e, t) => {
-		E.azG += e, E.polG = Le(E.polG - t, u, d);
-	}, N = (e) => {
-		E.distG = Le(E.distG * e, D, O);
+	let N = (e, t) => {
+		D.azG += e, D.polG = Le(D.polG - t, d, f);
+	}, P = (e) => {
+		D.distG = Le(D.distG * e, O, k);
 	};
-	function P() {
-		if (!y) return;
-		let t = new e.Box3().setFromObject(y), n = t.getSize(new e.Vector3()), r = t.getCenter(new e.Vector3());
-		y.position.sub(r), _.position.y = t.min.y - r.y, g.target.position.set(0, 0, 0), k.copy(n), A = j(), D = A * c, O = Math.max(D + .01, A * l), E.dist = E.distG = A, E.target.set(0, k.y * s, 0);
+	function F() {
+		if (!b) return;
+		let t = new e.Box3().setFromObject(b), n = t.getSize(new e.Vector3()), r = t.getCenter(new e.Vector3());
+		b.position.sub(r), v.position.y = t.min.y - r.y, _.target.position.set(0, 0, 0), A.copy(n), j = M(), O = j * l, k = Math.max(O + .01, j * u), D.dist = D.distG = j, D.target.set(0, A.y * s, 0);
 	}
-	function F(e) {
-		a && (E.azG += a * e), E.az = X(E.az, E.azG, e, 6), E.pol = X(E.pol, E.polG, e, 6), E.dist = X(E.dist, E.distG, e, 6);
-		let t = Math.sin(E.pol), n = Math.cos(E.pol);
-		p.position.set(E.target.x + E.dist * t * Math.sin(E.az), E.target.y + E.dist * n, E.target.z + E.dist * t * Math.cos(E.az)), p.lookAt(E.target);
+	function I(e) {
+		a && (D.azG += a * e), D.az = X(D.az, D.azG, e, 6), D.pol = X(D.pol, D.polG, e, 6), D.dist = X(D.dist, D.distG, e, 6);
+		let t = Math.sin(D.pol), n = Math.cos(D.pol);
+		m.position.set(D.target.x + D.dist * t * Math.sin(D.az), D.target.y + D.dist * n, D.target.z + D.dist * t * Math.cos(D.az)), m.lookAt(D.target);
 	}
-	function I(e, t) {
-		if (p.aspect = t > 0 ? e / t : 1, p.updateProjectionMatrix(), !y) return;
-		let n = A;
-		A = j();
-		let r = n > 0 ? A / n : 1;
-		D = A * c, O = Math.max(D + .01, A * l), E.distG = Le(E.distG * r, D, O), E.dist = Le(E.dist * r, D, O);
+	function L(e, t) {
+		if (m.aspect = t > 0 ? e / t : 1, m.updateProjectionMatrix(), !b) return;
+		let n = j;
+		j = M();
+		let r = n > 0 ? j / n : 1;
+		O = j * l, k = Math.max(O + .01, j * u), D.distG = Le(D.distG * r, O, k), D.dist = Le(D.dist * r, O, k);
 	}
-	let L = {};
-	function R() {
-		L.tone = t.toneMapping, L.exp = t.toneMappingExposure, L.cs = t.outputColorSpace, L.ac = t.autoClear, L.smE = t.shadowMap.enabled, L.smT = t.shadowMap.type, L.rt = t.getRenderTarget(), t.getClearColor(L.cc = new e.Color()), L.ca = t.getClearAlpha(), t.toneMapping = e.ACESFilmicToneMapping, t.toneMappingExposure = i, t.outputColorSpace = e.SRGBColorSpace, t.autoClear = !0, t.shadowMap.enabled = !0, t.shadowMap.type = e.PCFSoftShadowMap, t.setRenderTarget(null), t.render(f, p), t.toneMapping = L.tone, t.toneMappingExposure = L.exp, t.outputColorSpace = L.cs, t.autoClear = L.ac, t.shadowMap.enabled = L.smE, t.shadowMap.type = L.smT, t.setClearColor(L.cc, L.ca), t.setRenderTarget(L.rt);
+	let R = {};
+	function z() {
+		R.tone = t.toneMapping, R.exp = t.toneMappingExposure, R.cs = t.outputColorSpace, R.ac = t.autoClear, R.smE = t.shadowMap.enabled, R.smT = t.shadowMap.type, R.rt = t.getRenderTarget(), t.getClearColor(R.cc = new e.Color()), R.ca = t.getClearAlpha(), t.toneMapping = e.ACESFilmicToneMapping, t.toneMappingExposure = i, t.outputColorSpace = e.SRGBColorSpace, t.autoClear = !0, t.shadowMap.enabled = !0, t.shadowMap.type = e.PCFSoftShadowMap, t.setRenderTarget(null), t.render(p, m), t.toneMapping = R.tone, t.toneMappingExposure = R.exp, t.outputColorSpace = R.cs, t.autoClear = R.ac, t.shadowMap.enabled = R.smE, t.shadowMap.type = R.smT, t.setClearColor(R.cc, R.ca), t.setRenderTarget(R.rt);
 	}
-	function z(e) {
+	function B(e) {
 		e.traverse((e) => {
 			e.geometry && e.geometry.dispose();
 			let t = e.material;
@@ -5255,24 +5255,24 @@ function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposur
 			});
 		});
 	}
-	function B() {
-		y && z(y), _.geometry.dispose(), _.material.dispose(), h.dispose();
+	function V() {
+		b && B(b), v.geometry.dispose(), v.material.dispose(), g.dispose();
 	}
 	return {
-		scene: f,
-		camera: p,
-		load: C,
-		listVariants: w,
-		setVariant: T,
-		frameToBounds: P,
-		orbitBy: M,
-		zoomBy: N,
-		update: F,
-		render: R,
-		resize: I,
-		dispose: B,
+		scene: p,
+		camera: m,
+		load: w,
+		listVariants: T,
+		setVariant: E,
+		frameToBounds: F,
+		orbitBy: N,
+		zoomBy: P,
+		update: I,
+		render: z,
+		resize: L,
+		dispose: V,
 		get url() {
-			return S;
+			return C;
 		}
 	};
 }

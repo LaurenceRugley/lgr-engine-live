@@ -35,7 +35,14 @@ export function createProductStage({
      the model rides HIGH in frame and leaves the lower third for copy. A product stage whose consumer
      puts a caption under it needs this; centring the model dead-centre is only right for a bare
      viewer. */
-  frameBias = -0.52,
+  frameBias = -0.66,
+  /* Floor on the aspect used by the WIDTH half of the fit. A long low object (a shoe) fitted across a
+     390px portrait viewport pushes the camera absurdly far back — measured, the product fell to 2.9%
+     of a phone frame against ~10% on desktop, small enough that at some scroll positions it left the
+     visible band entirely and the page showed three swatches on an empty ground. On a narrow screen
+     the right answer is to let the LENGTH overflow a little and keep the product legible, which is
+     what a phone product shot does anyway. Desktop is unaffected: its aspect is already above this. */
+  minFitAspect = 0.95,
   /* Zoom clamps, as MULTIPLES OF THE FIT DISTANCE (2026-08-07). They used to be absolute world units
      while this comment claimed they were relative, and the mismatch had teeth: for the showcase shoe
      the fit landed on 1.60 and the absolute floor was ALSO 1.60, so the camera opened pinned exactly
@@ -121,7 +128,7 @@ export function createProductStage({
      aspect, so it has to be recomputable — see resize(). */
   function fitDistance() {
     const vFov = (camera.fov * Math.PI) / 180;
-    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.0001, camera.aspect));
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(minFitAspect, camera.aspect));
     const dV = (_size.y * 0.5) / Math.tan(vFov / 2);
     const dH = (Math.max(_size.x, _size.z) * 0.5) / Math.tan(hFov / 2);
     return Math.max(dV, dH, 0.0001) * fitMargin;
