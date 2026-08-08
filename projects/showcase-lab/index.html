@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>LGR Engine — a procedural city you fly by scrolling</title>
-  <meta name="description" content="A scroll-driven flight over a hand-built procedural city. The day rides your scroll, the art style morphs, and at the bottom you take the controls." />
+  <meta name="description" content="A scroll-driven flight over a procedural city grown from a single seed. The day rides your scroll, the art style morphs, and at the bottom you take the controls." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e0b07'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='18' font-weight='700' fill='%23b89968' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E" />   <!-- the ONLY page in the repo that lacked one; the browser's automatic
        /favicon.ico request was the single console error on the portfolio page -->
   <link rel="preload" as="image" href="./poster.jpg" fetchpriority="high" />
@@ -158,9 +158,20 @@
     .swatch[aria-pressed="true"] { border-color:#1a1712; transform:translateY(-3px); }
     .swatch[aria-pressed="true"]::after { content:""; position:absolute; inset:-6px; border:1px solid rgba(26,23,18,0.4); border-radius:50%; }
     .swatch:focus-visible { outline:2px solid #9a6a2e; outline-offset:3px; }
-    .sw-midnight { background:linear-gradient(135deg,#2a2f45,#0e1120); }
-    .sw-beach    { background:linear-gradient(135deg,#e9d9b8,#c9a877); }
-    .sw-street   { background:linear-gradient(135deg,#c4413a,#7a2420); }
+    /* Chips must show what the MATERIAL actually renders as. All three were wrong (2026-08-07),
+       verified by switching each variant and looking at the frame:
+         midnight  rendered a bright CYAN mesh; the chip was a near-black navy, so the darkest chip
+                   on the row produced the brightest shoe.
+         beach     rendered dusty PINK; the chip was sand/cream.
+         street    rendered BLACK with red stripes; the chip was solid red, i.e. it showed the accent
+                   and called it the colourway.
+       A configurator whose swatches lie about their own product is worse than one with no swatches,
+       and this is the section pitching e-commerce work. Colours read from the rendered captures: a
+       modal-colour sampler was tried first and kept locking onto the white midsole (it returned the
+       same grey for the pink and the black shoe), so the honest instrument here was looking. */
+    .sw-midnight { background:linear-gradient(135deg,#3aafda,#1b6e96); }
+    .sw-beach    { background:linear-gradient(135deg,#e6c9cc,#b78d91); }
+    .sw-street   { background:linear-gradient(135deg,#343434,#0e0e0e); }
     /* The closing section. Shares the configurator's light ground so the page RESOLVES on a bright
        note instead of trailing off, and is the only place on the document with an outbound link. */
     .chapter.sign { display:flex; align-items:center; justify-content:center; min-height:78svh;
@@ -218,7 +229,7 @@
        the VISIBLE choreography is #lgr-poster below, which main.js holds until landmarks are ready (F08). -->
   <div id="lgr-loader" aria-hidden="true" style="position:fixed;width:0;height:0;overflow:hidden;pointer-events:none"></div>
   <div id="lgr-poster">
-    <img id="poster" src="./poster.jpg" alt="A hand-built procedural city at golden hour, seen from a helicopter." fetchpriority="high" decoding="async" />
+    <img id="poster" src="./poster.jpg" alt="A procedural city at golden hour, seen from a helicopter." fetchpriority="high" decoding="async" />
     <div class="loader-copy">
       <div class="mark">LGR Engine</div>
       <div class="pct" id="loadPct">0%</div>

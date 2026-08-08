@@ -197,7 +197,15 @@ const product = createProductStage({ renderer, backdrop: '#efe9df', envIntensity
   const NARRATIVE_SECTIONS = [
     { id: 'intro', eyebrow: 'LGR · WebGL Engine', title: 'A city you fly by scrolling.', accent: ACCENTS[0],
       body: 'Everything here is generated: the streets, the towers, the water, the sky. Scroll to descend into it.' },
-    { id: 'procedural', eyebrow: 'Procedural', title: 'Hand-built, to the horizon.', accent: ACCENTS[1],
+    /* RETITLED 2026-08-07. The headline said "Hand-built, to the horizon." directly above a body that
+       says "No baked scenery. A seed grows the whole skyline." — the chapter contradicted itself, and
+       hand-built is the opposite of the claim that makes the work impressive.
+       The TAGS row carries the actual seed. Every engineering claim on this page was an adjective and
+       not one was checkable; the seed is the single most falsifiable thing here, because a visitor can
+       change it in the URL (?seed=) and watch a different city grow. It also finally uses the tags row
+       the narrative module has always built and no section ever populated. */
+    { id: 'procedural', eyebrow: 'Procedural', title: 'One seed. A whole skyline.', accent: ACCENTS[1],
+      tags: [`seed ${citySeed}`, 'change it in the URL'],
       body: "No baked scenery. A seed grows the whole skyline; the same engine drives every frame you're scrolling through." },
     { id: 'day', eyebrow: 'One continuous shot', title: 'The day rides your scroll.', accent: ACCENTS[2],
       body: 'Golden hour eases to dusk to night as you go. The sun is a function of your scroll position, not a clock.' },
@@ -215,7 +223,7 @@ const product = createProductStage({ renderer, backdrop: '#efe9df', envIntensity
       body: (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
         ? 'Fly the helicopter, take the helm of a boat, ride the air as a gull, or drop under the surface as a fish. Four bodies, one city, no reload. The stick steers, ⤒ and ⤓ climb and dive, and ✕ drops you back to the page.'
         : 'Fly the helicopter, take the helm of a boat, ride the air as a gull, or drop under the surface as a fish. Four bodies, one city, no reload. WASD steers, Space and Shift climb and dive, and Esc drops you back to the page.',
-      cta: { primary: { label: '✈ Take the controls', onClick: () => takeControls() } } },
+      cta: { primary: { label: 'Take the controls', onClick: () => takeControls() } } },
   ];
   const flightT = () => clamp(scrollT / CONFIG_START, 0, 1);
   let _postNow = BEAUTY;
@@ -296,11 +304,16 @@ const product = createProductStage({ renderer, backdrop: '#efe9df', envIntensity
 
      Why it appears AFTER you take the controls rather than as four CTAs: one tap to get in is the
      low-friction path, and discovering you can also be a gull is a better beat than a menu. */
+  /* NO EMOJI on the switcher or the CTA (2026-08-07). They render in a different typeface at a
+     different optical weight than the label beside them, and the page has no other icon system, so
+     they read as decoration bolted onto a control. The active pill's gold fill is already the
+     affordance doing the work. (The touch HUD's ⤒/⤓/✕ stay: those are functional control labels
+     matching projects/city's own glyphs, Rule 11.) */
   const BODIES = [
-    { model: 'spacecraft', label: '✈ craft', lift: true },
-    { model: 'boat',       label: '⛵ boat',  lift: false },
-    { model: 'bird',       label: '🕊 gull',  lift: true },
-    { model: 'fish',       label: '🐟 fish',  lift: true },
+    { model: 'spacecraft', label: 'craft', lift: true },
+    { model: 'boat',       label: 'boat',  lift: false },
+    { model: 'bird',       label: 'gull',  lift: true },
+    { model: 'fish',       label: 'fish',  lift: true },
   ];
   const USES_LIFT = new Set(BODIES.filter((b) => b.lift).map((b) => b.model));
   let switcher = null, activeModel = 'spacecraft';
