@@ -15,6 +15,11 @@
        third-party origin, which is the one thing you never do on a page tuned around poster-as-LCP. -->
   <link rel="preload" as="font" type="font/woff2" href="./fonts/outfit-700-latin.woff2" crossorigin />
   <style>
+    /* Form controls do NOT inherit font-family: a <button> or <select> renders in the UA default
+       (Arial here) next to a page set in something else, and it reads as a stray element rather than
+       part of the design. Audited across every built project 2026-08-07 and found on six of them.
+       One rule, and it cannot regress the canvas — this is DOM chrome only. */
+    button, select, input, textarea { font: inherit; }
     /* DISPLAY FACE (2026-08-07). The narrative's type METRICS were already right — clamp sizing,
        1.02 leading, -0.02em tracking — but the family was the browser's default ui-sans-serif chain,
        i.e. never actually chosen. That was the loudest remaining tell on the page.

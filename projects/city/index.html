@@ -25,6 +25,11 @@
   <meta name="twitter:image" content="https://laurencerugley.github.io/lgr-engine-live/live/og.jpg" />
   <meta name="twitter:image:alt" content="A helicopter flying over a procedural city at golden hour, rendered by the hand-built LGR WebGL engine." />
   <style>
+    /* Form controls do NOT inherit font-family: a <button> or <select> renders in the UA default
+       (Arial here) next to a page set in something else, and it reads as a stray element rather than
+       part of the design. Audited across every built project 2026-08-07 and found on six of them.
+       One rule, and it cannot regress the canvas — this is DOM chrome only. */
+    button, select, input, textarea { font: inherit; }
     html, body { margin: 0; height: 100%; background: #0e0b07; overflow: hidden; }
     canvas { display: block; }       /* three.js appends the canvas here */
     .hint {

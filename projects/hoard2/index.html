@@ -6,6 +6,11 @@
     <title>The Hoard — survive the dead</title>
     <link rel="icon" href="data:," /><!-- suppress the implicit /favicon.ico request (keeps the zero-console-error gate honest) -->
     <style>
+    /* Form controls do NOT inherit font-family: a <button> or <select> renders in the UA default
+       (Arial here) next to a page set in something else, and it reads as a stray element rather than
+       part of the design. Audited across every built project 2026-08-07 and found on six of them.
+       One rule, and it cannot regress the canvas — this is DOM chrome only. */
+    button, select, input, textarea { font: inherit; }
       :root { color-scheme: dark; }
       /* iOS Safari: lock the page (no pan/scroll that hid the map + stole look-drags in PORTRAIT) and use
          the DYNAMIC viewport height (dvh) so the canvas fills the VISIBLE area under the URL bar/toolbar.

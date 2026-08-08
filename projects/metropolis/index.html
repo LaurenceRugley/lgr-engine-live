@@ -6,6 +6,11 @@
     <title>Metropolis — a living city, composed</title>
     <link rel="icon" href="data:," />
     <style>
+      /* Form controls do NOT inherit font-family. #dock button already had `font: inherit`, which is
+         exactly why this was missed on the first sweep — the string was present so the file was
+         skipped, while the select and the date input were still rendering in the UA default Arial
+         beside a dock set in system-ui. Cover the whole class, not one element of it. */
+      button, select, input, textarea { font: inherit; }
       :root { color-scheme: dark; }
       html, body { margin: 0; height: 100dvh; background: #0e0b07; overflow: hidden; overscroll-behavior: none; position: fixed; inset: 0; width: 100%; touch-action: none; }
       #app { position: fixed; inset: 0; height: 100dvh; touch-action: none; }
