@@ -3,18 +3,13 @@
    ------------------------------------------------------------
    Exports the renderer/post/rig/sun layer and general-purpose tools —
    everything a no-build consumer needs WITHOUT the city content pack.
-   Omitted vs index-lib.js:
-     - createEngine           (wraps createCityWorld — city dep)
-     - createCityWorld        (city content)
-     - createCity/citygen     (city generation)
-     - createCityLife/agents  (city NPC system)
-     - createStreetLights     (city night lights)
-     - createWaterLife        (boat/gull water life)
-     - createLandmarkFactory  (GLB building kit)
-     - createWeatherRig       (city weather)
-     - createCloudField       (city clouds)
-     - createCelestials       (city moon/stars)
-     - createCodePanel        (shiki dep — omitted from all lib entries)
+
+   Omitted vs index.js: 5 categories (city / hoard / 2D-UI / scroll-narrative / shiki), 78 names as of
+   2026-08-02. The exhaustive, CHECKED list lives in `tools/barrel-coverage.test.mjs`'s `CORE_OMISSIONS`
+   constant, not here — a prose list in this comment previously claimed only ~11 categories/~16 names
+   and rotted silently as index.js grew (adversarial guard audit, 2026-08-02: real count was 78). A test
+   now asserts that list is complete (every real omission named) and non-stale (every named one still
+   actually omitted), so this comment can't drift from reality unnoticed again.
    The workspace projects still import from index.js (full barrel, unchanged).
    ============================================================ */
 
@@ -22,7 +17,8 @@ export * as THREE from 'three';
 
 export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.js';
 export { createCameraRig, CAM } from './src/camera-rig.js';
-export { createSunRig, validateSunKeyframes } from './src/sun-rig.js';
+export { measureBounds, autoFrame } from './src/asset-viewer.js';   // Arc A-VIEW: bbox auto-framing
+export { createSunRig, validateSunKeyframes, lowSunWashK } from './src/sun-rig.js';
 export { createCapture } from './src/capture.js';
 // CLIENT-CRITICAL (audit 2026-07-30): client sites consume THIS core micro-barrel via the no-build fx/ path,
 // so the field debug overlay + the recorder MUST be reachable here — they were in index.js only (barrel bug,
@@ -31,10 +27,14 @@ export { createDebugOverlay } from './src/debug-overlay.js';
 export { VIDEO_TYPES, createRecorder, pickVideoType, recorderExt } from './src/createRecorder.js';
 export { createViewerUI } from './src/viewer-ui.js';
 export { createHints } from './src/hints.js';
+export { createTouchControls } from './src/touch-controls.js';   // 2026-08-06: the floating thumbstick + look-drag — touch input was built 5x in projects and never in core
+// createPedestrians is OMITTED here (CORE_OMISSIONS.city): it imports citygen + ships a city-content
+// asset — a no-city renderer consumer must not pay for it. index.js/index-lib.js carry it.
 export { createAppShell, readAppFlags } from './src/app-shell.js';
 export { THEME, applyThemeToRoot } from './src/diagram-theme.js';
 export { createMorphTimeline, easeInOutCubic } from './src/math/morph-timeline.js';
 export { createMatrixGrid } from './src/math/matrix-grid.js';
+export { createTween } from './src/math/tween.js';   // Arc A-TWEEN: fixed-duration eased tween (gap 5)
 export { validateSceneSpec, fromURLParams, toURLParams, applySceneSpec, SCENE_SPEC_VERSION } from './src/scene-spec.js';
 export { createProductStage } from './src/product-stage.js';
 export { createDevMode } from './src/dev-mode.js';
@@ -45,7 +45,7 @@ export { createPlacedLife } from './src/placed-life.js';
 export { createHiddenProp } from './src/hidden-prop.js';
 export { pickStreetIntersection, createProximityLatch } from './src/hidden-prop-logic.js';
 export { createEditor } from './src/editor.js';
-export { createPilotController, createGroundModel, createSpacecraftModel, ATV_PROFILE, CRAFT_PROFILE } from './src/pilot.js';
+export { createPilotController, createGroundModel, createSpacecraftModel, createRoadModel, createBoatModel, createBirdModel, createFishModel, carryMomentum, ATV_PROFILE, CRAFT_PROFILE, ROAD_PROFILE, BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE } from './src/pilot.js';   // A-FEEL: createRoadModel = a car that corners on a street grid (curvature-limited steering, R grows with v squared)
 export { createCockpit } from './src/cockpit.js';
 export { createGyroLook, mapGyroToLook } from './src/gyro-look.js';
 export { createTracer }                  from './src/tracer.js';
@@ -97,8 +97,9 @@ export { detectLakes, buildLakeGroup, createWorldLakes } from './src/world-water
 export { createWaterFlow } from './src/water-flow.js';
 export { reprojectScatter } from './src/scatter.js';
 export { scatterAdd, scatterErase } from './src/scatter.js';
-export { createCatalog, seedWorldEditorCatalog } from './src/catalog.js';
+export { createCatalog, seedWorldEditorCatalog, registerAssetCatalog } from './src/catalog.js';
 export { createSkyAtmosphere } from './src/sky-atmosphere.js';
+export { createHillaireSky, GROUND_MM, ATMOS_MM } from './src/hillaire-sky.js';   // A-SKYDOME: the physically-based all-hours sky (Rayleigh+Mie+ozone, RGBA8 LUTs — mobile-safe). Lifted from lgr-live-sky 2026-08-05; barrel-exported so it is reachable through the public API, not just as an internal seam (the index's CORE_UNBARRELED class).
 export { makeContactShadow, makeVignette, createSeatedLook } from './src/interior.js';
 export {
   vectorOn, vectorTint, vectorShadow, weatherSnow, weatherCloud, weatherCloudOff,
@@ -176,7 +177,7 @@ export { createCelestial } from './src/createCelestial.js';
 // ARC A20 — THE REAL-ASTRONOMY LIFT (from lgr-live-sky): real stars (BSC5), 88 constellations, all 7
 // planets, all 110 Messier objects, and the Bortle light-pollution model (one shared shader mechanism
 // for star/planet/Messier visibility). No-op by construction; real-location-mode only.
-export { limitingMagnitude, skyGlow, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
+export { limitingMagnitude, skyGlow, skyBrightnessSQM, skyGlowIntensity, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
 export { planetPosition, PLANET_KEYS } from './src/planets.js';
 export { createTrueStars } from './src/createTrueStars.js';
 export { createConstellations } from './src/createConstellations.js';

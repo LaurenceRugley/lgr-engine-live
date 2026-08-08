@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>LGR Engine — a procedural city you fly by scrolling</title>
+  <meta name="description" content="A scroll-driven flight over a hand-built procedural city. The day rides your scroll, the art style morphs, and at the bottom you take the controls." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e0b07'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='18' font-weight='700' fill='%23b89968' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E" />   <!-- the ONLY page in the repo that lacked one; the browser's automatic
+       /favicon.ico request was the single console error on the portfolio page -->
+  <link rel="preload" as="image" href="./poster.jpg" fetchpriority="high" />
+  <!-- Outfit 700, latin subset, 14KB, SIL OFL 1.1 (public/fonts/OFL.txt + README.md).
+       PRELOADED but NOT fetchpriority:high — the poster keeps that, because it is the LCP element
+       and a headline that swaps in 80ms later costs nothing while a delayed poster costs the score.
+       Self-hosted rather than a Google Fonts <link>: that would be a render-blocking stylesheet on a
+       third-party origin, which is the one thing you never do on a page tuned around poster-as-LCP. -->
+  <link rel="preload" as="font" type="font/woff2" href="./fonts/outfit-700-latin.woff2" crossorigin />
+  <style>
+    /* DISPLAY FACE (2026-08-07). The narrative's type METRICS were already right — clamp sizing,
+       1.02 leading, -0.02em tracking — but the family was the browser's default ui-sans-serif chain,
+       i.e. never actually chosen. That was the loudest remaining tell on the page.
+       Outfit: a geometric grotesque with a confident display range. Deliberately not Inter, and not
+       Fraunces or Instrument Serif, all three of which read as "an AI picked a font".
+       ONE weight, display only. Headlines and the configurator heading use it; body copy, UI and code
+       stay on the system stack, which costs nothing and is well drawn on every platform already.
+       font-display:swap so the text is never invisible while it loads. */
+    @font-face {
+      font-family: 'Outfit';
+      src: url('./fonts/outfit-700-latin.woff2') format('woff2');
+      font-weight: 700; font-style: normal; font-display: swap;
+    }
+    :root { --display: 'Outfit', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    :root { --ink:#f4ece0; --dim:rgba(244,236,224,0.62); --gold:#e8b46a; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body { height:100%; }
+    /* LCP POSTER — an instant golden-hour gradient paints BEFORE the WebGL canvas warms (the canvas fades in over it).
+       So first paint is immediate + on-brand even on a cold GPU. (A real baked poster.jpg is a Phase-3 CWV item.) */
+    body {
+      background: radial-gradient(120% 90% at 50% 8%, #c98b4e 0%, #6a4a3a 42%, #241a20 78%, #120c14 100%);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    /* The engine appends its <canvas> to <body>; main.js CSS-pins it as a FIXED full-viewport background (F01). This
+       rule is a belt-and-braces so it's pinned even for the frame before JS runs. It fades in once __cityReady. */
+    body > canvas { position:fixed; inset:0; z-index:0; opacity:0; transition:opacity .8s ease; }
+    body.ready > canvas { opacity:1; }
+
+    /* The SCROLL DOCUMENT — chapters stacked over the fixed canvas. Each is one viewport tall SPACER (no inner
+       markup any more — the copy itself is now the engine's createScrollNarrative, mounted fixed + progress-driven
+       by main.js); the total height is still what the scrollDirector maps [0..1] onto, byte-identical to before
+       this lift, so the camera-flight timing (KF, CONFIG_START) is untouched. */
+    .scroll { position:relative; z-index:1; }
+    .chapter { min-height:100svh; }
+
+    /* the narrative content layer (createScrollNarrative) hides during the studio configurator and free-flight
+       piloting — the same two conditions that already hide the static .scroll document (see body.piloting below). */
+    body.config-open .lgr-narrative, body.config-open .lgr-narrative-nav,
+    body.piloting .lgr-narrative, body.piloting .lgr-narrative-nav { opacity:0; pointer-events:none; transition:opacity .3s ease; }
+
+    /* TAKE THE CONTROLS — the hand-off button in the final chapter. */
+    .cta { margin-top:2rem; display:inline-flex; align-items:center; gap:.6rem; padding:1rem 1.8rem; border:1px solid rgba(232,180,106,0.5);
+           border-radius:999px; background:rgba(232,180,106,0.12); color:var(--ink); font:600 1.05rem/1 inherit; letter-spacing:0.02em;
+           cursor:pointer; backdrop-filter:blur(6px); transition:background .2s, transform .2s; }
+    .cta:hover { background:rgba(232,180,106,0.22); transform:translateY(-2px); }
+    .cta:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+
+    /* Fixed scroll-progress rail (premium cue) + a "scroll to fly" hint that fades on first scroll. */
+    .rail { position:fixed; top:0; left:0; height:2px; width:100%; z-index:3; background:transparent; }
+    .rail > i { display:block; height:100%; width:0%; background:linear-gradient(90deg, var(--accent, var(--gold)), #fff); transition:width .1s linear, background .5s ease; }
+    .hint { position:fixed; left:50%; bottom:2rem; transform:translateX(-50%); z-index:3; font-size:.85rem; letter-spacing:.14em;
+            text-transform:uppercase; color:var(--dim); transition:opacity .4s; pointer-events:none; }
+    .hint::after { content:""; display:block; width:1px; height:26px; margin:.6rem auto 0; background:linear-gradient(var(--gold), transparent); }
+    body.scrolled .hint { opacity:0; }
+
+    /* Minimal pilot HUD — shown only after TAKE THE CONTROLS. */
+    .hud { position:fixed; left:50%; top:1.5rem; transform:translateX(-50%); z-index:4; display:none; gap:.5rem; align-items:center;
+           padding:.55rem 1rem; border-radius:999px; background:rgba(18,12,20,0.6); border:1px solid rgba(244,236,224,0.14);
+           font-size:.8rem; letter-spacing:.12em; text-transform:uppercase; color:var(--dim); backdrop-filter:blur(8px); }
+    body.piloting .hud { display:flex; }
+    body.piloting .scroll, body.piloting .hint { display:none; }   /* free flight owns the screen — hide the scroll doc */
+
+    /* #lgr-poster = the LCP POSTER + the % PRELOADER. It shows a real poster.jpg (the LCP element, painted before any
+       WebGL) behind a title + a percentage, and I fade it (→ .gone) once the lazy-booted engine's landmarks are ready.
+       CLS-safe: everything is position:fixed (no layout flow). (The engine hard-owns the SEPARATE hidden #lgr-loader
+       stub below — it force-fades it after 2 rendered frames, which would cut this choreography short; F08.) */
+    #lgr-poster { position:fixed; inset:0; z-index:50; overflow:hidden; background:#120c14; transition:opacity .9s ease; }
+    #lgr-poster.gone { opacity:0; pointer-events:none; }
+    #poster { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+    #lgr-poster::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, rgba(18,12,20,0.15) 0%, rgba(18,12,20,0.35) 55%, rgba(18,12,20,0.85) 100%); }
+    .loader-copy { position:absolute; inset:auto 0 clamp(3rem,12vh,8rem) 0; z-index:1; display:flex; flex-direction:column; align-items:center; gap:.9rem; padding:0 1.5rem; text-align:center; }
+    .loader-copy .mark { font:700 clamp(1.6rem,4vw,2.4rem)/1 Georgia, serif; letter-spacing:0.06em; color:var(--ink); text-shadow:0 2px 24px rgba(0,0,0,0.6); }
+    .loader-copy .pct { font:600 .95rem/1 ui-sans-serif, system-ui; letter-spacing:.28em; color:var(--gold); }
+    .loader-copy .bar { width:min(240px, 60vw); height:2px; background:rgba(244,236,224,0.18); border-radius:2px; overflow:hidden; }
+    .loader-copy .bar > i { display:block; height:100%; width:0%; background:var(--gold); transition:width .25s ease; }
+    .loader-copy .fallback { display:none; font-size:.9rem; color:var(--dim); max-width:22rem; }
+    body.no-webgl .loader-copy .pct, body.no-webgl .loader-copy .bar { display:none; }
+    body.no-webgl .loader-copy .fallback { display:block; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* sound toggle (opt-in, muted default) */
+    .sound { position:fixed; right:1.2rem; top:1.2rem; z-index:6; width:2.6rem; height:2.6rem; border-radius:50%; display:grid; place-items:center;
+             border:1px solid rgba(244,236,224,0.18); background:rgba(18,12,20,0.4); color:var(--dim); cursor:pointer; backdrop-filter:blur(8px); font-size:1rem; transition:color .2s, border-color .2s; }
+    .sound:hover { color:var(--ink); border-color:rgba(232,180,106,0.5); }
+    .sound[aria-pressed="true"] { color:var(--gold); border-color:var(--gold); }
+    .sound:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+
+    /* CONFIGURATOR — the product renders to the canvas behind; this section holds the UI (swatches at the bottom,
+       the model floats in the upper area). On a light studio backdrop the copy flips to dark ink. */
+    /* `display:flex` was MISSING and both alignment declarations below were inert (2026-08-07).
+       `.chapter` is `min-height:100svh` with no display, so a <section> computed to `display:block`
+       and align-items/justify-content did nothing: .config-ui stacked at offset 0 of a 130svh
+       section while the shoe and the price bar sat at the bottom. Measured at 1440x900 — chapter
+       height 1170px, .config-ui top 0px — so the "Build your pair." heading, the subtitle and all
+       three colourway swatches rendered about 1.3 viewports ABOVE the product they describe, and a
+       visitor never saw them. The bottom-clearance hack further down (body.config-open .config-ui
+       padding-bottom) was written to stop the price bar covering swatches it could never reach,
+       which is the proof this was always meant to be flex.
+       SCOPED to .chapter.config deliberately, NOT .chapter: the six narrative sections are pure
+       height spacers whose 100svh geometry the scroll director's [0,1] mapping depends on. */
+    .chapter.config { display:flex; align-items:flex-end; justify-content:center; min-height:130svh; color:#1a1712; }
+    .config-ui { text-align:center; max-width:40rem; }
+    .config-ui h2 { font-size:clamp(2rem, 5vw, 3.4rem); font-weight:700; letter-spacing:-0.02em; }
+    .config-ui .k { color:#9a6a2e; }
+    .config-sub { margin-top:.8rem; color:rgba(26,23,18,0.6); font-size:1rem; }
+    /* LEGIBILITY WASH (lgr-taste, 2026-08-07 — rev 3). Copy sits over a LIVE frame that travels from
+       a pale afternoon sky to a night skyline of lit windows, and one fixed wash cannot serve both.
+
+       REV 1 was a radial behind the panel: right over the night city, an obvious grey blob over the
+       flat dawn sky, because a soft shape vanishes on a busy background and is just a shape on a flat
+       one. REV 2 anchored it to the viewport edge instead, which produced a hard-edged grey RECTANGLE
+       — the panel's own transform makes a position:fixed child resolve against the panel rather than
+       the viewport, and a horizontal-only gradient has hard top and bottom edges regardless. Both were
+       caught by looking at the capture straight after shipping, which is the only reason rev 3 exists.
+
+       REV 3 stops guessing: the page ALREADY knows how dark the frame is, because the scroll position
+       drives the sun (KF sun 0.34 afternoon → 0.80 → 0.02 night). main.js publishes that as --lgr-wash
+       and the wash follows it, so the pale chapters get almost nothing and the night chapters get a
+       real lift. The shape is rev 1's radial, which was always the right shape at the wrong strength. */
+    .lgr-narrative-panel::before {
+      content: ""; position: absolute; z-index: -1; pointer-events: none;
+      left: -30%; right: -30%; top: -45%; bottom: -45%;
+      background: radial-gradient(closest-side ellipse at 50% 50%,
+        rgba(8, 9, 12, var(--lgr-wash, 0.18)) 0%,
+        rgba(8, 9, 12, calc(var(--lgr-wash, 0.18) * 0.55)) 48%,
+        rgba(8, 9, 12, 0) 100%);
+    }
+    /* Apply the display face ONLY where type is display: the narrative headlines and the
+       configurator heading. Everything else — body copy, tags, buttons, the price bar, code — stays
+       on the system stack, so the page pays for exactly one file. */
+    .lgr-narrative-title, .config-ui h2, .loader-copy .mark { font-family: var(--display); }
+    .config-sub code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em; background:rgba(26,23,18,0.08); padding:.1em .4em; border-radius:.3em; }
+    .swatches { display:flex; gap:.9rem; justify-content:center; margin-top:1.8rem; }
+    .swatch { width:2.6rem; height:2.6rem; border-radius:50%; border:2px solid rgba(26,23,18,0.15); cursor:pointer; transition:transform .18s, border-color .18s;
+              box-shadow:0 4px 14px rgba(0,0,0,0.18); position:relative; }
+    .swatch:hover { transform:translateY(-3px); }
+    .swatch[aria-pressed="true"] { border-color:#1a1712; transform:translateY(-3px); }
+    .swatch[aria-pressed="true"]::after { content:""; position:absolute; inset:-6px; border:1px solid rgba(26,23,18,0.4); border-radius:50%; }
+    .swatch:focus-visible { outline:2px solid #9a6a2e; outline-offset:3px; }
+    .sw-midnight { background:linear-gradient(135deg,#2a2f45,#0e1120); }
+    .sw-beach    { background:linear-gradient(135deg,#e9d9b8,#c9a877); }
+    .sw-street   { background:linear-gradient(135deg,#c4413a,#7a2420); }
+    /* The closing section. Shares the configurator's light ground so the page RESOLVES on a bright
+       note instead of trailing off, and is the only place on the document with an outbound link. */
+    .chapter.sign { display:flex; align-items:center; justify-content:center; min-height:78svh;
+      background:var(--paper,#efe7dc); color:#1a1712; padding:3rem 1.5rem
+      calc(3rem + env(safe-area-inset-bottom)); }
+    .sign-ui { max-width:44rem; text-align:center; }
+    .sign-ui .k { font:700 .8rem/1 ui-sans-serif, system-ui; letter-spacing:.32em; text-transform:uppercase;
+      color:#9a6a2e; }
+    .sign-ui h2 { font-family:var(--display); font-size:clamp(2rem,5vw,3.4rem); font-weight:700;
+      letter-spacing:-.02em; line-height:1.04; margin:.7rem 0 0; }
+    .sign-sub { margin:1rem auto 0; max-width:36rem; font-size:clamp(1rem,1.5vw,1.15rem); line-height:1.55;
+      color:#4a423a; }
+    .sign-cta { display:inline-block; margin-top:1.8rem; padding:.95rem 1.9rem; border-radius:999px;
+      background:#1a1712; color:#f4ece0; text-decoration:none; font-weight:600; font-size:1rem;
+      transition:transform .2s, background .2s; }
+    .sign-cta:hover { transform:translateY(-2px); background:#2c261f; }
+    .sign-cta:focus-visible { outline:3px solid #9a6a2e; outline-offset:3px; }
+    @media (prefers-reduced-motion: reduce) { .sign-cta { transition:none; } }
+
+    /* A: pricebar is fixed bottom:0; swatches at flex-end get covered — add clearance when the bar is visible. */
+    /* Clearance so the price bar never covers the swatches. RAISED 2026-08-07: the old
+       clamp(5rem,10vh,7rem) was authored while the flex above was inert, so .config-ui sat a
+       viewport higher and this padding never had to do its job — measured after the flex fix, the
+       swatch row still overlapped the bar by 15px. Sized from the bar's own height rather than
+       guessed, with margin for the safe-area inset on a notched phone. */
+    body.config-open .config-ui { padding-bottom: clamp(7rem, 14vh, 10rem); }
+
+    .pricebar { position:fixed; left:0; right:0; bottom:0; z-index:5; display:flex; align-items:center; justify-content:space-between;
+                gap:1rem; padding:1rem clamp(1rem,5vw,3rem); background:rgba(250,247,242,0.86); border-top:1px solid rgba(26,23,18,0.1);
+                backdrop-filter:blur(12px); color:#1a1712; transform:translateY(110%); transition:transform .35s ease; }
+    body.config-open .pricebar { transform:translateY(0); }
+    /* ...but retract it again once the closing section is on screen, so the ask owns the frame. */
+    body.signing .pricebar { transform:translateY(100%); }
+    .pb-info { display:flex; flex-direction:column; gap:.15rem; }
+    .pb-name { font-weight:700; font-size:1.05rem; }
+    .pb-variant { font-size:.8rem; letter-spacing:.12em; text-transform:uppercase; color:rgba(26,23,18,0.55); }
+    .pb-buy { display:flex; align-items:center; gap:1.1rem; }
+    .pb-price { font-weight:700; font-size:1.25rem; }
+    .pb-cart { padding:.75rem 1.5rem; font-size:.95rem; border-color:rgba(26,23,18,0.3); background:#1a1712; color:#f7f3ec; }
+    .pb-cart:hover { background:#000; }
+
+    @media (prefers-reduced-motion: reduce) { body > canvas { transition:none; } .cta, .swatch, .pricebar { transition:none; } #lgr-poster, #lgr-poster #poster { transition:none; } }
+  </style>
+</head>
+<body>
+  <!-- The engine hard-codes getElementById('lgr-loader') and fades THIS after 2 rendered frames (createEngine.js:1770);
+       the smoke gate's B-assertion also waits on #lgr-loader.gone. It's a hidden 0-size stub so that latch is a no-op —
+       the VISIBLE choreography is #lgr-poster below, which main.js holds until landmarks are ready (F08). -->
+  <div id="lgr-loader" aria-hidden="true" style="position:fixed;width:0;height:0;overflow:hidden;pointer-events:none"></div>
+  <div id="lgr-poster">
+    <img id="poster" src="./poster.jpg" alt="A hand-built procedural city at golden hour, seen from a helicopter." fetchpriority="high" decoding="async" />
+    <div class="loader-copy">
+      <div class="mark">LGR Engine</div>
+      <div class="pct" id="loadPct">0%</div>
+      <div class="bar"><i id="loadBar"></i></div>
+      <div class="fallback">Your browser can't run WebGL2 — here's a still of the live engine.</div>
+    </div>
+  </div>
+  <button class="sound" id="sound" type="button" aria-pressed="false" aria-label="Toggle ambient sound" title="Ambient sound">♪</button>
+  <div class="rail"><i id="rail"></i></div>
+
+  <main class="scroll">
+    <!-- 6 SPACER sections, byte-identical heights to before (min-height:100svh each) — they set the scrollable
+         page height the scrollDirector maps to [0..1] (so KF/CONFIG_START timing is untouched). The COPY that
+         used to live inside each one is now authored as data below and rendered by createScrollNarrative, a
+         fixed-position, progress-driven layer mounted by main.js — not tied to these sections' document flow. -->
+    <section class="chapter"></section>
+    <section class="chapter"></section>
+    <section class="chapter"></section>
+    <section class="chapter center"></section>
+    <section class="chapter"></section>
+    <section class="chapter center"></section>
+
+    <!-- CONFIGURATOR — the same engine, a studio product stage. Rendered to the SAME canvas (product.render() when
+         this section is in view; the city hero resumes byte-identically after, via renderer state save/restore). -->
+    <section class="chapter config" id="config">
+      <div class="config-ui">
+        <div class="k">Product configurator · one engine</div>
+        <h2>Build your pair.</h2>
+        <p class="config-sub">A studio-lit GLB, live variants, add-to-cart — powered by <code>createProductStage</code>. Drag to orbit · scroll-pinch to zoom.</p>
+        <div class="swatches" id="swatches" role="group" aria-label="Colourway"></div>
+      </div>
+    </section>
+
+    <!-- THE PAGE NEVER SIGNED ITSELF (2026-08-07). A four-lens review's top finding, and the client
+         lens put it best: a spectacular showreel wearing no business card. Before this section the
+         document contained ZERO anchor elements, no studio name beyond an eyebrow, no footer, and the
+         only thing a visitor could click was "add to cart" on a shoe that does not exist, which
+         actively confused what business this is. A demo that never says "we build this for you" does
+         not lose to a better demo; it loses to whoever answers.
+         Points at lgrwebstudios.com (the owner's call) rather than a mailto, so the address stays off
+         a public page and traffic lands on the surface he controls. -->
+    <section class="chapter sign" id="work">
+      <div class="sign-ui">
+        <div class="k">LGR</div>
+        <h2>We build these.</h2>
+        <p class="sign-sub">Everything on this page is one engine, written from scratch: the city, the
+          water, the sky, the product stage. If you want a site that does something nobody can hand you
+          from a template, that is the work.</p>
+        <a class="sign-cta" href="https://lgrwebstudios.com">Work with us</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- sticky commerce footer — visible only over the configurator -->
+  <div class="pricebar" id="pricebar" aria-hidden="true">
+    <div class="pb-info"><span class="pb-name">LGR Runner</span><span class="pb-variant" id="pbVariant">midnight</span></div>
+    <div class="pb-buy"><span class="pb-price">$180</span><button class="cta pb-cart" id="addCart" type="button">Add to cart</button></div>
+  </div>
+
+  <div class="hint" id="hint">Scroll to fly</div>
+  <!-- Text set by main.js at boot from the pointer type — a phone has none of these keys.
+       (The section copy below was fixed first and THIS one was missed; a capture caught it.) -->
+  <div class="hud" id="pilotHud">Piloting · WASD steer · Space / Shift climb · Esc release</div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

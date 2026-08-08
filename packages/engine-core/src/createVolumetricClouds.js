@@ -23,8 +23,11 @@ import vert from './shaders/sky-pass.vert';
 import frag from './shaders/clouds.frag';
 import { buildCloudNoise } from './noise3d.js';
 
-// [primaryMarchSteps, lightMarchSteps] per governor tier (the shader clamps to MAX_STEPS/MAX_LIGHT).
-export const CLOUD_TIERS = { HIGH: [32, 5], MED: [22, 4], LOW: [14, 3] };
+// [primaryMarchSteps, lightMarchSteps] per governor tier (the shader clamps to MAX_STEPS=64/MAX_LIGHT=8,
+// clouds.frag). CAPTURE is the offline/hero-shot tier (2026-08-01, clouds-vertical-extent brief §A3) —
+// real-time stays on HIGH/MED/LOW; a capture/reel pass opts into CAPTURE for the extra fine-step detail
+// A3's empty-space skipping affords (see clouds.frag's fineStep tier interpolation).
+export const CLOUD_TIERS = { HIGH: [32, 5], MED: [22, 4], LOW: [14, 3], CAPTURE: [64, 8] };
 
 export function createVolumetricClouds({ noiseN = 32, seed = 1337, coverage = 0, tiers = CLOUD_TIERS } = {}) {
   const pass = new ShaderPass({
@@ -34,6 +37,8 @@ export function createVolumetricClouds({ noiseN = 32, seed = 1337, coverage = 0,
       uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunColor: { value: new THREE.Color(0xffffff) }, uSkyTint: { value: new THREE.Color(0x8a94b0) },
       uTime: { value: 0 }, uCoverage: { value: coverage }, uSteps: { value: 32 }, uLightSteps: { value: 5 },
+      uOvercast: { value: 0 },   // weather horizon haze (2026-08-05); 0 = byte-identical clear
+      uSceneDepth: { value: null }, uDepthGate: { value: 0 },   // occlusion gate (2026-08-06): bind a depth texture via setSceneDepth() or clouds paint over geometry
     },
     vertexShader: vert, fragmentShader: frag,
   });
@@ -49,11 +54,17 @@ export function createVolumetricClouds({ noiseN = 32, seed = 1337, coverage = 0,
   return {
     pass,
     setCoverage(c) { u.uCoverage.value = c; },
-    update({ camera, sunDir, sunColor, skyTint, time, tierName } = {}) {
+    /* Bind the scene's depth so geometry occludes cloud. Call once with the consumer's own
+       same-camera, same-frame depth texture (city passes its grab-pass depth). Without it the pass
+       keeps its legacy no-depth behaviour, which is only safe for cameras that never look UP at
+       geometry — see clouds.frag's OCCLUSION GATE note. */
+    setSceneDepth(tex) { u.uSceneDepth.value = tex; u.uDepthGate.value = tex ? 1 : 0; },
+    update({ camera, sunDir, sunColor, skyTint, time, tierName, overcast } = {}) {
       if (camera) { u.uInvProj.value.copy(camera.projectionMatrixInverse); u.uCamWorld.value.copy(camera.matrixWorld); u.uCamPos.value.copy(camera.position); }
       if (sunDir) u.uSunDir.value.copy(sunDir);
       if (sunColor) u.uSunColor.value.copy(sunColor);
       if (skyTint) u.uSkyTint.value.copy(skyTint);
+      if (overcast != null) u.uOvercast.value = overcast;
       if (time != null) u.uTime.value = time;
       const ts = tiers[tierName] || tiers.HIGH; u.uSteps.value = ts[0]; u.uLightSteps.value = ts[1];
     },

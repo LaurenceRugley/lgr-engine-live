@@ -38,6 +38,11 @@ import { createSpriteAnim, loadSpriteSheet } from './sprite-anim.js';
 // `?url` emits the asset + hands back its hashed URL; the swappable seam loads it, procedural fallback
 // if it's ever missing. 1024×256, cols=4 rows=1, white-on-transparent (luminance) — see the .json sidecar.
 import gullDiffusionUrl from '../assets/creatures/gull_diffusion_sheet.png?url';
+/* A-BODIES (2026-08-07): the default PROFILE for each pilotable this module ships. Without these,
+   every consumer had to know which profile went with which body and assign it before possessing —
+   metropolis did, and it is the reason city and showcase-lab silently owned 12 pilotable bodies they
+   could not use. A consumer may still override `.pilot.profile`; this is only the sane default. */
+import { BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE } from './pilot.js';
 
 /* A soft round glow sprite (white→transparent) for the boats' night running lights — same recipe
    as the L24 car head/tail lights, so bow/stern glows read identically and show through the RTT. */
@@ -115,7 +120,7 @@ function roundedRectLane(L, rc, y) {
   return new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
 }
 
-export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } = {}) {
+export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3, boatCount = 4, gullCount = 4 } = {}) {
   const group = new THREE.Group();
   group.raycast = () => {};                       // never block the water-poke raycast
 
@@ -163,12 +168,18 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } 
 
   // boat states: lane index, arc-length param u, direction, speed, a wake-strength, plus a private
   // phase so the bobbing + light flicker don't move in lock-step.
-  const BOATS = [
+  // ARC A-LIVE: BASE_BOATS is the hand-authored 4-boat flotilla (unchanged, still the default);
+  // boatCount > 4 cycles through these SAME templates rather than authoring new hull/cabin colors —
+  // no art pass this arc, so extra density is mechanical repetition, not a new visual decision. Each
+  // slot gets its own shallow clone (not a shared reference) since .mesh/.u/.phase are attached
+  // per-instance below.
+  const BASE_BOATS = [
     { laneIndex: 0, dir: +1, speed: 0.50, wake: 0.024, scale: 1.0, hull: '#5a6675', cabin: '#e7ecf2' },
     { laneIndex: 1, dir: -1, speed: 0.42, wake: 0.022, scale: 1.0, hull: '#7a5b46', cabin: '#d9c3a6' },
     { laneIndex: 0, dir: +1, speed: 0.56, wake: 0.024, scale: 0.9, hull: '#456079', cabin: '#cfe0ee' },
     { laneIndex: 2, dir: +1, speed: 0.34, wake: 0.030, scale: 1.35, hull: '#39505f', cabin: '#e2b85a' }, // the harbor ferry (bigger, slower)
   ];
+  const BOATS = Array.from({ length: boatCount }, (_, i) => ({ ...BASE_BOATS[i % BASE_BOATS.length] }));
   BOATS.forEach((b, i) => {
     b.mesh = makeBoat(b);
     b.u = (i * 0.27) % 1;                          // stagger their starting positions
@@ -232,7 +243,7 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } 
 
   /* GULLS — a few dark sprites skimming low over the water near the coast. Day-favouring (they roost
      at night). Billboards → show through the office glass too. */
-  const GULLS = 4;
+  const GULLS = gullCount;   // ARC A-LIVE: tunable, default unchanged
   const gullAnim = createSpriteAnim({ frames: 4, fps: 7 });  // 4-col strip — matches BOTH the procedural strip AND the diffusion sheet
   const GULL_VARIANTS = ['#ffffff', '#cfd4da', '#c8a06a']; // white · grey · tan — "different colour patterns"
   const gulls = [];
@@ -287,6 +298,18 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } 
     // --- BOATS: advance along the lane, place + orient, inject the wake at the stern ---
     for (let i = 0; i < NB; i++) {
       const b = BOATS[i];
+      /* A-BOAT: a boat with a human at the helm skips its lane-follower — the pilot controller owns
+         its transform now. Everything BELOW the position write still runs (wake injection, bob), so
+         a piloted hull keeps carving the same real wake as an autonomous one. */
+      if (b._piloted) {
+        // the same stern-impulse the autonomous branch injects below, read off the HULL's own live
+        // transform instead of the lane tangent — so steering the boat yourself still carves a wake.
+        const hlp = b.mesh.userData.halfLen;
+        const sy = Math.sin(b.mesh.rotation.y), cy = Math.cos(b.mesh.rotation.y);
+        uvOf(b.mesh.position.x - sy * hlp, b.mesh.position.z - cy * hlp, _uv);
+        wakeDrops[i].set(_uv.x, _uv.y, b.wake);
+        continue;
+      }
       const lane = LANES[b.laneIndex], len = LANE_LEN[b.laneIndex];
       // ferry eases off near the harbor mouth (lane 2's u≈0 point) so it "arrives" gently at the docks
       const ease = b.isFerry ? (0.45 + 0.55 * Math.min(1, Math.abs(((b.u + 0.5) % 1) - 0.5) * 3)) : 1;
@@ -321,8 +344,28 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } 
     // --- BREACHERS: arc up through the surface on a schedule; splash a ripple-ring on the way out ---
     for (let i = 0; i < NBREACH; i++) {
       const b = BREACHERS[i];
-      b.t += dt;
       const wslot = NB + i;
+      /* A-FISH (2026-08-07): a PILOTED breacher is driven by createFishModel, not by this schedule.
+         The schedule owns position AND rotation every frame and parks the body at y = -5 between
+         breaches, so leaving it running would fight the pilot for the transform and then teleport the
+         player 5 units under the world. Same `_piloted` gate the boats and gulls already use.
+         The WAKE RING still fires, keyed to real surface proximity instead of the arc's k: a player
+         breaking the surface should carve a ripple exactly like the scheduled one does — that effect
+         was written for this moment and there is no reason it should stop being true when you are the
+         one doing it. (The whale's spout rides the same scalar; see below.) */
+      if (b._piloted) {
+        const above = b.mesh.position.y - (WATER_Y - 0.1);
+        const near = Math.max(0, 1 - Math.abs(above) / 0.22);      // 1 AT the surface, 0 well clear of it
+        uvOf(b.mesh.position.x, b.mesh.position.z, _uv);
+        wakeDrops[wslot].set(_uv.x, _uv.y, near * (b.whale ? 0.07 : 0.05));
+        if (b.spout) {
+          const sp = above > 0 ? Math.min(1, above * 2.2) : 0;
+          b.spout.position.set(b.mesh.position.x, WATER_Y + 0.5 + sp * 0.6, b.mesh.position.z);
+          b.spout.material.opacity = sp * 0.9;
+        }
+        continue;
+      }
+      b.t += dt;
       const arcDur = b.whale ? 3.2 : 1.3;          // seconds the body is above water
       if (b.t >= b.period) {
         const k = (b.t - b.period) / arcDur;       // 0..1 progress through the breach arc
@@ -350,9 +393,14 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } 
     // --- GULLS: skim circular paths near the coast; fade in by day, roost at night ---
     for (let i = 0; i < GULLS; i++) {
       const g = gulls[i];
+      /* A-BIRD: the gull a human is flying keeps its pilot-set position and its hidden body — but its
+         wings still beat below, so the flock reads alive. `_lastOpacity` remembers the day-driven
+         visibility so releasing the bird restores it instead of snapping to full. */
+      if (g._piloted) { gullAnim.step(g.sp.material.map, elapsed, g.phase); continue; }
       const a = g.phase + elapsed * g.speed * 0.25;
       g.sp.position.set(Math.cos(a) * g.r, g.y + Math.sin(elapsed * 1.4 + g.phase) * 0.12, Math.sin(a) * g.r);
       g.sp.material.opacity = THREE.MathUtils.clamp(day * 0.9 - 0.05, 0, 0.85);
+      g._lastOpacity = g.sp.material.opacity;
       const fr = gullAnim.step(g.sp.material.map, elapsed, g.phase);   // L43: advance the wing flap, desynced by phase
       if (i === 0 && typeof window !== 'undefined') window.__gullFrame = fr;   // live frame (harness confirms it steps)
     }
@@ -362,7 +410,11 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } 
     if (typeof window !== 'undefined') {
       let breaching = 0;
       for (const b of BREACHERS) if (b.mesh.position.y > WATER_Y) breaching++;
-      window.__waterLife = { boats: NB, breaching, gulls: +gulls[0].sp.material.opacity.toFixed(2), lights: +lights.material.opacity.toFixed(2) };
+      // A-BOAT fix: this per-frame DEBUG write used to occupy `window.__waterLife`, clobbering the
+      // handle consumers assign there (metropolis sets window.__waterLife = waterLife at boot, and
+      // this overwrote it on frame 1 — so getFollowables() vanished from the console and from any
+      // probe). Debug telemetry gets its own name; the handle belongs to whoever assigned it.
+      window.__waterLifeDbg = { boats: NB, breaching, gulls: +gulls[0].sp.material.opacity.toFixed(2), lights: +lights.material.opacity.toFixed(2) };
     }
   }
 
@@ -380,18 +432,104 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3 } 
       kind: 'boat', label: b.isFerry ? 'ferry' : `boat ${i + 1}`,
       getWorldPos: (o) => o.copy(b.mesh.position),
       info: () => (b.isFerry ? 'boat · harbor ferry → docks' : `boat · open-water lane ${b.laneIndex}`),
+      /* A-BOAT (2026-08-06) — TAKE THE HELM. pilot.js's doctrine: "a followable that also carries
+         `.pilot` is pilotable" — so a boat becomes seizable by DESCRIBING it, with no new spawn
+         path, no second boat system, and no controller edit. `_piloted` parks this boat's autonomous
+         lane-following while a human has the wheel (update() checks it) and hands it back on
+         release, exactly as the ATV/heli suspend their own autonomy. The transform bridges the
+         model's flat state to the mesh; the wake keeps carving because update() still runs. */
+      pilot: {
+        model: 'boat', profile: BOAT_PROFILE,
+        controlHints: 'W/S throttle · A/D rudder (only steers with way on)',
+        getWorldPos: (o) => o.copy(b.mesh.position),
+        getTransform: () => (b._t || (b._t = {
+          x: b.mesh.position.x, y: b.mesh.position.y, z: b.mesh.position.z,
+          yaw: b.mesh.rotation.y, speed: 0, vy: 0, bank: 0, quat: new THREE.Quaternion(),
+        })),
+        setTransform: (t) => { b.mesh.position.set(t.x, t.y, t.z); b.mesh.quaternion.copy(t.quat); },
+        suspendAutonomy: () => { b._piloted = true; },
+        resumeAutonomy: () => {
+          b._piloted = false;
+          // hand the lane-follower back a param that matches where the human left the hull, or it
+          // would teleport to wherever u had drifted to while parked.
+          b.u = b.u;
+        },
+        setBodyVisible: (v) => { b.mesh.visible = v; },
+      },
     })),
     ...gulls.map((g, i) => ({
       kind: 'gull', label: `gull ${i + 1}`,
       getWorldPos: (o) => o.copy(g.sp.position),
       active: () => g.sp.material.opacity > 0.05,
       info: () => 'gull · circling the coast',
+      /* A-BIRD (2026-08-06) — BE THE GULL. Same descriptor route the boats take. The body is HIDDEN
+         while piloted (setBodyVisible(false)): a gull is a THREE.Sprite, and a billboard swivels to
+         face whatever camera looks at it, so a chase view of one reads as broken — consumers fly
+         this in cockpit view, where there is nothing to draw anyway. `_piloted` parks the circling
+         autonomy; the sprite's flap animation keeps running for the flock around you. */
+      pilot: {
+        model: 'bird', profile: BIRD_PROFILE,
+        /* Key-NEUTRAL on the vertical axis, deliberately (A-SPRINT, 2026-08-07): this string used to say
+           "Space climb / Shift dive", and metropolis then rebound Shift to boost — so the engine was
+           describing a key map it does not own. Throttle/steer keys are universal across every project
+           here; climb/dive are not. Name the VERB; let the consumer name its keys. */
+        controlHints: 'W flap · A/D bank · climb / dive · gains speed diving, stalls climbing',
+        getWorldPos: (o) => o.copy(g.sp.position),
+        getTransform: () => (g._t || (g._t = {
+          x: g.sp.position.x, y: g.sp.position.y, z: g.sp.position.z,
+          yaw: 0, pitch: 0, bank: 0, speed: 0, vy: 0, quat: new THREE.Quaternion(),
+        })),
+        setTransform: (t) => { g.sp.position.set(t.x, t.y, t.z); },   // a sprite ignores rotation — position only
+        suspendAutonomy: () => { g._piloted = true; },
+        resumeAutonomy: () => { g._piloted = false; },
+        setBodyVisible: (v) => { g.sp.material.opacity = v ? g._lastOpacity ?? 1 : 0; },
+      },
     })),
     ...BREACHERS.map((b, i) => ({
       kind: 'fish', label: b.whale ? 'whale' : `fish ${i + 1}`,
+      size: b.size,                                               // A-FISH: lets a consumer pick the BIGGEST body to pilot
       getWorldPos: (o) => o.copy(b.mesh.position),
       active: () => b.mesh.position.y > WATER_Y - 0.3,            // only while surfaced
       info: () => (b.mesh.position.y > WATER_Y ? (b.whale ? 'whale · breaching!' : 'fish · breaching!') : 'fish · below the surface'),
+      /* A-FISH (2026-08-07) — BE THE FISH. The sixth body, and the easiest descriptor of the six,
+         because a breacher is a real THREE.Mesh (a squashed sphere, long in +Z) that this module was
+         ALREADY rotating every frame. That is the difference from the gull: a Sprite ignores rotation
+         and swivels to face any camera, which is why the bird is flown from inside. A fish can be
+         ORIENTED and therefore WATCHED — so it ships in chase view, and you get to see it swim.
+
+         THE SPAWN, which is the one non-obvious line: between breaches the schedule parks the body at
+         y = -5, far below the seabed. Possessing it there would drop the player through the floor, so
+         suspendAutonomy LIFTS it into the water column first — mid-depth over its own home point,
+         nose level. `_t` is created once and then owned by the model (it is the live mutable movement
+         record every model mutates in place; re-creating it per call would reset your speed). */
+      pilot: {
+        model: 'fish', profile: FISH_PROFILE,
+        controlHints: 'W/S swim · A/D turn (a fish pivots — no speed needed) · climb / dive · surface fast to BREACH',
+        getWorldPos: (o) => o.copy(b.mesh.position),
+        getTransform: () => (b._t || (b._t = {
+          x: b.x, y: -0.55, z: b.z,
+          yaw: b.heading, pitch: 0, bank: 0, speed: 0, vy: 0, airborne: false,
+          quat: new THREE.Quaternion(),
+        })),
+        setTransform: (t) => {
+          b.mesh.position.set(t.x, t.y, t.z);
+          b.mesh.quaternion.copy(t.quat);       // a Mesh honours this — the whole reason this body gets a chase cam
+        },
+        suspendAutonomy: () => {
+          b._piloted = true;
+          const t = b._t || null;
+          // lift out of the y = -5 parking spot into real water before the camera arrives
+          b.mesh.position.set(t ? t.x : b.x, t ? t.y : -0.55, t ? t.z : b.z);
+        },
+        resumeAutonomy: () => {
+          b._piloted = false;
+          b.t = 0;                              // rejoin the breach schedule cleanly at the start of a cycle
+          b.mesh.position.y = -5;
+          b.mesh.rotation.set(0, b.heading, 0); // the schedule drives Euler rotation; clear the pilot's quaternion
+          if (b.spout) b.spout.material.opacity = 0;
+        },
+        setBodyVisible: (v) => { b.mesh.visible = v; },
+      },
     })),
   ];
   function getFollowables() { return followables; }

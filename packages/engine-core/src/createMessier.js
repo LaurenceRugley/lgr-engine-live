@@ -140,8 +140,16 @@ export function createMessier({ celestial }) {
     return cat ? cat.map((o) => ({ designation: o.designation, name: o.name, label: `${o.designation}${o.name ? ' — ' + o.name : ''}` })) : [];
   }
 
+  /* A-REVENDOR (2026-08-06): upstreamed from lgr-live-sky's trajectory-arc feature — the catalog's
+     fixed J2000 RA/Dec (radians) for an object, by designation, for a sibling renderer that samples
+     a whole day, not just this frame's position. Null-safe before the catalog loads. */
+  function getRaDecByDesignation(designation) {
+    const obj = cat && cat.find((o) => o.designation === designation);
+    return obj ? { raRad: obj.raDeg * Math.PI / 180, decRad: obj.decDeg * Math.PI / 180 } : null;
+  }
+
   return {
-    group, ready, update, setSelected, getSelectedLookDir, getSelectedLabel, getObjectList,
+    group, ready, update, setSelected, getSelectedLookDir, getSelectedLabel, getObjectList, getRaDecByDesignation,
     setVisible: (v) => { group.visible = v; },
     setBortle: (bortle) => { material.uniforms.uLimitMag.value = limitingMagnitude(bortle); },
   };

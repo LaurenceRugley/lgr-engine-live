@@ -18,14 +18,14 @@
    ============================================================ */
 import { createMorphTimeline } from './math/morph-timeline.js';
 
-export function createTracePlayer(tracer, { msPerStep = 700 } = {}) {
+export function createTracePlayer(tracer, { secondsPerStep = 0.7 } = {}) {
   const ops        = tracer.getOps();
   const keyframes  = tracer.getKeyframes();
   let stepIndex    = 0;
   let playing      = false;
   let _cb          = null;
   // Per-step morph tween (80% of step duration — leaves a short rest before the next op).
-  const _tween     = createMorphTimeline({ duration: msPerStep * 0.8 });
+  const _tween     = createMorphTimeline({ duration: secondsPerStep * 0.8 });
 
   function onUpdate(fn) { _cb = fn; }
 

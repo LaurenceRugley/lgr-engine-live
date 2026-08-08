@@ -1,0 +1,15 @@
+{
+  "name": "@lgr/showcase-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "STRESS TEST 1 — a scroll-driven premium city-flight showcase built ON @lgr/engine-core (a CONSUMER, never an engine edit). FRICTION.md is a primary deliverable: every place the engine made something hard is logged for the post-phase re-audit.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lgr/engine-core": "*"
+  }
+}

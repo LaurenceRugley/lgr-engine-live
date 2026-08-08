@@ -60,7 +60,48 @@ export const ATV_PROFILE = {
   expo: 0.5,         // steer expo curve steepness (0=linear, 1=cubic; 0.5 = mild S-curve)
   bankMax: 0.35, bankTau: 0.18,   // lean angle (rad) + damp τ for coordinated bank
   camLead: 0.14,     // camera azimuth lead (rad per normalised steer at turn=2 rad/s)
+  // ARC A-CAM+WALK Part A2 — the ATV had NO collide config at all (unlike CRAFT_PROFILE below), so
+  // pilot.js's `const cfg = p.profile && p.profile.collide` gate was always false for it: an ATV drove
+  // straight through every building, unbounded, on the world-mode terrain map (no buildings there to
+  // notice) — invisible until this arc drove it through a CITY. Same shape as CRAFT_PROFILE's own
+  // collide block, sized for a smaller, grounded vehicle (lower yOff — it rides ON the ground, not
+  // hovering at cabin height; a touch smaller radius; slightly more slide friction for a "grippier"
+  // ground feel). Confirmed by a real dispatched-throttle test: before this line, position crossed
+  // straight through a building's full AABB (z: -6.5 -> +19.3, never slowed); after, the drive stops
+  // at the wall (see HANDOFF.md Arc A-CAM+WALK for the measured before/after).
+  collide: { r: 0.4, yOff: 0.3, PUSH_MAX: 10.0, SLIDE_FRICTION: 2.2, SKIN: 0.02 },
+  boost: { speed: 1.5, accel: 1.25 },   // A-SPRINT: inert until a consumer sends axes.boost (see below)
 };
+
+/* ── BOOST — ONE AXIS, FIVE PHYSICAL MEANINGS (A-SPRINT, 2026-08-07) ──────────
+   Owner's ask: "a sprint ability … for all of the walk, drive, helicopter, boat" — and the walker
+   already had one (createFirstPersonWalker's `input.sprint`) while every PILOTED body had none. So
+   the axis belongs in the seam all five bodies already share, not bolted onto each project.
+
+   The interesting part is that "give it everything" is NOT one behaviour. Each medium spends the
+   extra differently, and each spends it at a cost the model already knows how to charge:
+     • road (car)  — higher top speed AND a wider corner, for free: R = v²/aLat is the model's own
+                     law, so boost pushes you past the radius the street corridor allows. You must
+                     lift off to make the turn. The header of createRoadModel already predicted this
+                     teachable moment; boost is what makes a player meet it.
+     • boat        — "full ahead". Rudder authority scales with way, so more speed = MORE bite.
+     • spacecraft  — more thrust and a higher ceiling on the medium's own maxSpeed.
+     • bird        — NOT a speed dial. A gull sprints by flapping HARDER (`flap`), and it still
+                     cannot out-flap a dive: maxSpeed is untouched, so terminal velocity stays the
+                     reward for trading height. Flapping buys climb, diving buys speed.
+     • walker      — already `sprint`; the one-word vocabulary is unified below (see the alias).
+
+   `boost` is ANALOG in [0,1] (a keyboard sends 0/1; a thumbstick pushed past its rim sends a ramp),
+   so bk() lerps 1 → the profile's multiplier. A profile with no `boost` block, or a consumer that
+   never sends the axis, gets exactly 1 — every existing tier stays byte-identical.
+   C++ anchor: a per-term scale factor read from a const config struct, not a branch in the integrator. */
+function bk(profile, axes, key) {
+  const cfg = profile && profile.boost;
+  if (!cfg || !axes) return 1;
+  const m = cfg[key];
+  if (m === undefined) return 1;
+  return 1 + (m - 1) * clamp(axes.boost || 0, 0, 1);
+}
 
 /* ── THE GROUND MOVEMENT MODEL (Strategy) ────────────────────────────────────
    A PURE arcade integrator: throttle → speed along heading, steer → heading, project onto the
@@ -83,19 +124,20 @@ export function createGroundModel(profile = ATV_PROFILE) {
     // 1) STEER → HEADING. Authority scales gently with speed (mushy parked, bites moving) so you
     //    can't pirouette in place — the cheap "stall feel" the research notes. Reversing flips the
     //    steer sense (back up and the wheel turns you the natural way, like a real car).
-    const speedFrac = clamp(Math.abs(state.speed) / profile.maxSpeed, 0, 1);
+    const maxS = profile.maxSpeed * bk(profile, axes, 'speed');   // A-SPRINT: 1× unless boost is held
+    const speedFrac = clamp(Math.abs(state.speed) / maxS, 0, 1);
     const dirSign = state.speed >= 0 ? 1 : -1;
     state.yaw += axes.steer * profile.turnRate * (0.35 + 0.65 * speedFrac) * dirSign * dt;
 
     // 2) THROTTLE → SPEED (semi-implicit: velocity FIRST). Held throttle accelerates; released, the
     //    craft COASTS to a stop under friction (momentum is the whole feel). Reverse is capped slower.
     if (axes.throttle !== 0) {
-      state.speed += axes.throttle * profile.accel * dt;
+      state.speed += axes.throttle * profile.accel * bk(profile, axes, 'accel') * dt;
     } else {
       const f = Math.min(Math.abs(state.speed), profile.drag * dt);   // friction can't overshoot zero
       state.speed -= Math.sign(state.speed) * f;
     }
-    state.speed = clamp(state.speed, -profile.maxSpeed * 0.5, profile.maxSpeed);
+    state.speed = clamp(state.speed, -maxS * 0.5, maxS);
 
     // 3) POSITION along the heading (semi-implicit: move with the NEW speed). forward = (sinθ, cosθ)
     //    matches the placed-life heading convention (so +Z is the craft's nose at yaw 0).
@@ -146,6 +188,10 @@ export const CRAFT_PROFILE = {
   // PUSH_MAX must exceed maxSpeed (8) so a full-throttle head-on ram can't out-run the push-out and tunnel
   // through — 12 beats the 8 u/s inward motion with margin, yet still eases a deep teleport-in over ~5 frames.
   collide: { r: 0.5, yOff: 0.45, PUSH_MAX: 12.0, SLIDE_FRICTION: 1.8, SKIN: 0.02 },
+  // A-SPRINT: more thrust and a higher ceiling on whatever medium you are in. `lift` is deliberately
+  // NOT boosted — sprint is a translation verb; a helicopter that also climbs 60% faster on the same
+  // key would make the vertical axis feel like it had lost its own throttle.
+  boost: { speed: 1.6, accel: 1.35 },
 };
 /* Per-MEDIUM force mix — a small PARAMETER swap, NOT three models (the research §A insight). Same integrator,
    different drag/buoyancy/top-speed per medium. We EASE between sets on a crossing (see crossingT) so motion
@@ -156,6 +202,25 @@ const MEDIUM_PARAMS = {
   water:  { drag: 4.6, maxSpeed: 3.6, turn: 1.3, vDrag: 4.5, buoyancy: 1.1 },   // buoyancy floats it up when you release descend
   ground: { drag: 5.5, maxSpeed: 5.0, turn: 2.0, vDrag: 9.0, buoyancy: 0.0 },
 };
+/* PER-WORLD SPEED SCALE (2026-08-06, A-HELI). The table above is tuned for the ORIGINAL city/hoard
+   world scale. metropolis's island is ~15 world units across, so air maxSpeed 8.0 crosses the whole
+   map in under two seconds — measured on the first flight: 27.5 units travelled in 2 s, i.e. the
+   craft left the city before you could look at it. This is the same class as the A-FEEL walker/car
+   finding (numbers authored for one world scale, inherited by another).
+   A profile may scale the speed-ish terms with `mediumScale` (default 1 => byte-identical for the
+   city, hoard and showcase). drag/vDrag/buoyancy are RATES (1/s) and are deliberately NOT scaled —
+   scaling them would change the FEEL (how quickly it settles), not the reach. */
+const SCALED_KEYS = new Set(['maxSpeed']);
+function mediumParams(profile) {
+  const k = profile && Number.isFinite(profile.mediumScale) ? profile.mediumScale : 1;
+  if (k === 1) return MEDIUM_PARAMS;
+  const out = {};
+  for (const [medium, set] of Object.entries(MEDIUM_PARAMS)) {
+    out[medium] = {};
+    for (const [key, v] of Object.entries(set)) out[medium][key] = SCALED_KEYS.has(key) ? v * k : v;
+  }
+  return out;
+}
 const PARAM_KEYS = ['drag', 'maxSpeed', 'turn', 'vDrag', 'buoyancy'];
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -172,6 +237,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 export function createSpacecraftModel(profile = CRAFT_PROFILE) {
   const _up = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
   const _fwd2 = new THREE.Vector3(), _m = new THREE.Matrix4(), _e = new THREE.Euler();
+  const MP = mediumParams(profile);   // A-HELI: per-world speed scale (profile.mediumScale; 1 = the original table)
   const _par = { drag: 0, maxSpeed: 0, turn: 0, vDrag: 0, buoyancy: 0 };   // L86 audit: reused per-medium param scratch (no per-frame {} alloc)
   const SKIN = 0.4;          // water-surface deadband (hysteresis half-width)
   const GROUND_SKIN = 0.3;   // "on the ground" band above the terrain surface
@@ -203,7 +269,7 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
     // L110 (audit B12): the origin must be state.crossFrom, NOT `prev`. prev is last frame's medium, which becomes the
     // NEW medium one frame after the crossing → the old `MEDIUM_PARAMS[prev]` snapped to the destination on frame 2,
     // making the whole ease dead code. crossFrom is pinned at the crossing and held until crossingT decays to 0.
-    const P = MEDIUM_PARAMS[medium], Pp = MEDIUM_PARAMS[(state.crossingT > 0 && state.crossFrom) ? state.crossFrom : medium], t = 1 - (state.crossingT || 0);
+    const P = MP[medium], Pp = MP[(state.crossingT > 0 && state.crossFrom) ? state.crossFrom : medium], t = 1 - (state.crossingT || 0);
     const par = _par; for (const k of PARAM_KEYS) par[k] = lerp(Pp[k], P[k], t);   // L86 audit: fill the reused scratch (was `{}` per frame)
 
     // --- STEER → yaw ---
@@ -215,9 +281,10 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
     state.yaw -= axes.steer * par.turn * dt;
 
     // --- THROTTLE → forward speed along heading (semi-implicit: velocity first) ---
-    if (axes.throttle !== 0) state.speed += axes.throttle * profile.accel * dt;
+    if (axes.throttle !== 0) state.speed += axes.throttle * profile.accel * bk(profile, axes, 'accel') * dt;
     else state.speed -= Math.sign(state.speed) * Math.min(Math.abs(state.speed), par.drag * dt);
-    state.speed = clamp(state.speed, -par.maxSpeed * 0.6, par.maxSpeed);
+    const maxS = par.maxSpeed * bk(profile, axes, 'speed');   // A-SPRINT: the medium's own ceiling, lifted
+    state.speed = clamp(state.speed, -maxS * 0.6, maxS);
     const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
     state.x += s * state.speed * dt;
     state.z += c * state.speed * dt;
@@ -250,8 +317,8 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
       // Damped toward the target so the craft leans gradually INTO a turn and levels on exit — not a snap.
       // state.bank persists across frames; init to 0 on first step (no prior value on a fresh possess).
       state.bank ??= 0;
-      const speedFrac = clamp(Math.abs(state.speed) / par.maxSpeed, 0, 1);
-      const bMax = profile.bankMax || 0.4;
+      const speedFrac = clamp(Math.abs(state.speed) / maxS, 0, 1);   // maxS, not par.maxSpeed: under boost the
+      const bMax = profile.bankMax || 0.4;                            // bank must stay proportional, not pin at full lean
       const targetBank = clamp(axes.steer * speedFrac * bMax, -bMax, bMax);
       state.bank = damp(state.bank, targetBank, 1 / (profile.bankTau || 0.14), dt);
       const pitch = clamp(-state.vy * 0.06, -0.3, 0.3);
@@ -262,12 +329,456 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
   return { step };
 }
 
+/* ---- THE ROAD CAR (A-FEEL, 2026-08-05) — a car that can actually turn a corner on a street grid.
+   WHY A THIRD MODEL rather than tuning ATV_PROFILE: createGroundModel is an ALL-TERRAIN model and its
+   steering law says so — yaw authority GROWS with speed (`0.35 + 0.65 * speedFrac` above), which is
+   backwards for a car. A real car's turn radius grows with v² (lateral grip is finite), so it corners
+   TIGHTEST slowly and washes wide fast. On the city grid the old law gave a 3.46-unit radius against
+   a 0.89-unit street corridor — 3.9× too wide to make a 90° turn, measured live. ATV_PROFILE is left
+   untouched: placed-life.js is a second consumer (Rule 7), and a dune buggy SHOULD drive like one.
+
+   THE LAW (one line, the whole model): R = max(turnRadiusMin, v²/latAccelMax); yaw += steer·(v/R)·dt.
+   It self-caps — peak yaw is at v = √(R_lock·aLat) and the rate FALLS as aLat/v above that, so no
+   separate cap is needed — and it kills the parked-pirouette for free (v→0 ⇒ ω→0). It also creates
+   the teachable moment a driving game wants: past √(R_corridor·aLat) you must lift off to make the
+   turn. Terrain-follow/orientation are deliberately SIMPLER than the ATV's slope basis: a road car
+   sits flat on a road, so it damps to the ground height and banks into the corner instead.
+   C++ anchor: same Strategy interface as the other two models — one `step`, swapped by key. */
+export const ROAD_PROFILE = {
+  maxSpeed: 2.4,          // ~2.6× the city's own traffic (agents.js runs 0.78-0.98 u/s)
+  accel: 6.0,             // u/s² — ~0.4 s to top speed
+  drag: 6.0,              // coast friction; momentum, never an instant stop
+  turnRadiusMin: 0.70,    // LOW-SPEED lock radius (u) — 23% inside the 0.905u the street corridor allows a 0.18-radius car
+  latAccelMax: 8.0,       // u/s² of grip — sets how fast the radius opens with speed
+  chaseDist: 2.2, chaseElev: 0.35,
+  bankMax: 0.10, bankTau: 0.14,
+  rideHeight: 0.15,
+  /* A-SPRINT: 2.4 → 3.72 u/s. This is the profile where boost is most than a number: the model's own
+     law R = v²/aLat opens the turning circle to 1.73 u at full boost, and the city's street corridor
+     only allows 0.905 u. So a boosted car PHYSICALLY cannot make a 90° turn — you have to lift off
+     before the junction. Nothing enforces that; it falls out of the curvature law already here. */
+  boost: { speed: 1.55, accel: 1.3 },
+};
+export function createRoadModel(profile = ROAD_PROFILE) {
+  const _e = new THREE.Euler();
+  function step(state, axes, dt, world) {
+    const H = (world && world.heightAt) || (() => 0);
+    // SELF-SEEDING: a model must not assume the caller pre-created fields only IT uses. createGroundModel
+    // never touches `bank`, so a project's transform object (metropolis's carState) legitimately lacks it —
+    // and damp(undefined, …) returns NaN, which propagates into the quaternion and poisons the whole
+    // transform. Seed on first step instead of demanding every consumer know this model's internals.
+    if (typeof state.bank !== 'number') state.bank = 0;
+    const v = Math.abs(state.speed);
+    const dirSign = state.speed >= 0 ? 1 : -1;
+
+    // 1) STEER → HEADING, curvature-limited (the fix). Radius is the larger of the mechanical lock
+    //    and what grip allows at this speed; ω = v/R follows directly.
+    //    The ?? defaults are load-bearing, not decoration: a consumer that spreads ATV_PROFILE (which
+    //    has neither field) would otherwise compute Math.max(undefined, NaN) → NaN yaw → NaN position,
+    //    silently teleporting the craft out of the world. Hit exactly that on the first wiring.
+    const rMin = profile.turnRadiusMin ?? ROAD_PROFILE.turnRadiusMin;
+    const aLat = profile.latAccelMax ?? ROAD_PROFILE.latAccelMax;
+    const R = Math.max(rMin, (v * v) / aLat);
+    state.yaw += axes.steer * (v / R) * dirSign * dt;
+
+    // 2) THROTTLE → SPEED — identical semantics to the ground model (coast on release, reverse capped).
+    if (axes.throttle !== 0) state.speed += axes.throttle * profile.accel * bk(profile, axes, 'accel') * dt;
+    else {
+      const f = Math.min(Math.abs(state.speed), profile.drag * dt);
+      state.speed -= Math.sign(state.speed) * f;
+    }
+    const maxS = profile.maxSpeed * bk(profile, axes, 'speed');   // A-SPRINT — and step 1 already charged for it
+    state.speed = clamp(state.speed, -maxS * 0.5, maxS);
+
+    // 3) POSITION along the heading (same +Z-nose convention as every other model).
+    const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
+    state.x += s * state.speed * dt;
+    state.z += c * state.speed * dt;
+
+    // 4) SIT ON THE ROAD — damp to ground height (a road car does not conform to slope normals).
+    state.y = damp(state.y, H(state.x, state.z), 18, dt);
+
+    // 5) BANK into the corner, proportional to actual lateral acceleration (v·ω), so it reads as
+    //    weight transfer rather than a steering-input animation.
+    const omega = axes.steer * (v / R) * dirSign;
+    const bMax = profile.bankMax || 0.1;
+    state.bank = damp(state.bank, clamp(-(v * omega) / aLat * bMax * 3, -bMax, bMax), 1 / (profile.bankTau || 0.14), dt);
+    _e.set(0, state.yaw, state.bank, 'YXZ');
+    state.quat.setFromEuler(_e);
+    return state;
+  }
+  return { step };
+}
+
+/* ---- THE BOAT (A-BOAT, 2026-08-06) — the WATER medium as its own model.
+   RECONCILE NOTE, so nobody repeats the mistake I nearly made: the plan was to LIFT createBoats from
+   lgr-live-sky. Reading it first killed that — its own header says "This is the SCENERY half of the
+   boat work; piloting one (dive-to-control, 3rd/1st person) is its own later arc". It is scenery,
+   it depends on live-sky's creatures.js, and water-life.js's boats here are already BETTER (they
+   carve real wakes into the wave sim). The thing neither repo had is this: a boat you can STEER.
+
+   WHY NOT createRoadModel with different numbers: a hull has no grip. It carries huge inertia, it
+   keeps turning after you centre the wheel, and — the characteristic bit — it only steers while
+   water is moving past the rudder, so a stopped boat cannot turn at all. That last property is the
+   whole feel, and it is the opposite of the road model's curvature law.
+
+   It also RIDES THE SWELL: y damps toward world.waterHeightAt(x,z) (the sampler the spacecraft's
+   medium probe already uses), so the pilot rises and falls with the sea the wave sim is running. */
+export const BOAT_PROFILE = {
+  maxSpeed: 1.6,          // u/s — deliberately slower than the road car (2.4); a boat is not a car
+  accel: 0.9,             // slow to build way
+  drag: 0.35,             // very low: a hull COASTS — this is the inertia that reads as displacement
+  turnRate: 0.85,         // rad/s at full way — a wide, ponderous arc
+  steerMinWay: 0.12,      // u/s below which the rudder does nothing (no water past it)
+  rideDamp: 3.0,          // how quickly the hull settles onto the swell (1/s)
+  chaseDist: 2.4, chaseElev: 0.30,
+  bankMax: 0.09, bankTau: 0.5,   // slow, heavy roll into a turn
+  /* A-SPRINT "full ahead" — 1.6 → 2.32 u/s, and the accel multiplier matters more than the top speed
+     here because the hull is so slow to build way (0.9 u/s²).
+     I first wrote here that a boosted boat also STEERS better "for free". A test refuted it: the
+     rudder-authority ramp normalised against maxSpeed, so raising maxSpeed raised the DENOMINATOR and
+     made authority WORSE at any given speed. Rudder force follows absolute way past the blade, not a
+     fraction of whatever ceiling the throttle is set to — so the ramp is now pinned to the UNBOOSTED
+     ceiling (see step 2). Unboosted maths is untouched; boosted way now genuinely bites harder. */
+  boost: { speed: 1.45, accel: 1.7 },
+};
+export function createBoatModel(profile = BOAT_PROFILE) {
+  const _e = new THREE.Euler();
+  function step(state, axes, dt, world) {
+    if (typeof state.bank !== 'number') state.bank = 0;
+    /* A-SPRINT — TWO ceilings, and the distinction is the whole correction (see the profile note):
+         hullMax  — the boosted top speed. Governs the CLAMP only: how fast full ahead can push her.
+         rateMax  — the UNBOOSTED design speed. Governs anything that reads as "how hard is the water
+                    working": rudder authority and heel. Those follow absolute way past the hull, so
+                    normalising them against a raised ceiling would make a faster boat steer and heel
+                    LESS — which is what my first version did, and what the test caught. */
+    const rateMax = profile.maxSpeed ?? BOAT_PROFILE.maxSpeed;
+    const hullMax = rateMax * bk(profile, axes, 'speed');
+
+    // 1) THROTTLE → WAY. Low drag = long coast; this is the entire "heavy hull" read.
+    if (axes.throttle !== 0) state.speed += axes.throttle * (profile.accel ?? BOAT_PROFILE.accel) * bk(profile, axes, 'accel') * dt;
+    else {
+      const f = Math.min(Math.abs(state.speed), (profile.drag ?? BOAT_PROFILE.drag) * dt);
+      state.speed -= Math.sign(state.speed) * f;
+    }
+    state.speed = clamp(state.speed, -hullMax * 0.4, hullMax);   // astern is slow
+
+    // 2) RUDDER — authority is proportional to WAY, and ZERO below steerMinWay. Dead in the water =
+    //    no steering, which is the property that makes a boat feel like a boat.
+    const v = Math.abs(state.speed);
+    const minWay = profile.steerMinWay ?? BOAT_PROFILE.steerMinWay;
+    if (v > minWay) {
+      const authority = Math.min(1, (v - minWay) / (rateMax - minWay));   // rateMax: absolute way, not % of throttle setting
+      state.yaw += axes.steer * (profile.turnRate ?? BOAT_PROFILE.turnRate) * authority * Math.sign(state.speed) * dt;
+    }
+
+    // 3) POSITION along the heading (+Z nose at yaw 0 — the house convention), CONSTRAINED TO WATER.
+    //    Without this a boat sails straight up the beach and into the city — found by sailing it and
+    //    looking (the hull ended up parked between two towers). The shoreline test is the water
+    //    sampler itself: a candidate position with no water under it is land. Classic wall-slide —
+    //    try the full step, then X-only, then Z-only — so running along a coast GLIDES instead of
+    //    dead-stopping, and only a head-on grounding actually stops you.
+    const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
+    const dx = s * state.speed * dt, dz = c * state.speed * dt;
+    const wet = (x, z) => !world || !world.waterHeightAt || world.waterHeightAt(x, z) > NO_WATER;
+    if (wet(state.x + dx, state.z + dz)) { state.x += dx; state.z += dz; }
+    else if (wet(state.x + dx, state.z)) { state.x += dx; state.speed *= 0.985; }
+    else if (wet(state.x, state.z + dz)) { state.z += dz; state.speed *= 0.985; }
+    else state.speed *= 0.55;   // hard aground — the way comes off fast
+
+    // 4) RIDE THE SWELL — damp onto the live water height (NOT a hard set: a hard set would transmit
+    //    every sim ripple as a jolt). Falls back to y=0 where a consumer supplies no sampler.
+    const wy = world && world.waterHeightAt ? world.waterHeightAt(state.x, state.z) : NO_WATER;
+    state.y = damp(state.y, wy > NO_WATER ? wy : 0, profile.rideDamp ?? BOAT_PROFILE.rideDamp, dt);
+
+    // 5) HEEL into the turn — slow and heavy (bankTau 0.5 vs the car's 0.14).
+    const bMax = profile.bankMax ?? BOAT_PROFILE.bankMax;
+    const target = clamp(-axes.steer * (v / rateMax) * bMax, -bMax, bMax);   // heel follows absolute way too — and
+    // yes, this means a hard turn at full ahead PINS the heel at bankMax. That is correct: a boat driven flat out
+    // into a hard turn does lay over on her ear. The clamp was always there; boost just makes you reach it.
+    state.bank = damp(state.bank, target, 1 / (profile.bankTau ?? BOAT_PROFILE.bankTau), dt);
+    _e.set(0, state.yaw, state.bank, 'YXZ');
+    state.quat.setFromEuler(_e);
+    return state;
+  }
+  return { step };
+}
+
+/* ---- THE BIRD (A-BIRD, 2026-08-06) — flight as an ENERGY TRADE, not a hover.
+   The spacecraft already flies, so why a second air model: the craft HOVERS — release the stick and
+   it holds station. A bird cannot. It is always falling forward, and its whole character is the
+   exchange the spacecraft has no notion of:
+     DIVE  -> gravity converts height into airspeed (you speed up)
+     CLIMB -> airspeed converts back into height (you slow down, and stall if you ask too much)
+   Below stallSpeed the wing stops flying and the nose drops on its own until speed returns. Turning
+   is BANKED, not yawed: steer rolls the body, and the yaw rate comes from the roll angle — so a
+   hard turn costs you altitude exactly the way it does for a real wing.
+   POV NOTE: consumers should fly this in COCKPIT view (controller.setView('cockpit')). The engine's
+   gulls are THREE.Sprite billboards — a chase camera behind one watches it swivel to face the
+   camera, which reads as broken. First person is both the correct view for flight and the one that
+   sidesteps that entirely. */
+export const BIRD_PROFILE = {
+  cruiseSpeed: 1.5,       // u/s the wing settles at in level flight
+  maxSpeed: 3.0,          // terminal-ish, in a full dive
+  stallSpeed: 0.55,       // below this the wing stops flying and the nose drops
+  /* flap — throttle-up thrust (u/s²), i.e. wingbeats.
+     CORRECTED 2026-08-07 (owner: "I don't have a way to flap and fly up. I just have a way to fly
+     down"). He was right, and the arithmetic says exactly why: a full climb costs sin(pitchMax)·
+     gravityTrade = sin(0.55)·2.6 = 1.359 u/s², plus glideDrag 0.28 = 1.639 u/s² of drain. The old
+     flap of 1.1 was BELOW that, so W+Space netted −0.54 u/s² — you always bled to stallSpeed and the
+     nose dropped. Measured before the fix: 2 s of W+Space gained +0.173 u and ended STALLING.
+     2.2 clears the 1.639 drain with +0.56 u/s² to spare: flapping now sustains a climb, and stopping
+     immediately resumes the glide/trade that is the whole point of the model. maxSpeed is NOT boosted
+     anywhere — you cannot out-flap a dive, so terminal speed stays the reward for spending height. */
+  flap: 2.2,
+  glideDrag: 0.28,        // very low: a gull glides for a long time
+  gravityTrade: 2.6,      // how strongly pitch converts height <-> speed (the whole feel)
+  pitchRate: 0.9,         // rad/s of nose authority
+  pitchMax: 0.55,         // rad — climb/dive limit
+  bankRate: 1.8,          // rad/s of roll authority
+  bankMax: 0.85,          // rad — a steep wingover
+  turnFromBank: 1.5,      // yaw rate per radian of bank (the banked-turn coupling)
+  chaseDist: 1.6, chaseElev: 0.22,
+  eye: { x: 0, y: 0.04, z: 0.06 },   // just behind the beak
+  /* A-SPRINT for a BIRD is not a speed dial — it is flapping harder. Only `flap` scales (2.2 → 3.96),
+     which nets +2.32 u/s² even in a full climb: the hard climb-out a startled gull actually does.
+     No `speed` key on purpose (see the flap note above): the dive stays the only way to reach terminal. */
+  boost: { flap: 1.8 },
+};
+export function createBirdModel(profile = BIRD_PROFILE) {
+  const _e = new THREE.Euler();
+  const P = (k) => (profile[k] !== undefined ? profile[k] : BIRD_PROFILE[k]);
+  function step(state, axes, dt, world) {
+    if (typeof state.bank !== 'number') state.bank = 0;
+    if (typeof state.pitch !== 'number') state.pitch = 0;
+    if (state.speed === 0) state.speed = P('cruiseSpeed');   // launched already flying — a bird never starts from rest mid-air
+
+    // 1) PITCH from the lift axis (Space/Shift, or a stick's Y) — damped toward the commanded angle.
+    const wantPitch = clamp((axes.lift || 0) * P('pitchMax'), -P('pitchMax'), P('pitchMax'));
+    state.pitch = damp(state.pitch, wantPitch, 1 / 0.25, dt);
+
+    // 2) BANK from steer, and the TURN comes from the bank (not from steer directly).
+    const wantBank = clamp(-axes.steer * P('bankMax'), -P('bankMax'), P('bankMax'));
+    state.bank = damp(state.bank, wantBank, P('bankRate'), dt);
+    state.yaw += -state.bank * P('turnFromBank') * dt;
+
+    // 3) THE ENERGY TRADE — the model's reason to exist. Nose down converts height to speed; nose up
+    //    spends speed to climb. Plus wingbeat thrust and a low glide drag.
+    state.speed += -Math.sin(state.pitch) * P('gravityTrade') * dt;
+    if ((axes.throttle || 0) > 0) state.speed += axes.throttle * P('flap') * bk(profile, axes, 'flap') * dt;
+    state.speed -= P('glideDrag') * dt;
+    state.speed = clamp(state.speed, 0.05, P('maxSpeed'));
+
+    // 4) STALL — too slow and the wing quits: the nose drops until speed comes back. Not an error
+    //    state, just the physics reasserting itself.
+    let effPitch = state.pitch;
+    if (state.speed < P('stallSpeed')) {
+      const deficit = 1 - state.speed / P('stallSpeed');
+      effPitch = state.pitch - deficit * 0.7;          // forced nose-down
+      state.pitch = damp(state.pitch, -0.4, 1 / 0.4, dt);
+      state.stalling = true;
+    } else state.stalling = false;
+
+    // 5) MOVE along the heading + the vertical component of the flight path.
+    const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
+    const horiz = state.speed * Math.cos(effPitch);
+    state.x += s * horiz * dt;
+    state.z += c * horiz * dt;
+    state.y += Math.sin(effPitch) * state.speed * dt;
+
+    // 6) FLOOR — do not fly through the ground or the sea. Skim, do not tunnel.
+    const gy = world && world.heightAt ? world.heightAt(state.x, state.z) : 0;
+    const wy = world && world.waterHeightAt ? world.waterHeightAt(state.x, state.z) : NO_WATER;
+    const floor = Math.max(gy, wy > NO_WATER ? wy : gy) + (profile.skim !== undefined ? profile.skim : 0.06);
+    if (state.y < floor) { state.y = floor; if (state.pitch < 0) state.pitch = 0; }
+
+    _e.set(effPitch, state.yaw, state.bank, 'YXZ');
+    state.quat.setFromEuler(_e);
+    return state;
+  }
+  return { step };
+}
+
+/* ---- THE FISH (A-FISH, 2026-08-07) — the sixth body, and the first one that does not FALL.
+   ---------------------------------------------------------------------------------------------
+   WHY NOT ONE OF THE FIVE MODELS WE ALREADY HAVE. This was interrogated rather than assumed, because
+   "same integrator, new numbers" is a fair criticism and the spacecraft ALREADY carries a water medium
+   (MEDIUM_PARAMS.water: drag 4.6, buoyancy 1.1). Three properties kill every reuse:
+
+     • NEUTRAL BUOYANCY. The bird is always falling — that IS the bird. The boat is pinned to a surface.
+       The spacecraft's water row applies +1.1 buoyancy, so releasing the stick FLOATS you up: it models
+       a submarine that wants to surface, not an animal that holds its depth. A fish at rest simply
+       stays where it is, at any depth, and that costs it nothing.
+     • IT TURNS BY BENDING, NOT BY MOVING. Every other model gates yaw on speed — the car's ω = v/R, the
+       boat's dead-in-the-water rudder, the bird's banked turn. A fish pivots almost in place, so its
+       turn rate has NO speed term at all. That single missing multiplication is most of the feel.
+     • IT DOES NOT COAST. The boat's whole character is inertia (drag 0.35, a hull coasts forever); the
+       fish is the opposite. Drag here is PROPORTIONAL to speed, not a constant subtraction, so it has a
+       natural terminal velocity and stops in about 1/drag seconds — roughly a body length, like a fish.
+
+   AND THE PAYOFF: the surface is a CEILING you can break. Above the waterline there is no thrust (a fish
+   cannot swim in air), no buoyancy, and no steering — just gravity and the momentum you left with. The
+   breach is genuinely ballistic, the nose follows the arc because the velocity vector rotates, and you
+   re-enter nose-first. Nothing scripts that; it falls out of running two force mixes either side of one
+   surface. C++ anchor: one integrator with a branch on a boolean the world answers, not two classes.
+
+   PREREQUISITE, and it is not optional: this needs somewhere to swim. Before A-FISH, metropolis's pilot
+   floor at sea was the BEACH CAP (0.12) — above the y=0 waterline — so the sea had negative depth and a
+   descending craft "landed" on it. citygen's `seabed` option and its shared seabedY() supply the real
+   water column; without one, this model has a two-centimetre pond. */
+export const FISH_PROFILE = {
+  maxSpeed: 2.6,          // u/s in a full burst
+  accel: 3.4,             // tail-beat thrust
+  drag: 2.4,              // PROPORTIONAL (1/s): coasts ~0.4 s. The boat's 0.35 is a SUBTRACTION — different animal, literally
+  turnRate: 1.9,          // rad/s, with NO speed gate — the signature property
+  pitchRate: 5.0,         // 1/s damp toward the commanded pitch — a fish reorients almost instantly
+  pitchMax: 1.15,         // ~66°: steep enough to drive straight up at the surface and breach
+  gravity: 5.2,           // AIRBORNE only — what makes a breach an arc instead of a hop
+  airDrag: 0.3,           // proportional, and nearly nothing: you keep your speed through the air
+  floorSkim: 0.1,         // how far off the seabed the body rides
+  bankMax: 0.5, bankTau: 0.22,   // fish roll hard into a turn — it is most of what makes them read as alive
+  /* The largest breacher is 0.40 u nose-to-tail. The rig's default dolly floor is 4.0 u — ten body
+     lengths — so without chaseMin the "fish" would be a speck and this whole body would be pointless
+     to look at. chaseMin is the opt-in that makes chaseDist mean anything (camera-rig.setDistanceClamp). */
+  chaseDist: 1.3, chaseElev: 0.16, chaseMin: 0.7,
+  eye: { x: 0, y: 0.03, z: 0.05 },
+  /* A-SPRINT: the burst. A fish's sprint is a genuine multiple of cruise, not a 20% nudge — this is the
+     one body where boost is the difference between a patrol and a hunt. */
+  boost: { speed: 1.7, accel: 1.9 },
+};
+export function createFishModel(profile = FISH_PROFILE) {
+  const _e = new THREE.Euler();
+  const P = (k) => (profile[k] !== undefined ? profile[k] : FISH_PROFILE[k]);
+  function step(state, axes, dt, world) {
+    if (typeof state.bank !== 'number') state.bank = 0;
+    if (typeof state.pitch !== 'number') state.pitch = 0;
+    if (typeof state.vy !== 'number') state.vy = 0;
+
+    const waterAt = (x, z) => (world && world.waterHeightAt ? world.waterHeightAt(x, z) : NO_WATER);
+    const wy = waterAt(state.x, state.z);
+    const wet = wy > NO_WATER;
+    const submerged = wet && state.y < wy;
+    const maxS = P('maxSpeed') * bk(profile, axes, 'speed');
+
+    if (submerged) {
+      /* ── UNDER ──────────────────────────────────────────────────────────────────────────────
+         On the frame we RE-ENTER, recompose the ballistic velocity back into the model's
+         speed+pitch representation, so a breach lands with the momentum it left with instead of
+         resetting. Without this the fish would hit the water and forget it had been moving. */
+      if (state.airborne) {
+        const h = Math.abs(state.speed);
+        state.speed = Math.hypot(h, state.vy);
+        state.pitch = Math.atan2(state.vy, Math.max(1e-4, h));
+        state.airborne = false;
+      }
+      // TURN — no speed term anywhere in this line. That absence is the fish.
+      state.yaw += axes.steer * P('turnRate') * dt;
+      // PITCH — near-total authority, fast. Point it and it points.
+      const wantPitch = clamp((axes.lift || 0) * P('pitchMax'), -P('pitchMax'), P('pitchMax'));
+      state.pitch = damp(state.pitch, wantPitch, P('pitchRate'), dt);
+      // THRUST + PROPORTIONAL drag (v' = -k·v): exponential decay, a real terminal speed, no coasting.
+      if ((axes.throttle || 0) !== 0) state.speed += axes.throttle * P('accel') * bk(profile, axes, 'accel') * dt;
+      state.speed -= state.speed * P('drag') * dt;
+      state.speed = clamp(state.speed, -maxS * 0.4, maxS);
+      // NO buoyancy term, deliberately: neutral. Depth is held for free — see the header.
+    } else {
+      /* ── OVER — the breach. No thrust, no steering, no buoyancy: you are a projectile now. ──── */
+      if (!state.airborne) {                       // the frame we LEAVE the water: decompose once
+        state.vy = state.speed * Math.sin(state.pitch);
+        state.speed = state.speed * Math.cos(state.pitch);   // `speed` now means HORIZONTAL speed
+        state.airborne = true;
+      }
+      state.vy -= P('gravity') * dt;
+      state.speed -= state.speed * P('airDrag') * dt;
+      state.y += state.vy * dt;
+      // The nose follows the velocity vector — which is exactly what a breaching fish looks like.
+      state.pitch = Math.atan2(state.vy, Math.max(1e-4, Math.abs(state.speed)));
+    }
+
+    /* MOVE in the horizontal plane, CONSTRAINED TO WATER — the boat's wall-slide, for the same reason
+       and with a sharper one: a fish that swims onto the beach is stranded with no way to move (it has
+       no thrust out of water), i.e. a soft-lock. Sliding along the shore instead of stopping dead also
+       means hugging the coast feels like hugging a coast. */
+    const horiz = state.airborne ? state.speed : state.speed * Math.cos(state.pitch);
+    const dx = Math.sin(state.yaw) * horiz * dt, dz = Math.cos(state.yaw) * horiz * dt;
+    const swimmable = (x, z) => waterAt(x, z) > NO_WATER;
+    if (swimmable(state.x + dx, state.z + dz)) { state.x += dx; state.z += dz; }
+    else if (swimmable(state.x + dx, state.z)) { state.x += dx; state.speed *= 0.985; }
+    else if (swimmable(state.x, state.z + dz)) { state.z += dz; state.speed *= 0.985; }
+    else state.speed *= 0.5;                       // nosed into the shore
+
+    if (submerged) state.y += Math.sin(state.pitch) * state.speed * dt;
+
+    /* THE SEABED — you cannot swim through the floor. Uses the same world.heightAt every other model
+       uses, which in metropolis is now citygen's real seabed rather than a constant above the waterline. */
+    const gy = world && world.heightAt ? world.heightAt(state.x, state.z) : 0;
+    const floor = gy + P('floorSkim');
+    if (state.y < floor) { state.y = floor; if (state.pitch < 0) state.pitch = 0; if (state.vy < 0) state.vy = 0; }
+
+    /* ROLL into the turn. Fish bank HARD — much harder than the boat heels — and it is the single
+       strongest "this is alive, not a vehicle" cue the body has. Only while submerged: mid-breach the
+       body should hold whatever attitude it launched with, not keep steering. */
+    const bMax = P('bankMax');
+    const target = submerged ? clamp(-axes.steer * bMax, -bMax, bMax) : state.bank * 0.9;
+    state.bank = damp(state.bank, target, 1 / P('bankTau'), dt);
+
+    _e.set(state.pitch, state.yaw, state.bank, 'YXZ');
+    state.quat.setFromEuler(_e);
+    state.submerged = submerged;                   // published for the project's HUD / camera treatment
+    return state;
+  }
+  return { step };
+}
+
+/* ---- carryMomentum(from, to, opts) — A-CROSSING (2026-08-07): hand one body's motion to another.
+   ---------------------------------------------------------------------------------------------
+   The ability behind "the gull hits the water and becomes the fish". Deliberately a PURE FUNCTION over
+   two transforms rather than a new controller method, and that shape was argued into place:
+
+   I first specced a `handoff(next)` on the controller that would release + possess in one call and skip
+   the ENTERING phase. Three independent reviews killed it, and the decisive point is that it solves a
+   problem that does not exist — possess() ALREADY self-releases (see its `if (craft) release()`), and
+   nothing in it assumes the incoming body is at rest. A second possession path would have duplicated
+   the state machine to change nothing, while quietly desynchronising every consumer's own mode/HUD
+   bookkeeping, which only the consumer can keep straight.
+
+   So the split is: the ENGINE owns "what motion means when you change bodies"; the PROJECT owns when
+   it happens and what its UI says about it. This function is the first half.
+
+   WHY THE LATCH RESETS ARE THE LOAD-BEARING PART, not the position copy. Each model keeps medium state
+   that is meaningless — or actively wrong — in the next body:
+     • `airborne`  the fish's ballistic latch. Inherited true, the fish would arrive under water in
+                   projectile mode: no thrust, no steering, and its own re-entry branch would then
+                   overwrite the pitch you just copied. This is the exact "entry paths do not guard
+                   what exit paths clear" class this repo has logged.
+     • `medium` / `crossing` / `crossFrom` / `crossingT`  the spacecraft's Schmitt-trigger bookkeeping;
+                   a stale crossing keeps easing force parameters toward a medium you already left.
+     • `vy`, `bank`, `stalling`  vertical velocity and attitude that belonged to the old wing/hull.
+   Speed is scaled, not copied raw: it is the same quantity in both models (units along the heading),
+   but water is not air, so `speedScale` is how much of a stoop survives the surface.
+   C++ anchor: a converting assignment between two state structs that share a coordinate convention —
+   the fields that mean the same thing carry, the regime flags are explicitly reset, never memcpy'd. */
+export function carryMomentum(from, to, { speedScale = 1, y = null, pitch = null } = {}) {
+  if (!from || !from.pilot || !to || !to.pilot) return false;
+  const a = from.pilot.getTransform(), b = to.pilot.getTransform();
+  if (!a || !b) return false;
+  b.x = a.x; b.z = a.z;
+  b.yaw = a.yaw;                                   // all six models share the +Z-nose convention
+  b.speed = Math.abs(a.speed || 0) * speedScale;
+  b.pitch = pitch !== null ? pitch : (a.pitch || 0);
+  if (y !== null) b.y = y;
+  // regime latches — reset explicitly, never inherited (see the note above)
+  b.vy = 0; b.bank = 0; b.airborne = false; b.stalling = false;
+  b.medium = undefined; b.crossing = undefined; b.crossFrom = undefined; b.crossingT = 0;
+  return true;
+}
+
 /* the model registry the controller dispatches on (a PilotProfile names its model by key). Adding a
    craft type = one entry here + its model factory + a PilotProfile on the entity. */
-const MODEL_FACTORIES = { ground: createGroundModel, spacecraft: createSpacecraftModel };
+const MODEL_FACTORIES = { ground: createGroundModel, spacecraft: createSpacecraftModel, road: createRoadModel, boat: createBoatModel, bird: createBirdModel, fish: createFishModel };
 
 const ENTER_TIME = 0.55;                 // seconds the ENTERING camera-move runs (input ignored) — "the move is the onboarding"
-const ZERO_AXES = { throttle: 0, steer: 0, lift: 0 };
+const ZERO_AXES = { throttle: 0, steer: 0, lift: 0, boost: 0 };
 
 /* ── THE PILOT CONTROLLER (the CONTEXT / state machine) ───────────────────────
    createPilotController({ rig, world }) — engine-core singleton. The project wires input → axes,
@@ -281,7 +792,7 @@ export function createPilotController({ rig, world } = {}) {
   let enterT = 0;            // ENTERING countdown
   let fpBlend = 0;           // 0 = chase view · 1 = cockpit POV (today only integer values; named for future tween)
   // H — eased axis closure: steer/lift damp toward the raw input each frame; throttle bypass (has accel/drag).
-  let _ax = { throttle: 0, steer: 0, lift: 0 };
+  let _ax = { throttle: 0, steer: 0, lift: 0, boost: 0 };
   // expo(x, a): gentle S-curve on the steer axis — soft near centre, full authority at the edge.
   // a=0: linear (identity). a=1: cubic. a≈0.5: mild curve. Formula: x*(a·x²+(1-a)).
   const expo = (x, a) => x * (a * x * x + (1 - a));
@@ -304,8 +815,22 @@ export function createPilotController({ rig, world } = {}) {
     model = make(p.profile);
     _ax.throttle = 0; _ax.steer = 0; _ax.lift = 0;          // H — zero envelope on each new possession (no carry-over)
     p.suspendAutonomy();                                     // stop the entity's idle/park loop while piloted
+    // TAKING CAMERA OWNERSHIP MEANS CLEARING WHAT OWNED IT BEFORE. If the project was driving a
+    // first-person eye (a walker feeding rig.setEye every frame), fpActive is still true — and
+    // camera-rig.update() early-branches on it (camera-rig.js:320), skipping BOTH the orbit block and
+    // the chase spring-arm we arm just below. Result: the craft drives away and the camera sits frozen
+    // at the walker's last eye. Every exit path in the tree clears the eye (pilot release, city
+    // stopWalking, hoard/hoard2 dive-exit) but NO entry path guarded it, so walk→drive latched in any
+    // project that offers both. Clearing here fixes it once for every current and future pilotable.
+    // (Cockpit POV re-establishes the eye itself each frame in step() below — this never fights it.)
+    if (rig.clearEye) rig.clearEye();
     // CAMERA MOVE (not a cut): follow the craft's live position + ease the chase dolly; SNAP the orbit
     // azimuth behind the heading so the swing-in takes the short way, then let the rig ease the rest.
+    /* A-FISH: a body smaller than the rig's 4.0 dolly floor must be allowed closer, or `chaseDist` is
+       decorative (it silently was, for every craft — see camera-rig.setDistanceClamp). Applied BEFORE
+       setFollow, since setFollow clamps `frame` on the spot. Only profiles that declare `chaseMin`
+       touch it, so every existing craft frames exactly as before. */
+    if (rig.setDistanceClamp && p.profile.chaseMin !== undefined) rig.setDistanceClamp(p.profile.chaseMin);
     rig.setFollow((out) => p.getWorldPos(out), { frame: p.profile.chaseDist });
     rig.setElevation(p.profile.chaseElev);
     rig.setAzimuth(p.getTransform().yaw + Math.PI, true);   // +π = behind the nose, looking along the heading
@@ -327,8 +852,18 @@ export function createPilotController({ rig, world } = {}) {
     if (craft.pilot.setBodyVisible) craft.pilot.setBodyVisible(true);
     if (craft.pilot.setCockpitVisible) craft.pilot.setCockpitVisible(false);
     craft.pilot.resumeAutonomy();
+    /* ORDER MATTERS, and it is not obvious (A-CROSSING, 2026-08-07): clearEye() re-seeds the orbit
+       from where the eye actually is, and to do that it needs the object still being FOLLOWED. This
+       used to run after clearFollow(), so the re-seed found followFn already null, bailed, and the
+       camera resumed from a snapshot frozen since the moment cockpit view began. Clearing the eye
+       first is what makes leaving a cockpit continuous instead of a cut — found by measuring the
+       crossing three times and being wrong twice about the cause. */
+    if (rig.clearEye) rig.clearEye();
     rig.clearFollow();
     if (rig.setSpringArm) rig.setSpringArm(null);   // L108: disarm the spring-arm → the free/attract camera is byte-identical again
+    /* A-FISH: hand the dolly clamp back. Entry paths that take ownership must have an exit path that
+       returns it — this repo has a logged failure class of exactly the opposite (latched modes). */
+    if (rig.setDistanceClamp) rig.setDistanceClamp();
     fpBlend = 0; pilotLook.recenter();               // L-cockpit: exit fp mode, smooth recenter of head-turn
     if (rig.clearEye) rig.clearEye();               // let camera-rig's orbit block resume
     craft = null; model = null; phase = 'free'; enterT = 0;
@@ -364,6 +899,10 @@ export function createPilotController({ rig, world } = {}) {
       _ax.steer = ax.steer; _ax.lift = ax.lift;
     }
     _ax.throttle = ax.throttle;
+    /* A-SPRINT: boost is NOT eased with steer/lift. Those are damped because a snapped control surface
+       reads as twitchy; boost is a gearbox, and a gearbox that fades in over 0.15 s feels broken. It
+       passes through raw (already analog from the stick, 0/1 from a key). */
+    _ax.boost = ax.boost || 0;
 
     // L108 (part C) — the ONE collision hook: integrate, then push the craft-sphere out of buildings BEFORE the
     // transform is written (the move-and-slide resolve slot). Strategy-agnostic → every craft with a `collide`

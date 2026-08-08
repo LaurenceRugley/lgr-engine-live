@@ -60,7 +60,7 @@ function makeRng(seed) {
    position-based determinism signature). C++: a per-instance constant transform of the base albedo. */
 const _tintC = new THREE.Color();
 const _tintHSL = { h: 0, s: 0, l: 0 };
-function tintTower(hex, rng) {
+export function tintTower(hex, rng) {
   _tintC.set(hex).getHSL(_tintHSL);
   _tintHSL.l = Math.max(0.10, Math.min(0.90, _tintHSL.l * (0.78 + rng.next() * 0.14)));   // VALUE down (fix pale) + vary
   _tintHSL.h = (_tintHSL.h + (rng.next() - 0.5) * 0.045 + 1.0) % 1.0;                       // small hue jitter
@@ -133,6 +133,22 @@ const N = 6;                     // L20: 6×6 blocks (bigger map). One source of
    headland/point), IN = max landward bite (a gentle bay). HARBOR_* carve ONE deep inlet into the
    camera-facing +X edge. Everything stays seaward of the blocks (a hard clamp), so no reroll can
    ever flood the grid — determinism + dry land are both invariants. */
+/* SEABED defaults (A-FISH, 2026-08-07) — see the seabed block in generate() for the full why.
+   shoreY MATCHES the beach terrace's underwater toe (its top 0.12 minus its 0.7 depth = -0.58) so the
+   sand shelf and the sea floor meet without a step. floorY -1.8 ≈ 11 m of water at this world's
+   ~6 m/unit anchor: enough to swim a fish through, shallow enough that the bottom stays a presence. */
+export const SEABED = { shoreY: -0.58, floorY: -1.8, shelf: 6.0 };
+
+/* seabedY(x, z, shoreY, floorY, shelf, extent) — THE depth function. Pure, exported, and called by
+   BOTH the seabed mesh builder and the `seabedAt` sampler the physics reads. Flat at the shore toe
+   inside the island's nominal extent, smoothstepping to the floor `shelf` units beyond it.
+   C++ anchor: a free function in a header, included by the renderer and the collision system alike —
+   the only way two subsystems can be guaranteed to describe the same surface. */
+export function seabedY(x, z, shoreY = SEABED.shoreY, floorY = SEABED.floorY, shelf = SEABED.shelf, extent = 7.5) {
+  const t = Math.min(1, Math.max(0, (Math.hypot(x, z) - extent) / shelf));
+  return shoreY + (floorY - shoreY) * (t * t * (3 - 2 * t));   // smoothstep — no crease at either end
+}
+
 const COAST = {
   BASE: 0.70,          // base shoreline margin beyond the outer block edge (fallback; profiles override)
   OUT: 0.95,           // max seaward bulge (a point/headland) — L28 bolder default
@@ -255,7 +271,50 @@ function computeRadialBlockCenters(half) {
   return centers;
 }
 
-export function createCity({ seed = 1, profileIndex = 0, profile = null, landmarkFactory = null, windowGlow, blockPattern = 'grid', spawnClearR = 0 }) {
+/* makePalm (2026-08-05, A-SHORE) — a toy PALM in the same dialect as createCity's stacked-sphere
+   park tree: a few flat-shaded primitives, vectorized so it restyles with every tier. Exported as an
+   ABILITY (the engine-first rule): the builder lives here, PLACEMENT is the consuming project's
+   content decision (metropolis rings its beach; a future resort scene can drop them anywhere).
+   `rand` is a mulberry32-style () => [0,1) — deterministic by default so byte-identical consumers
+   stay byte-identical. `season: false` on the fronds: palms are evergreen — they must NOT autumn-
+   shift with the deciduous park trees. */
+export function makePalm({ rand = mulberry32(0x9a1e), h = 0.6, lean = 0.16 } = {}) {
+  const g = new THREE.Group();
+  const trunkCol = '#8a6a44';
+  const SEG = 4, segH = h / SEG;
+  // trunk: stacked, progressively offset box segments → a cheap curved lean
+  for (let i = 0; i < SEG; i++) {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(0.045 - i * 0.006, segH * 1.15, 0.045 - i * 0.006),
+      vectorize(new THREE.MeshStandardMaterial({ color: trunkCol, flatShading: true }), { color: trunkCol }),
+    );
+    const t = (i + 0.5) / SEG;
+    m.position.set(lean * t * t, segH * (i + 0.5), 0);   // quadratic offset = the classic palm sway
+    m.rotation.z = -lean * t * 0.9;
+    g.add(m);
+  }
+  // crown: 6-7 drooping fronds — elongated flattened ellipsoids radiating from the trunk top
+  const crownX = lean, crownY = h + 0.01;
+  const nF = 6 + Math.floor(rand() * 2);
+  for (let i = 0; i < nF; i++) {
+    const hue = rand();
+    const c = new THREE.Color('#3f7d4a').offsetHSL(0, 0, hue * 0.10 - 0.05).getStyle();
+    const f = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 6, 5),
+      vectorize(new THREE.MeshStandardMaterial({ color: c, flatShading: true }), { color: c, season: false }),
+    );
+    f.scale.set(0.32, 0.10, 1.0);                        // long flat blade
+    const a = (i / nF) * Math.PI * 2 + rand() * 0.5;
+    f.position.set(crownX + Math.sin(a) * 0.11, crownY, Math.cos(a) * 0.11);
+    f.rotation.y = a;                                     // blade points outward
+    f.rotation.x = 0.35 + rand() * 0.25;                  // droop
+    g.add(f);
+  }
+  g.traverse((o) => { o.raycast = () => {}; if (o.isMesh) { o.castShadow = true; } });
+  return g;
+}
+
+export function createCity({ seed = 1, profileIndex = 0, profile = null, landmarkFactory = null, windowGlow, blockPattern = 'grid', spawnClearR = 0, forgeMaterials = null, lights = true, beach = null, streetDetail = null, seabed = null }) {
   // Lesson CITYGEN-PROFILE-OBJECT: `profile` lets a consumer pass a CUSTOM profile OBJECT (same shape as a
   // PROFILES entry) instead of indexing the three baked ones — so a project can re-skin the city's rules
   // with its own palette/character without adding a baked profile. When omitted (null), the generator falls
@@ -275,11 +334,18 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
   procedural.raycast = () => {}; landmarksG.raycast = () => {};   // keep the water raycast clean
   group.add(procedural, landmarksG);
 
-  /* LIGHTS — same SunRig-driven key+fill the old diorama had (main.js sets them each frame). */
+  /* LIGHTS — same SunRig-driven key+fill the old diorama had (main.js sets them each frame).
+     `lights: false` — a SECOND-CONSUMER seam (metropolis, 2026-08-05): a project that composes this
+     city into a scene that ALREADY carries the engine's sunRig-driven key+fill must opt out, or the
+     constructor pair sits UNDRIVEN at noon values 24/7 and double-lights the city (flat noon, and a
+     daylight-green island at midnight — the frozen-light wiring-drift bug). The objects are still
+     created and returned either way (API shape unchanged; driving un-added lights is harmless) —
+     they just never join the graph, so they cannot light anything. Default true = byte-identical
+     for every existing caller (city, recipe worlds, structures.clusters backdrops). */
   const key = new THREE.DirectionalLight(0xfff1da, 3.0);
   key.position.set(0.45, 0.6, -0.65).multiplyScalar(10);
   const fill = new THREE.HemisphereLight(0x6f97b3, 0x2a2620, 1.0);
-  group.add(key, fill);
+  if (lights) group.add(key, fill);
 
   /* reusable scratch + a per-build window-id counter (each building twinkles uniquely). */
   let winId = 0;
@@ -288,11 +354,31 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
   let state = { seed, profileIndex, profile: customProfile || PROFILES[profileIndex], extent: 0, meshCount: 0 };
 
   /* ---- small builders ------------------------------------------------------ */
+  // ARC A-ART: copy a baked forge material's PBR maps onto a plain flat-colour material, BEFORE
+  // vectorize()/vectorizeTower() wrap it — Three's own map_fragment chunk runs ahead of the custom
+  // color_fragment/opaque_fragment splices those wrappers inject, so diffuseColor already carries
+  // the map by the time the window-grid/vector-tier code touches it (composes cleanly, no shader-
+  // order fights). `mat.color` (the per-building/per-surface tint) stays as authored — a texture map
+  // MULTIPLIES the tint, it doesn't replace it, so per-building/per-profile colour variety survives
+  // right alongside the new surface detail. No-op when forgeMat is null (the byte-identical default).
+  function applyForgeMaps(mat, forgeMat) {
+    if (!forgeMat) return mat;
+    mat.map = forgeMat.map; mat.normalMap = forgeMat.normalMap;
+    mat.roughnessMap = forgeMat.roughnessMap; mat.metalnessMap = forgeMat.metalnessMap; mat.aoMap = forgeMat.aoMap;
+    if (mat.aoMap) mat.aoMap.channel = 0;
+    // Three multiplies the SCALAR factor by its matching map channel (roughness = roughnessFactor *
+    // roughnessMap.g, same for metalness) — carry the recipe's own factors over too, else the
+    // target's pre-forge baseline (e.g. a building's flat roughness:0.7) would multiply the recipe's
+    // map instead of the value the recipe actually authored.
+    if (forgeMat.roughness != null) mat.roughness = forgeMat.roughness;
+    if (forgeMat.metalness != null) mat.metalness = forgeMat.metalness;
+    return mat;
+  }
   // a flat horizontal slab (street/sidewalk/park ground) at y, sized w×d, vector-tinted.
-  function slab(w, d, y, colorHex) {
+  function slab(w, d, y, colorHex, forgeMat = null) {
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(w, 0.04, d),
-      vectorize(new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.95, flatShading: true }), { color: colorHex }),
+      vectorize(applyForgeMaps(new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.95, flatShading: true }), forgeMat), { color: colorHex }),
     );
     m.position.y = y;
     m.userData.ground = true;                          // flat ground → RECEIVES shadows, doesn't cast
@@ -341,12 +427,80 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
     island.position.y = PLINTH_TOP - 2;               // top cap lands at PLINTH_TOP; body sinks to -1.7
     island.userData.ground = true;                    // the landmass top RECEIVES shadows
     island.userData.groundKind = 'island';            // ARC A21: purely-additive metadata (no pixel change) — lets a consumer target ground SUB-TYPES (e.g. glint/forge on streets only) without guessing by colour
+
+    /* BEACH (2026-08-05, A-SHORE — additive, default OFF like blockPattern/lights → every existing
+       caller byte-identical). A sand TERRACE ring: the same coast shape scaled out `width`, its top
+       cap a step below the grass (above the waterline) and its body sinking underwater — so the
+       island reads grass → sand shelf → water, and the water shader's own depth-keyed shoreline
+       foam band forms along the sand edge for free. Colour default = terrain.js's own beach-band
+       sand (#d8c89a) so the two ground systems agree on what sand looks like. */
+    if (beach) {
+      const bCol = beach.color ?? '#d8c89a';
+      const bTop = beach.top ?? 0.12;                 // cap height: below PLINTH_TOP grass, above y=0 water
+      const bDepth = 0.7;                             // body reaches ~0.58 underwater (visible wet sand at the drop)
+      const bMesh = new THREE.Mesh(
+        new THREE.ExtrudeGeometry(shape, { depth: bDepth, bevelEnabled: false, steps: 1 }),
+        vectorize(new THREE.MeshStandardMaterial({ color: bCol, roughness: 0.95, flatShading: true, side: THREE.DoubleSide }), { color: bCol }),
+      );
+      bMesh.rotation.x = -Math.PI / 2;
+      const bs = 1 + (beach.width ?? 0.055);
+      bMesh.scale.set(bs, bs, 1);
+      bMesh.position.y = bTop - bDepth;               // same transform algebra as the island: cap lands at bTop
+      bMesh.userData.ground = true;
+      bMesh.userData.groundKind = 'beach';
+      bMesh.raycast = () => {};
+      procedural.add(bMesh);
+    }
+
+    /* SEABED (2026-08-07, A-FISH — additive, default OFF like beach/blockPattern/lights).
+       ---------------------------------------------------------------------------------
+       WHY THIS HAD TO EXIST BEFORE A FISH COULD. Measured before writing a line: hold DESCEND in the
+       helicopter over open water and it stops at y = 0.12 reporting medium='ground', while the water
+       plane is at y = 0. The sea floor was ABOVE the sea surface — metropolis's pilot sampler reused
+       the beach CAP height (0.12) as the floor everywhere at sea. There was literally nowhere to swim,
+       and no amount of fish physics would have fixed that. So the world gets a real water column first.
+
+       ONE FUNCTION, TWO CONSUMERS. seabedY() below displaces this mesh's vertices AND answers the
+       physics sampler (exposed as `seabedAt`). That is deliberate: a floor you collide with at a
+       different height than the one you can see is the guard-scope-blindness failure this repo has
+       logged seven times. Sharing the function makes them agree BY CONSTRUCTION, at any resolution.
+
+       THE SHAPE: flat at the beach's own underwater toe (shoreY, = beach top - beach depth) so the
+       shelf continues the sand seamlessly, then a smoothstep down to floorY over `shelf` world units
+       measured outward from the island's nominal extent. Under the island footprint the plane sits
+       INSIDE the island's own extruded body (top 0.34 → bottom -1.66), so it is never visible there
+       and needs no hole cut in it. C++ anchor: a heightfield sampled by both the mesh builder and the
+       collision query — one source, two readers, the classic way to keep render and physics honest. */
+    if (seabed) {
+      const sy = seabed.shoreY ?? SEABED.shoreY;
+      const fy = seabed.floorY ?? SEABED.floorY;
+      const shelf = seabed.shelf ?? SEABED.shelf;
+      const size = seabed.size ?? 28;                 // covers createCityWorld's WATER_SIZE plane
+      const seg = seabed.segments ?? 32;              // 2048 tris for an entire sea floor; it is seen through fog
+      const sCol = seabed.color ?? '#4a4a3c';         // dark silt — reads as depth, not as more beach
+      const sGeo = new THREE.PlaneGeometry(size, size, seg, seg);
+      const pos = sGeo.attributes.position;
+      // PlaneGeometry is built in XY and rotated to XZ below, so vertex (x, y) maps to world (x, -z)…
+      // …but the depth function is radially symmetric, so the sign never matters here. Displace Z-in-
+      // plane, which becomes world Y after the rotation.
+      for (let i = 0; i < pos.count; i++) pos.setZ(i, seabedY(pos.getX(i), -pos.getY(i), sy, fy, shelf, extent));
+      sGeo.computeVertexNormals();
+      const sMesh = new THREE.Mesh(
+        sGeo,
+        vectorize(new THREE.MeshStandardMaterial({ color: sCol, roughness: 1.0, flatShading: true }), { color: sCol }),
+      );
+      sMesh.rotation.x = -Math.PI / 2;
+      sMesh.userData.groundKind = 'seabed';
+      sMesh.raycast = () => {};                        // never a dive target (the tower pick ray runs through the sea)
+      procedural.add(sMesh);
+      state.seabed = { shoreY: sy, floorY: fy, shelf };
+    } else state.seabed = null;
     procedural.add(island);
     // STREET layer: one square slab covering JUST the block field (a touch beyond the outer blocks,
     // but well INSIDE the shoreline, so the exposed land between street grid and water reads as a
     // green coastal margin). Blocks (sidewalk squares) sit on top → the gaps read as the grid.
     const streetSize = 2 * (blockHalf + 0.12);
-    const streetMesh = slab(streetSize, streetSize, PLINTH_TOP + 0.02, prof.street);
+    const streetMesh = slab(streetSize, streetSize, PLINTH_TOP + 0.02, prof.street, forgeMaterials?.road);
     streetMesh.userData.groundKind = 'street';         // ARC A21: see the island tag above
     procedural.add(streetMesh);
     // L25 HARBOR DOCKS — a couple of timber piers reaching out over the inlet on the +X edge, plus
@@ -381,11 +535,40 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
     // collect candidate landmark lots (tall, large, near core) while we build.
     const candidates = [];
 
+    state.blocks = blockCenters.map((b) => b.slice());   // A-PEDS: block centres for sidewalk-walking consumers (additive)
     blockCenters.forEach(([bx, bz], bi) => {
       // each block gets a sidewalk square (its base); buildings inset within.
-      const sidewalkMesh = slab(BLOCK, BLOCK, PLINTH_TOP + 0.03, prof.sidewalk).translateX(bx).translateZ(bz);
+      const sidewalkMesh = slab(BLOCK, BLOCK, PLINTH_TOP + 0.03, prof.sidewalk, forgeMaterials?.concrete).translateX(bx).translateZ(bz);
       sidewalkMesh.userData.groundKind = 'sidewalk';   // ARC A21: see the island tag above
       procedural.add(sidewalkMesh);
+
+      /* A-STREET (2026-08-06, look-bible §6 items 3 — additive, default OFF like beach/blockPattern
+         → every existing caller byte-identical). KERBS: a thin lip framing each block where sidewalk
+         meets street — at the human eye height the walker now has (0.28), this one edge is what
+         visually separates "standing on the pavement" from "standing on a painted board". CROSSWALKS:
+         unlit paint stripes (the markMat convention — paint is immune to the light rig) bridging the
+         street gap on two sides per block, which tiles into every intersection having them. */
+      if (streetDetail) {
+        const kerbMat = vectorize(new THREE.MeshStandardMaterial({ color: '#c9ced3', roughness: 0.9, flatShading: true }), { color: '#c9ced3' });
+        const K = BLOCK / 2, KY = PLINTH_TOP + 0.036, KH = 0.022, KW = 0.024;
+        for (const [w, d, ox, oz] of [[BLOCK, KW, 0, K], [BLOCK, KW, 0, -K], [KW, BLOCK, K, 0], [KW, BLOCK, -K, 0]]) {
+          const kerb = new THREE.Mesh(new THREE.BoxGeometry(w, KH, d), kerbMat);
+          kerb.position.set(bx + ox, KY, bz + oz);
+          kerb.raycast = () => {};
+          procedural.add(kerb);
+        }
+        const paintMat = new THREE.MeshBasicMaterial({ color: '#e8e6e0', fog: true });
+        for (const side of [0, 1]) {                 // north + east crossings; grid tiling covers the rest
+          for (let i = 0; i < 4; i++) {
+            const stripe = new THREE.Mesh(new THREE.BoxGeometry(side ? STREET * 0.86 : 0.07, 0.004, side ? 0.07 : STREET * 0.86), paintMat);
+            const off = -0.27 + i * 0.18;
+            if (side) stripe.position.set(bx + K + STREET / 2, PLINTH_TOP + 0.006, bz + off);
+            else stripe.position.set(bx + off, PLINTH_TOP + 0.006, bz + K + STREET / 2);
+            stripe.raycast = () => {};
+            procedural.add(stripe);
+          }
+        }
+      }
 
       if (parkSet.has(bi)) {                         // PARK block: green + a few trees
         const parkMesh = slab(BLOCK - SIDEWALK * 2, BLOCK - SIDEWALK * 2, PLINTH_TOP + 0.05, prof.park).translateX(bx).translateZ(bz);
@@ -414,7 +597,7 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
         // a tall-ish, central lot is a landmark candidate (relaxed so flat Paris finds 3).
         if (h > prof.hMax * 0.5 && Math.min(fw, fd) >= 0.7) candidates.push({ lx, lz, fw, fd, h, r });
 
-        addBuilding(lx, lz, fw, fd, h, prof, rng);
+        addBuilding(lx, lz, fw, fd, h, prof, rng, bx, bz);
       }
     });
 
@@ -503,9 +686,12 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
 
   /* a parameterized building box (+ optional shopfront band + roof detail). Tagged with its
      lot centre so a landmark can evict it. */
-  function addBuilding(lx, lz, fw, fd, h, prof, rng) {
+  function addBuilding(lx, lz, fw, fd, h, prof, rng, bx = lx, bz = lz) {
     const body = vectorizeTower(
-      new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.7, metalness: 0.05, envMapIntensity: 0.3 }),   // L93: cut the sky-IBL response so the bright midday sky doesn't over-light the shadowed faces → buildings keep shadow CONTRAST + pop. Beauty-only (scene.environment is null on pixel/vector/toon → no env to respond to → those tiers byte-identical).
+      // ARC A-ART: applyForgeMaps is a no-op (forgeMaterials null, the default) — every existing city
+      // stays byte-identical. When a look is active, the building WALL gets that look's forged surface
+      // (facade or glass, per CITY_LOOKS.wallSurface) — the per-building tint below still applies over it.
+      applyForgeMaps(new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.7, metalness: 0.05, envMapIntensity: 0.3 }), forgeMaterials?.wall),   // L93: cut the sky-IBL response so the bright midday sky doesn't over-light the shadowed faces → buildings keep shadow CONTRAST + pop. Beauty-only (scene.environment is null on pixel/vector/toon → no env to respond to → those tiers byte-identical).
       { color: tintTower(rng.pick(prof.towers), rng), id: ++winId, windowGlow, winColors: prof.winColors, litFrac: prof.nightLit },   // L92: per-building value-down + hue jitter
     );
     // Paris zinc mansard: tint the TOP face via emissive-free trick is hard here; instead a thin
@@ -517,7 +703,7 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
     procedural.add(b);
 
     if (prof.roofTint) {
-      const capMat = vectorize(new THREE.MeshStandardMaterial({ color: prof.roofTint, roughness: 0.85, flatShading: true }), { color: prof.roofTint });
+      const capMat = vectorize(applyForgeMaps(new THREE.MeshStandardMaterial({ color: prof.roofTint, roughness: 0.85, flatShading: true }), forgeMaterials?.roof), { color: prof.roofTint });
       const cap = new THREE.Mesh(new THREE.BoxGeometry(fw * 1.02, 0.08, fd * 1.02), capMat);
       cap.position.set(lx, PLINTH_TOP + h + 0.04, lz); cap.userData.lot = [lx, lz]; cap.userData.collide = true;
       procedural.add(cap);
@@ -530,6 +716,70 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
       band.position.set(lx, PLINTH_TOP + 0.09, lz); band.userData.lot = [lx, lz]; band.userData.collide = true;
       procedural.add(band);
     }
+    /* A-STREET (look-bible S6 items 1-2, default OFF): STOREFRONT GLAZING — a slightly-proud emissive
+       band at display-window height (0.11-0.21 against the 0.28 human eye). The bible's #1 street
+       item: "gives the canyon its light, scale, and human read all at once". Constant emissive — an
+       interior is lit day and night; at noon beauty it reads as glass depth, at night it lights the
+       sidewalk. AWNINGS (#2): on ~half the buildings, a tilted accent plank over the glazing on the
+       face toward the nearest street (the lot's dominant offset from its block centre) — the palette
+       accents doing "colour rhythm at eye height". Both draw from the SAME rng stream only when the
+       option is on, so default-off callers keep their exact build sequence (byte-identical). */
+    if (streetDetail) {
+      /* A solid emissive box read as a glowing BEAM (first attempt, seen at eye level) — glazing has
+         to read as WINDOWS. So the band speaks the tower's own dialect: vectorizeTower's procedural
+         window grid, one row tall at this height, with its OWN always-on glow (a fixed {value} box,
+         NOT the shared day-night windowGlow — storefronts stay lit; that is the bible's point). */
+      const glaze = new THREE.Mesh(new THREE.BoxGeometry(fw * 1.03, 0.14, fd * 1.03),
+        vectorizeTower(new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.5, metalness: 0.05 }),
+          { color: '#2a2e33', id: ++winId, windowGlow: { value: 0.85 }, winColors: ['#ffc98a', '#ffe2b0'], litFrac: 0.9 }));
+      glaze.position.set(lx, PLINTH_TOP + 0.13, lz); glaze.userData.lot = [lx, lz];
+      glaze.raycast = () => {};
+      procedural.add(glaze);
+      /* BLADE SIGNS (bible §6 item 5): on taller buildings, a vertical sign jutting perpendicular
+         from the street face — "identity by day, light sources by night". Unlit (the paint/markMat
+         convention, toneMapped:false) so it stays legible in the canyon at any hour. The texture is
+         a seeded canvas (2-4 glyphs on a shopfront-palette ground); HEADLESS-SAFE: citygen runs in
+         node determinism tests where document does not exist — both paths consume IDENTICAL rng
+         draws so the position signature never shifts. */
+      if (h >= 1.4 && rng.chance(0.30)) {
+        const dxo = lx - bx, dzo = lz - bz;
+        const ax = Math.abs(dxo) >= Math.abs(dzo);
+        const sgn = ax ? Math.sign(dxo || 1) : Math.sign(dzo || 1);
+        const sc = rng.pick(prof.shopfronts);
+        const nGlyph = rng.int(2, 4);
+        const glyphs = [];
+        for (let k = 0; k < nGlyph; k++) glyphs.push(String.fromCharCode(65 + Math.floor(rng.next() * 26)));
+        let signMat;
+        if (typeof document !== 'undefined') {
+          const cv = document.createElement('canvas'); cv.width = 32; cv.height = 128;
+          const g = cv.getContext('2d');
+          g.fillStyle = sc; g.fillRect(0, 0, 32, 128);
+          g.fillStyle = '#fff6e2'; g.font = 'bold 24px system-ui, sans-serif'; g.textAlign = 'center';
+          glyphs.forEach((ch, k) => g.fillText(ch, 16, 36 + k * 30));
+          const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+          signMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false, fog: true });
+        } else {
+          signMat = new THREE.MeshBasicMaterial({ color: sc, side: THREE.DoubleSide, fog: true });
+        }
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.10, 0.40), signMat);
+        sign.position.set(lx + (ax ? sgn * (fw / 2 + 0.06) : 0), PLINTH_TOP + 0.62, lz + (ax ? 0 : sgn * (fd / 2 + 0.06)));
+        if (!ax) sign.rotation.y = Math.PI / 2;   // blade face runs ALONG the street either way
+        sign.raycast = () => {};
+        procedural.add(sign);
+      }
+      if (rng.chance(0.35)) {
+        const dxo = lx - bx, dzo = lz - bz;
+        const ax = Math.abs(dxo) >= Math.abs(dzo);            // face the dominant street side
+        const sgn = ax ? Math.sign(dxo || 1) : Math.sign(dzo || 1);
+        const aw = (ax ? fd : fw) * 0.42;   // an accent over a doorway, not a beam across the facade
+        const awn = new THREE.Mesh(new THREE.BoxGeometry(ax ? 0.065 : aw, 0.012, ax ? aw : 0.065),
+          vectorize(new THREE.MeshStandardMaterial({ color: rng.pick(prof.shopfronts), roughness: 0.8, flatShading: true }), { color: prof.shopfronts[0] }));
+        awn.position.set(lx + (ax ? sgn * (fw / 2 + 0.03) : 0), PLINTH_TOP + 0.30, lz + (ax ? 0 : sgn * (fd / 2 + 0.03)));   // just ABOVE the 0.28 eye — you walk under it
+        if (ax) awn.rotation.z = -sgn * 0.32; else awn.rotation.x = sgn * 0.32;
+        awn.raycast = () => {};
+        procedural.add(awn);
+      }
+    }
     // L55 SETBACK CROWN — the biggest silhouette win. Tall buildings get a narrower UPPER tier (the Art-Deco
     // "wedding cake" step) instead of every tower being one flat box. Cheap (one extra box, tall lots only)
     // and deterministic (drawn from the same rng stream → same seed = same city). The crown carries its OWN
@@ -541,7 +791,7 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
       const cw = fw * rng.range(0.5, 0.72), cd = fd * rng.range(0.5, 0.72);   // narrower footprint
       const ch = h * rng.range(0.18, 0.4);                                    // a modest extra storey-stack
       const crown = new THREE.Mesh(new THREE.BoxGeometry(cw, ch, cd), vectorizeTower(
-        new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.7, metalness: 0.05, envMapIntensity: 0.3 }),   // L93: cut the sky-IBL response so the bright midday sky doesn't over-light the shadowed faces → buildings keep shadow CONTRAST + pop. Beauty-only (scene.environment is null on pixel/vector/toon → no env to respond to → those tiers byte-identical).
+        applyForgeMaps(new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.7, metalness: 0.05, envMapIntensity: 0.3 }), forgeMaterials?.wall),   // L93: cut the sky-IBL response so the bright midday sky doesn't over-light the shadowed faces → buildings keep shadow CONTRAST + pop. Beauty-only (scene.environment is null on pixel/vector/toon → no env to respond to → those tiers byte-identical).
         { color: tintTower(rng.pick(prof.towers), rng), id: ++winId, windowGlow, winColors: prof.winColors, litFrac: prof.nightLit },   // L92: per-building tint
       ));
       crown.position.set(lx, PLINTH_TOP + h + ch / 2, lz); crown.userData.lot = [lx, lz]; crown.userData.collide = true;
@@ -553,9 +803,9 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
     if (h > prof.hMax * 0.45 && rng.chance(prof.roofRate)) {
       const rd = rng.chance(0.5)
         ? new THREE.Mesh(new THREE.BoxGeometry(topW * 0.4, 0.18, topD * 0.4),
-            vectorize(new THREE.MeshStandardMaterial({ color: '#9a9a9a', flatShading: true }), { color: '#9a9a9a' }))
+            vectorize(applyForgeMaps(new THREE.MeshStandardMaterial({ color: '#9a9a9a', flatShading: true }), forgeMaterials?.roof), { color: '#9a9a9a' }))
         : new THREE.Mesh(new THREE.CylinderGeometry(topW * 0.18, topW * 0.18, 0.22, 10),
-            vectorize(new THREE.MeshStandardMaterial({ color: '#b9bec4', flatShading: true }), { color: '#b9bec4' }));
+            vectorize(applyForgeMaps(new THREE.MeshStandardMaterial({ color: '#b9bec4', flatShading: true }), forgeMaterials?.roof), { color: '#b9bec4' }));
       rd.position.set(lx + rng.range(-0.1, 0.1), roofY + 0.11, lz + rng.range(-0.1, 0.1));
       rd.userData.lot = [lx, lz];
       if (rd.geometry.type === 'BoxGeometry') rd.userData.collide = true;   // L112: the box HVAC is solid; the cylinder tank is excluded (the post-pass only AABBs boxes anyway)
@@ -657,8 +907,18 @@ export function createCity({ seed = 1, profileIndex = 0, profile = null, landmar
     return inside;
   }
 
+  /* seabedAt(x, z) — the floor of the sea, in world Y, or NULL when this city has no seabed.
+     Null rather than a number by design: a consumer must not be able to collide with a floor that was
+     never drawn. Callers use it as `city.seabedAt(x, z) ?? <their old fallback>`, so a city built
+     without the option keeps whatever floor it had before — byte-identical. */
+  function seabedAt(x, z) {
+    const sb = state.seabed;
+    if (!sb) return null;
+    return seabedY(x, z, sb.shoreY, sb.floorY, sb.shelf, state.extent);
+  }
+
   return {
-    group, key, fill, update, generate, isLand,
+    group, key, fill, update, generate, isLand, seabedAt,
     get state() { return state; },
     get extent() { return state.extent; },
     get waterColor() { return state.profile.water; },

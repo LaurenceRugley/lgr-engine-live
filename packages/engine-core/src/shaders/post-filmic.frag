@@ -182,10 +182,20 @@ void main() {
     col = clamp(col, 0.0, 1.0);
     /* L105 NOON WARM-BALANCE — kill the residual blue sky-IBL cast at high sun (uWarmBal = midK·strength from the
        engine; 0 at golden hour → no-op there). Push R up / B down, then rescale to PRESERVE LUMA (a white-balance,
-       NOT exposure). Inside the uGrade gate → pixel/toon/vector (uGrade=0) stay BYTE-IDENTICAL. */
+       NOT exposure). Inside the uGrade gate → pixel/toon/vector (uGrade=0) stay BYTE-IDENTICAL.
+       LUMA GATE (2026-08-05, metropolis noon fix — headed-browser pixel sweep): the cast this lever kills lives on
+       SHADOW faces and concrete (luma ≲ 0.5, lit by the blue sky-IBL); the noon SKY BAND itself measures ~0.62-0.65
+       and was being warm-balanced into the exact "flat pale gray-green" the noon-washout docs keep fighting
+       (measured: intended #aacadd rendered as rgb(161,166,142) — blue INVERTED to green). No single uWarmBal value
+       serves both (sweep: sky needs ≤0.25, shadow faces need ≥0.6), so gate by luma: full balance below 0.50,
+       none above 0.66 — the sky, the horizon haze and the clouds keep their color, the cast-afflicted faces keep
+       their cure. Sun-lit bright faces lose the balance too, but they are lit by the WARM sun and never had the
+       blue cast. Dusk/night unchanged by construction (uWarmBal is already 0 outside high sun). */
     if (uWarmBal > 0.0) {
-      vec3 warm = vec3(1.0 + 0.20 * uWarmBal, 1.0, 1.0 - 0.26 * uWarmBal);
-      float l0 = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      float lg = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      float wbK = uWarmBal * (1.0 - smoothstep(0.50, 0.66, lg));
+      vec3 warm = vec3(1.0 + 0.20 * wbK, 1.0, 1.0 - 0.26 * wbK);
+      float l0 = lg;
       vec3 cw = col * warm;
       float l1 = dot(cw, vec3(0.2126, 0.7152, 0.0722));
       col = clamp(cw * (l1 > 1e-4 ? l0 / l1 : 1.0), 0.0, 1.0);

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>Metropolis — a living city, composed</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; height: 100dvh; background: #0e0b07; overflow: hidden; overscroll-behavior: none; position: fixed; inset: 0; width: 100%; touch-action: none; }
+      #app { position: fixed; inset: 0; height: 100dvh; touch-action: none; }
+      canvas { display: block; touch-action: none; }
+      /* id is the HOUSE convention (lgr-loader + .gone) that tools/smoke.mjs waits on — see lessons/main.js:9 */
+      #lgr-loader {
+        position: fixed; inset: 0; display: grid; place-items: center; z-index: 50;
+        background: #0e0b07; color: #b9a582; font: 500 15px/1.5 system-ui, sans-serif;
+        letter-spacing: 0.08em; text-transform: uppercase; transition: opacity 0.6s ease;
+      }
+      #lgr-loader.gone { opacity: 0; pointer-events: none; }
+
+      /* ----- the REAL public control surface — modelled on lgr-live-sky's dock, NOT hidden behind
+         an AUTHOR gate. A small number of controls that all actually do something. ----- */
+      #dock {
+        position: fixed; left: 12px; bottom: 12px; z-index: 40; width: 300px; max-width: calc(100vw - 24px);
+        background: rgba(14,12,9,0.82); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px; padding: 10px 12px 12px; color: #e8dfc8; font: 13px/1.4 system-ui, sans-serif;
+      }
+      #dock.hidden { display: none; }
+      #dock h1 { font-size: 11px; margin: 0 0 8px; letter-spacing: 0.08em; text-transform: uppercase; color: #b9a582; font-weight: 600; }
+      #dock label { display: block; font-size: 11px; color: #b9a582; margin: 8px 0 2px; }
+      #dock input[type="range"] { width: 100%; accent-color: #e0a86a; }
+      #dock input[type="date"] { width: 100%; background: #1a1610; color: #e8dfc8; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 3px 6px; }
+      #dock select { width: 100%; background: #1a1610; color: #e8dfc8; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 3px 6px; }
+      #dock .row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+      #dock button { background: #23201a; color: #e8dfc8; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+      #dock button[aria-pressed="true"] { background: #e0a86a; color: #241a0a; border-color: #e0a86a; }
+      #dock button:hover { border-color: rgba(255,255,255,0.4); }
+      #dockToggle {
+        position: fixed; left: 12px; bottom: 12px; z-index: 41; background: rgba(14,12,9,0.82);
+        color: #e8dfc8; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px 10px;
+        font: 12px system-ui, sans-serif; cursor: pointer; display: none;
+      }
+      #dockToggle.show { display: block; }
+
+      #hint {
+        position: fixed; right: 12px; bottom: 12px; z-index: 30; color: #cdb896; font: 12px/1.5 system-ui, sans-serif;
+        background: rgba(14,12,9,0.6); border-radius: 8px; padding: 6px 10px; max-width: 40vw; text-align: right;
+      }
+
+      /* ----- PHONE (2026-08-06). On a portrait phone the desktop dock ate the bottom third of the
+         screen and collided with the hint; the thumbstick zone lives in the lower-left, so the dock
+         is moved to the TOP and made compact, and the hint sits under it. Safe-area insets keep the
+         notch and home indicator clear. Keyed on coarse pointer AND narrow width so a touch laptop
+         keeps the roomy desktop dock. ----- */
+      @media (pointer: coarse) and (max-width: 820px) {
+        #dock {
+          top: max(52px, calc(env(safe-area-inset-top) + 46px)); bottom: auto;   /* below the ⚙/✕ chip */
+          left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right));
+          width: auto; max-width: none; padding: 8px 10px 10px; font-size: 12px;
+        }
+        #dock h1 { margin-bottom: 4px; }
+        #dock label { margin: 5px 0 1px; }
+        /* the date picker is a desktop affordance — the real-sky toggle still works without it */
+        #dock input[type="date"] { display: none; }
+        #dock .row { gap: 5px; }
+        #dock button { padding: 7px 11px; }        /* ≥44px touch targets with the line-height */
+        #dockToggle { top: max(8px, env(safe-area-inset-top)); bottom: auto; left: max(8px, env(safe-area-inset-left)); }
+        #hint {
+          right: max(8px, env(safe-area-inset-right)); left: max(8px, env(safe-area-inset-left));
+          bottom: auto; top: 0; max-width: none; text-align: center; font-size: 11px;
+          background: none; transform: translateY(-200%);   /* parked off-screen; JS re-places it under the dock */
+        }
+        #hint.mobile { position: fixed; top: auto; bottom: max(10px, env(safe-area-inset-bottom));
+          right: max(8px, env(safe-area-inset-right)); left: auto; width: auto; transform: none;
+          background: rgba(14,12,9,0.6); text-align: right; max-width: 46vw; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="lgr-loader">Metropolis — composing the city…</div>
+
+    <div id="dock">
+      <h1>Metropolis</h1>
+      <label for="time">Time of day <span id="clock" style="float:right;font-variant-numeric:tabular-nums;opacity:.85"></span></label>
+      <input id="time" type="range" min="0" max="1000" step="1" value="340" aria-label="Time of day" />
+      <div class="row">
+        <button id="auto" aria-pressed="false" title="Auto day/night cycle">Auto</button>
+        <select id="weather" aria-label="Weather" title="Weather">
+          <option value="clear">clear</option>
+          <option value="rain">rain</option>
+          <option value="snow">snow</option>
+          <option value="fog">fog</option>
+        </select>
+      </div>
+      <label for="speed">Day-cycle speed</label>
+      <input id="speed" type="range" min="0" max="100" step="1" value="30" aria-label="Day-cycle speed" />
+      <div class="row">
+        <button id="realsky" aria-pressed="false" title="Position the sun/moon/stars for a real place + date (art direction stays the same)">real sky</button>
+        <input id="realdate" type="date" aria-label="Date" title="Date" />
+      </div>
+      <div class="row">
+        <button id="modeFly" aria-pressed="true" title="Fly">fly</button>
+        <button id="modeWalk" aria-pressed="false" title="Walk (E to enter/exit a vehicle)">walk</button>
+        <button id="modeDrive" aria-pressed="false" title="Drive">drive</button>
+        <button id="modeHeli" aria-pressed="false" title="Fly the helicopter (Space climb · C descend · Shift boost)">heli</button>
+        <button id="modeBoat" aria-pressed="false" title="Take the helm of a boat (rudder only works with way on · Shift full ahead)">boat</button>
+        <button id="modeBird" aria-pressed="false" title="Be a gull — W flap, A/D bank, Space climb, C dive, Shift beat harder">bird</button>
+        <button id="modeFish" aria-pressed="false" title="Be a fish — W/S swim, A/D turn on the spot, Space up, C dive, Shift burst; hit the surface fast to breach">fish</button>
+      </div>
+    </div>
+    <button id="dockToggle">controls ⌄</button>
+    <!-- placeholder only: main.js's refreshHint() replaces this with the CURRENT body's controls on boot
+         and on every mode change (the HINTS table there is the source of truth). -->
+    <div id="hint">WASD move · Shift boost · drag look · scroll zoom · click a tower to step inside</div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

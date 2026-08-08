@@ -19,3 +19,12 @@ We credit anyway, because crediting good free work is how the commons stays fed.
 
 These feed `src/landmarks.js`, which normalizes each to our world units (`Box3`) and makes
 them adopt our art direction (vector tiers / day-night / windows / palettes) — see Lesson 12.
+
+## survivor.glb (A-PEDS, 2026-08-06 — the engine's generic human)
+- **Author:** Quaternius (https://quaternius.com), via the poly.pizza mirror
+- **License:** CC0 1.0 Universal (https://creativecommons.org/publicdomain/zero/1.0/)
+- Same file, byte-identical, as `projects/hoard/public/models/survivor.glb` and
+  `projects/hoard2/public/models/survivor.glb` (their LICENSES.md carry the original
+  citation). Promoted into the LIBRARY home so `createPedestrians` — an engine ability —
+  ships with its own asset instead of reaching into a project's public dir.
+- Skinned, 8 clips incl. `Human Armature|Walk` (the one pedestrians use).

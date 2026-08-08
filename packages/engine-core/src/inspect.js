@@ -90,6 +90,19 @@ export function createInspector({ rig, getCamera, sources = [] }) {
     pickAt, cycle, follow, release, prune,
     get focus() { return focus; },
     get count() { return all().length; },
+    /* PILOTABLES (2026-08-07) — every followable that also carries `.pilot`, i.e. every body in this
+       world a player could BE. The registry already aggregates cars, water life, clouds and placed
+       life; nothing exposed the pilotable subset, so consumers hand-rolled the filter (metropolis
+       writes it three times, once per body) and showcase-lab could only ever offer the ONE craft that
+       `seizeCraft` happens to name.
+
+       DELIBERATELY NOT FILTERED BY `active()`. That predicate answers "is this worth WATCHING right
+       now" — water-life's fish set it to `y > WATER_Y - 0.3`, true only while they are breaching. A
+       body you can possess is pilotable whether or not it is currently interesting to look at, and
+       possessing one is exactly what brings it into view (its suspendAutonomy lifts it out of its
+       parking spot). Filtering here would make the fish selectable only during the ~10% of its cycle
+       it is airborne, which is the kind of "safe by accident" idiom this repo has been bitten by. */
+    get pilotables() { return all().filter((f) => f && f.pilot); },
     // the live behaviour readout for the focused object (null if free) — the inspect overlay reads this.
     get readout() { return focus ? { kind: focus.kind, label: focus.label, info: focus.info ? focus.info() : '' } : null; },
   };

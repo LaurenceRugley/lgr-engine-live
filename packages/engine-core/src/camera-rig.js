@@ -161,9 +161,13 @@ export function createCameraRig({
   let aspectRatio = aspect;
 
   /* GOAL = where we want to be; CURR = where we are this frame. update() eases
-     curr → goal. Target is a Vector3 (damped component-wise). */
-  const goal = { azimuth, elevation, distance, zoom, target: target.clone() };
-  const curr = { azimuth, elevation, distance, zoom, target: target.clone() };
+     curr → goal. Target is a Vector3 (damped component-wise). `roll` (2026-08-01, camera-path.js's
+     banking feature) only ever matters in FP-EYE mode (setEye/update's fpActive branch below) — the
+     orbit camera never rolls, by design (cam.lookAt() there has no roll concept at all). Damped through
+     the SAME damp()/K as every other rig value, per the brief's own "reuse the existing damp helper
+     rather than inventing a second smoothing function." */
+  const goal = { azimuth, elevation, distance, zoom, target: target.clone(), roll: 0 };
+  const curr = { azimuth, elevation, distance, zoom, target: target.clone(), roll: 0 };
 
   /* In iso/dimetric the PITCH is the definition of the view, so we lock elevation
      to its canonical value: vertical drag is ignored, only the heading orbits.
@@ -265,13 +269,36 @@ export function createCameraRig({
      Pan speed scales with how much world the view currently spans (distance for
      perspective, zoom for ortho), so a keypress nudges a consistent fraction of
      the frame no matter how far in you are. */
-  function pan(dxRight, dyForward) {
+  // ARC A-CAM+WALK — Part A's one missing degree of freedom: `dyUp` (optional, default 0 — every
+  // existing 2-arg caller is untouched) moves the target straight up/down in world Y, the SAME
+  // `span`-scaled step as right/forward so a vertical nudge feels consistent with a horizontal one.
+  // The rig places the eye at target + distance·(azimuth,elevation) (see update()'s Spherical→
+  // Cartesian block), so moving the TARGET's Y moves the whole orbit sphere — the free camera
+  // climbs/descends without needing a separate "fly" mode or touching elevation/distance at all.
+  function pan(dxRight, dyForward, dyUp = 0) {
     const az = goal.azimuth;
     const span = mode === CAM.PERSPECTIVE ? goal.distance * 0.04 : goal.zoom * 0.08;
     const right   = new THREE.Vector3(Math.cos(az),  0, -Math.sin(az));
     const forward = new THREE.Vector3(-Math.sin(az), 0, -Math.cos(az));
-    goal.target.addScaledVector(right,   dxRight  * span);
-    goal.target.addScaledVector(forward, dyForward * span);
+    const ox = goal.target.x, oy = goal.target.y, oz = goal.target.z;
+    let nx = ox + right.x * dxRight * span + forward.x * dyForward * span;
+    let nz = oz + right.z * dxRight * span + forward.z * dyForward * span;
+    // ARC A-CAM+WALK finding (measured, not assumed): the spring-arm's segmentQuery protects the
+    // EYE-to-TARGET segment, but pan() moves the TARGET itself — nothing stopped the target from
+    // tunnelling INTO a building, and segmentHit's own "origin already inside the fat box -> t=0"
+    // fallback then pulls the eye to sit WHERE THE TARGET IS, i.e. also inside the wall it just
+    // walked into (confirmed by a real fly-at-a-wall test: eye position tracked straight through).
+    // Fix: when a spring arm is set (armed for the free camera, same state pilot.js's chase-cam
+    // arms), sweep the TARGET's own proposed HORIZONTAL move through the SAME segmentQuery and clamp
+    // it. ONLY horizontal — a first attempt clamped all 3 axes uniformly and broke vertical flight
+    // near ANY building (segmentHit's t=0 "already touching something" fallback froze dyUp too, so
+    // pressing E near a wall did nothing at all — a worse bug than the one being fixed). Straight up
+    // is always a valid escape (the city has no ceiling), so it stays unclamped.
+    if (armEnabled && armSegmentQuery && (dxRight !== 0 || dyForward !== 0)) {
+      const t = armSegmentQuery(ox, oy, oz, nx, oy, nz, armRadius);
+      if (t < 1) { nx = ox + (nx - ox) * t; nz = oz + (nz - oz) * t; }
+    }
+    goal.target.set(nx, oy + dyUp * span, nz);
   }
 
   /* Keep aspect current; the perspective matrix needs it now, the ortho frustum
@@ -294,6 +321,13 @@ export function createCameraRig({
       const cam = activeCamera();
       cam.position.copy(fpPos);
       cam.lookAt(fpPos.x + fpDir.x, fpPos.y + fpDir.y, fpPos.z + fpDir.z);
+      // BANKING (2026-08-01, camera-path.js): damp curr.roll toward whatever setEye's 3rd arg last set,
+      // same K-rate as every other rig value, THEN rotate around the camera's own view axis — composes
+      // AFTER lookAt's yaw/pitch, so it banks the frame without disturbing where it's pointed. A caller
+      // that never passes a roll (the existing pilot cockpit call site) leaves goal.roll at its 0 default
+      // → curr.roll damps 0→0 → rotateZ(0) is a no-op → byte-identical to before this feature existed.
+      curr.roll = damp(curr.roll, goal.roll, dt);
+      if (curr.roll !== 0) cam.rotateZ(curr.roll);
       if (cam.isOrthographicCamera) {
         const halfH = curr.zoom, halfW = halfH * aspectRatio;
         cam.left = -halfW; cam.right = halfW; cam.top = halfH; cam.bottom = -halfH;
@@ -372,6 +406,35 @@ export function createCameraRig({
     goal.zoom = THREE.MathUtils.clamp(z, zoomMin, zoomMax);
     if (snap) curr.zoom = goal.zoom;
   }
+  // ARC A-CAM+WALK Part A — the perspective twin of setZoom: only zoomBy(factor) (multiplicative,
+  // relative) existed before; a viewpoint URL restores an ABSOLUTE distance, which needed this.
+  function setDistance(d, snap = false) {
+    goal.distance = THREE.MathUtils.clamp(d, distMin, distMax);
+    if (snap) curr.distance = goal.distance;
+  }
+
+  /* setDistanceClamp(min, max) — A-FISH (2026-08-07). Retune the perspective dolly clamp at runtime.
+     WHY THIS EXISTS, and it is a bug fix disguised as a feature: `chaseDist` on a PilotProfile has
+     been DECORATIVE for every craft in this repo. setFollow's `frame` is clamped to distMin (4.0),
+     so BOAT_PROFILE's 2.4, BIRD_PROFILE's 1.6 and CRAFT_PROFILE's 9.5 all resolve to 4.0 — the
+     numbers were written, tuned, and silently discarded. Nobody noticed because 4 u happens to frame
+     a car acceptably. It does NOT frame a fish: the largest breacher is 0.40 u long, so a 4 u chase
+     puts the camera ten body-lengths back and the "fish" is a speck.
+     Rather than lower DIST_MIN globally — which would also loosen the user's scroll-zoom in fly mode
+     and is therefore a byte-identical question, not a one-liner — the clamp becomes settable, and the
+     pilot controller owns it the same way it owns the spring arm: applied on possess, restored on
+     release. Call with no arguments to restore the defaults. */
+  function setDistanceClamp(min, max) {
+    distMin = Number.isFinite(min) ? min : DIST_MIN;
+    distMax = Number.isFinite(max) ? max : DIST_MAX;
+    /* Clamp the GOAL only. My first version also hard-wrote `curr.distance`, which turned every
+       clamp change into an instant dolly jump: release() restores distMin to 4, so leaving a body
+       framed at 1.3 u yanked the camera to 4.0 u in a single frame — measured at 9.19 u of camera
+       movement across a body swap that should barely move it at all. Letting `curr` ease to the
+       clamped goal at the rig's normal rate is both smoother and the rig's own convention: every
+       other setter here writes `goal` and only jumps `curr` behind an explicit `snap` flag. */
+    goal.distance = THREE.MathUtils.clamp(goal.distance, distMin, distMax);
+  }
 
   /* ----- L76 CHASE-CAM seam: drive the orbit angles directly (the pilot's reactive chase) -----
      The L32 Hoard cam followed a target POSITION but kept whatever azimuth the user had orbited
@@ -416,12 +479,45 @@ export function createCameraRig({
     if (armEnabled) { armDist = curr.distance; armGroundY = curr.target.y; }   // seed from the current framing so the first frame doesn't pop
   }
 
-  /* L-cockpit: setEye(pos, lookDir) — pilot controller calls this every COCKPIT frame to override
-     the orbit placement. lookDir is the pre-composed world-space look direction (heading + seated look
-     offsets); camera-rig calls cam.lookAt(fpPos + fpDir) — no quaternion composing needed here.
-     clearEye() exits fp mode so the orbit block resumes on the next update() call. */
-  function setEye(pos, lookDir) { fpPos.copy(pos); fpDir.copy(lookDir); fpActive = true; }
-  function clearEye() { fpActive = false; }
+  /* L-cockpit: setEye(pos, lookDir, roll) — pilot controller (or a camera-path flythrough, 2026-08-01)
+     calls this every COCKPIT/FLIGHT frame to override the orbit placement. lookDir is the pre-composed
+     world-space look direction (heading + seated look offsets); camera-rig calls cam.lookAt(fpPos+fpDir)
+     — no quaternion composing needed here. `roll` (optional, default 0 — existing callers unaffected) is
+     a BANK ANGLE in radians around the view axis, eased in via the rig's own damp (see update()'s
+     fpActive branch) — a caller drives this from camera-path.js's curvatureAt()/bankAngleFromCurvature(),
+     but the rig itself doesn't know or care where the number came from (it just damps + applies it), the
+     same "inject the number, the rig owns the ease" shape setAzimuth/setElevation already use.
+     clearEye() exits fp mode so the orbit block resumes on the next update() call; it also resets roll to
+     0 so a LATER setEye() call (cockpit re-entry, a different flythrough) doesn't inherit a stale bank. */
+  function setEye(pos, lookDir, roll = 0) { fpPos.copy(pos); fpDir.copy(lookDir); goal.roll = roll; fpActive = true; }
+  function clearEye() {
+    fpActive = false; goal.roll = 0; curr.roll = 0;
+    /* RE-SEED THE ORBIT FROM WHERE THE EYE ACTUALLY IS (A-CROSSING, 2026-08-07).
+       The fpActive branch above early-returns ABOVE the damp block, so for the whole cockpit session
+       curr.target / azimuth / elevation / distance are FROZEN at whatever they held when the eye took
+       over. Dropping straight back into the orbit block therefore places the camera from a stale
+       snapshot — the view cuts to wherever you were standing before you became the gull, which can be
+       most of the map away. Measured on the gull→fish crossing: 7.6 u of camera movement on a body
+       swap whose position does not change at all.
+       The fix is to invert the placement below (eye = target + d·(cos e·sin a, sin e, cos e·cos a))
+       and write the result back, so the FIRST orbit frame reproduces the cockpit's exact eye and the
+       rig then eases to its goal from there. Continuous by construction rather than by tuning.
+       Guarded on followFn: with nothing followed there is no meaningful target to orbit, and the old
+       behaviour (resume from whatever curr held) is correct — so free-fly stays byte-identical. */
+    if (!followFn) return;
+    followFn(_followPos);
+    const cam = activeCamera();
+    const dx = cam.position.x - _followPos.x;
+    const dy = cam.position.y - _followPos.y;
+    const dz = cam.position.z - _followPos.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d < 1e-4) return;                       // eye sitting exactly on the target — nothing to derive
+    curr.target.copy(_followPos); goal.target.copy(_followPos);
+    curr.distance  = THREE.MathUtils.clamp(d, distMin, distMax);
+    curr.elevation = Math.asin(THREE.MathUtils.clamp(dy / d, -1, 1));
+    curr.azimuth   = Math.atan2(dx, dz);        // matches the sa/ca split in update()
+    goal.azimuth   = nearestAngle(goal.azimuth, curr.azimuth);   // ease the short way from here
+  }
 
   return {
     get camera() { return activeCamera(); },
@@ -429,8 +525,14 @@ export function createCameraRig({
     get armDist() { return armDist; },        // L108: the effective (possibly-shortened) chase distance — for the spring-arm probes
     get armed()   { return armEnabled; },
     get azimuth() { return curr.azimuth; },        // L32: live heading, for camera-relative movement
+    // ARC A-CAM+WALK Part A — viewpoint URL params need to READ back what setAzimuth/setElevation/
+    // setZoom/setTarget already let a caller WRITE; these were the missing half of that seam.
+    get elevation() { return curr.elevation; },
+    get distance() { return curr.distance; },
+    get zoom() { return curr.zoom; },
+    get target() { return curr.target; },          // live Vector3 (read-only by convention — callers copy out, never mutate)
     get following() { return !!followFn; },        // L63: is the inspection lens locked onto something?
-    setTarget, setZoom, setFollow, clearFollow, setSpringArm,   // L108: the chase spring-arm (pilot arms on possess, disarms on release)
+    setTarget, setZoom, setDistance, setDistanceClamp, setFollow, clearFollow, setSpringArm,   // L108: the chase spring-arm (pilot arms on possess, disarms on release)
     setEye, clearEye,                                          // L-cockpit: first-person eye override (pilot sets each cockpit frame, clears on exit)
     setAzimuth, setElevation,        // L76: the chase-cam angle seam (the pilot swings the cam behind the craft's heading)
     /* styleT — the rig's current zoom as a normalized 0..1 (0 = nearest, 1 =

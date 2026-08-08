@@ -81,6 +81,57 @@ test('eye pose: eye at eye height, direction from yaw/pitch', () => {
   assert.ok(Math.abs(d.x) < 1e-9 && Math.abs(d.y) < 1e-9 && Math.abs(d.z - 1) < 1e-9, `dir ${JSON.stringify(d)} ≠ +z`);
 });
 
+// ARC A-CAM+WALK — groundY(x,z) hook (createFirstPersonWalker.js:118-120's own documented gap: eye
+// height was a CONSTANT, wrong once the ground itself isn't flat at y=0 — the city's street sits at
+// LAYOUT.PLINTH_TOP, not 0).
+test('groundY omitted: eyePosition falls back to the ORIGINAL constant eyeY behavior, unchanged', () => {
+  const w = createFirstPersonWalker({ eyeY: 1.4 });
+  assert.ok(Math.abs(w.eyePosition().y - 1.4) < 1e-9, 'no groundY passed → byte-identical to pre-arc behavior');
+});
+
+test('groundY supplied: eye height tracks the sampled ground, not a constant', () => {
+  const w = createFirstPersonWalker({ groundY: (x, z) => (x > 5 ? 3 : 0.3), eyeHeight: 1.4 });
+  w.setPosition(0, 0);
+  assert.ok(Math.abs(w.eyePosition().y - (0.3 + 1.4)) < 1e-9, `low ground: eye should sit at groundY+eyeHeight, got ${w.eyePosition().y}`);
+  w.setPosition(10, 0);
+  assert.ok(Math.abs(w.eyePosition().y - (3 + 1.4)) < 1e-9, `stepping onto higher ground must raise eye height, got ${w.eyePosition().y}`);
+});
+
+test('setGroundY: can be wired after construction (matches setColliders/setAabbs\'s own late-bind convention)', () => {
+  const w = createFirstPersonWalker({ eyeY: 1.4 });
+  assert.ok(Math.abs(w.eyePosition().y - 1.4) < 1e-9, 'no groundY yet → the constructor default');
+  w.setGroundY((x, z) => 5);
+  assert.ok(Math.abs(w.eyePosition().y - (5 + 1.4)) < 1e-9, 'setGroundY after construction takes effect immediately');
+  w.setGroundY(null);
+  assert.ok(Math.abs(w.eyePosition().y - 1.4) < 1e-9, 'clearing groundY (null) restores the constant eyeY fallback');
+});
+
+test('resolveSpatial omitted: existing circle/aabb collision is unaffected (byte-identical hoard2 path)', () => {
+  const tree = { x: 0, z: 2, r: 0.6 };
+  const w = createFirstPersonWalker({ moveSpeed: 6, accel: 1e6, radius: 0.3, colliders: [tree] });
+  for (let s = 0; s < 120; s++) w.update(1 / 60, { x: 0, y: 1 });
+  const d = Math.hypot(w.x - tree.x, w.z - tree.z);
+  assert.ok(d >= tree.r + 0.3 - 1e-3, 'no resolveSpatial passed → the existing circle collision alone must still block');
+});
+
+test('resolveSpatial supplied: a wall reported by the injected resolver actually stops the walker', () => {
+  // a minimal stand-in for collide.js's resolveSphere(state,dt,cfg): a wall at z=2, push back to z=1.7 on contact.
+  const fakeResolve = (state) => { if (state.z > 1.7) state.z = 1.7; };
+  const w = createFirstPersonWalker({ moveSpeed: 6, accel: 1e6, resolveSpatial: fakeResolve });
+  for (let s = 0; s < 120; s++) w.update(1 / 60, { x: 0, y: 1 });   // walk straight at the wall for 2s
+  assert.ok(w.z <= 1.7 + 1e-9, `the injected spatial resolver's wall must stop the walker, got z=${w.z.toFixed(3)}`);
+});
+
+test('setResolveSpatial: can be wired after construction, and cleared with null', () => {
+  const w = createFirstPersonWalker({ moveSpeed: 6, accel: 1e6 });
+  w.setResolveSpatial((state) => { if (state.z > 1) state.z = 1; });
+  for (let s = 0; s < 60; s++) w.update(1 / 60, { x: 0, y: 1 });
+  assert.ok(w.z <= 1 + 1e-9, `wired-after-construction resolver must still block, got z=${w.z.toFixed(3)}`);
+  w.setResolveSpatial(null);
+  for (let s = 0; s < 60; s++) w.update(1 / 60, { x: 0, y: 1 });
+  assert.ok(w.z > 1.5, `clearing the resolver (null) must let movement past the old wall resume, got z=${w.z.toFixed(3)}`);
+});
+
 test('determinism: identical look+move input ⇒ identical state', () => {
   const run = () => {
     const w = createFirstPersonWalker({ colliders: [{ x: 0.5, z: 1.5, r: 0.5 }], arenaRadius: 10 });

@@ -30,8 +30,18 @@
    physical quantity (limiting magnitude), three consumers.
 
    API: createTrueStars({ celestial }) → { group, ready, update(date,lat,lon,nightK,elapsed,reduced,
-   camera), setVisible(v), setBortle(b), hrToIndex, position } — hrToIndex + position are exposed so
-   a sibling renderer (createConstellations) can share the SAME live positions, no second alt/az pass.
+   camera), setVisible(v), setBortle(b), setMagnitudeMapping(brightFloor,brightGamma,physical),
+   hrToIndex, position, getRaDecByHR(hr) } — hrToIndex + position are exposed so a sibling renderer
+   (createConstellations) can share the SAME live positions, no second alt/az pass; getRaDecByHR
+   (A-REVENDOR 2026-08-06, upstreamed from live-sky's trajectory arc) returns the catalog's fixed
+   J2000 {raRad, decRad, vmag} so a day-sampling renderer never re-fetches the catalog.
+
+   2026-08-02 lift-back (docs/engine-inventory-2026-08-02.md List C #5): magToBrightSize() +
+   setMagnitudeMapping() below were built in lgr-live-sky's star-trail arc (physically-correct flux
+   falloff for long-exposure trail captures, where the artistic BRIGHT_FLOOR/BRIGHT_GAMMA compression
+   reads as a washed-out grey field instead of black sky) and never lifted here. `ready`'s default path
+   still always calls magToBrightSize(mag, BRIGHT_FLOOR, BRIGHT_GAMMA) — same two constants, same
+   formula — so every existing consumer's rendered output is unchanged; setMagnitudeMapping is opt-in.
    ============================================================ */
 import * as THREE from 'three';
 import bsc5Url from '../assets/astronomy/bsc5.bin?url';
@@ -47,6 +57,30 @@ const MAG_FAINT = 6.5, MAG_BRIGHT = -1.5;
 const BRIGHT_FLOOR = 0.30, BRIGHT_GAMMA = 0.45;     // brightness = floor + (1-floor)*t^gamma
 const SIZE_MIN = 1.4, SIZE_MAX = 6.4, SIZE_GAMMA = 0.5;
 const BV_SENTINEL = -99.99;      // 324 catalog stars have no measured B-V (see bsc5.SOURCE.md) → neutral white
+
+/* magnitude -> [brightness, size]. Lift-back 2026-08-02 (docs/engine-inventory-2026-08-02.md List C
+   #5): born in lgr-live-sky's star-trail arc, stranded there since. `brightFloor`/`brightGamma` are
+   OVERRIDABLE (setMagnitudeMapping, below) — the DEFAULT call site (in `ready`, below) always passes
+   BRIGHT_FLOOR/BRIGHT_GAMMA, so every existing consumer sees byte-identical output; size always uses
+   the fixed SIZE_MIN/MAX/GAMMA curve (not part of this override — the washed-out-trails defect this
+   override exists to fix is a BRIGHTNESS problem, not a size one: see lgr-live-sky's
+   tools/startrails-capture.mjs header for the full "why").
+
+   `physical=true` ignores brightFloor/brightGamma and computes TRUE flux instead: brightness =
+   10^(-0.4*(mag-MAG_BRIGHT)), the real physical relation (see file header). This is NOT the same
+   function family as floor+(1-floor)*t^gamma — that polynomial (t linear in MAGNITUDE, then raised
+   to a power) can't reproduce a genuinely EXPONENTIAL flux curve at any (floor, gamma); pushing floor
+   and gamma to their most aggressive plausible values still left long-exposure star-trail renders
+   washed out (found by testing, not assumed) because the polynomial's tail simply doesn't fall off
+   fast enough — most of BSC5's 9,096 stars sit in the faint half of the magnitude range, and a
+   polynomial keeps them collectively bright enough that thousands of overlapping full trails still
+   read as solid coverage. True flux falls off fast enough that only genuinely bright stars register. */
+function magToBrightSize(mag, brightFloor, brightGamma, physical = false) {
+  const t = THREE.MathUtils.clamp((MAG_FAINT - mag) / (MAG_FAINT - MAG_BRIGHT), 0, 1);
+  const bright = physical ? Math.pow(10, -0.4 * (mag - MAG_BRIGHT)) : brightFloor + (1 - brightFloor) * Math.pow(t, brightGamma);
+  const size = SIZE_MIN + (SIZE_MAX - SIZE_MIN) * Math.pow(t, SIZE_GAMMA);
+  return [bright, size];
+}
 
 /* B-V colour index → an approximate RGB star colour (blue-white → yellow-white → orange → red).
    Standard shape for this kind of visualization; a handful of control points, linearly interpolated. */
@@ -123,9 +157,8 @@ export function createTrueStars({ celestial }) {
       const aColor = new Float32Array(n * 3);
       const _c = new THREE.Color();
       for (let i = 0; i < n; i++) {
-        const t = THREE.MathUtils.clamp((MAG_FAINT - cat.vmag[i]) / (MAG_FAINT - MAG_BRIGHT), 0, 1);
-        aBright[i] = BRIGHT_FLOOR + (1 - BRIGHT_FLOOR) * Math.pow(t, BRIGHT_GAMMA);
-        aSize[i] = SIZE_MIN + (SIZE_MAX - SIZE_MIN) * Math.pow(t, SIZE_GAMMA);
+        const [b, s] = magToBrightSize(cat.vmag[i], BRIGHT_FLOOR, BRIGHT_GAMMA);
+        aBright[i] = b; aSize[i] = s;
         aPhase[i] = (i * 2.399963) % (Math.PI * 2);              // deterministic, decorrelated twinkle phase (no PRNG needed)
         const bv = cat.bv[i] <= BV_SENTINEL ? 0 : cat.bv[i];
         colorFromBV(bv, _c);
@@ -168,6 +201,31 @@ export function createTrueStars({ celestial }) {
     hrToIndex, get position() { return position; },
     // Bortle 1-9 (continuous) -> naked-eye limiting magnitude, smoothly faded in the shader (see
     // shaders/realstars.vert). GPU-side so dragging the slider costs zero CPU work.
+    /* A-REVENDOR (2026-08-06): upstreamed from lgr-live-sky's trajectory/diurnal-arc feature — the
+       catalog's fixed J2000 RA/Dec for a star, by HR number, for a sibling renderer that needs to
+       SAMPLE a star's alt/az across a whole day, not just read this frame's already-computed
+       position. Reuses the one parse; no second bsc5.bin fetch. Pre-load-safe (null before ready). */
+    getRaDecByHR: (hr) => {
+      const i = hrToIndex.get(hr);
+      return i == null ? null : { raRad: cat.raRad[i], decRad: cat.decRad[i], vmag: cat.vmag[i] };
+    },
     setBortle: (bortle) => { material.uniforms.uLimitMag.value = limitingMagnitude(bortle); },
+    // OPT-IN override for BRIGHT_FLOOR/BRIGHT_GAMMA — no-op-default discipline: never called unless a
+    // consumer opts in, so the shipped real-time sky (BRIGHT_FLOOR/BRIGHT_GAMMA via `ready`, above) is
+    // untouched. Exists because that artistic compression (tuned for a single point-star frame) is
+    // WRONG outside that regime: a 30%-floor point covering 1-3px reads as a pleasingly faint star, but
+    // the same 30% smeared along a long-exposure trail covers thousands of pixels, and 9096 of those
+    // tile into a washed-out grey field instead of black sky (see lgr-live-sky's
+    // tools/startrails-capture.mjs). Recomputes aBright/aSize from the already-parsed catalog (no
+    // refetch) — cheap, one-time, not per-frame.
+    setMagnitudeMapping: (brightFloor, brightGamma, physical = false) => {
+      if (!cat || !points) return;   // no-op if the catalog hasn't loaded yet — caller should await `ready` first
+      const aBright = geo.attributes.aBright, aSize = geo.attributes.aSize;
+      for (let i = 0; i < cat.count; i++) {
+        const [b, s] = magToBrightSize(cat.vmag[i], brightFloor, brightGamma, physical);
+        aBright.array[i] = b; aSize.array[i] = s;
+      }
+      aBright.needsUpdate = true; aSize.needsUpdate = true;
+    },
   };
 }

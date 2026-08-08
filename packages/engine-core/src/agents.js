@@ -106,7 +106,7 @@ export function buildGraph() {
   return { nodes, edges, y, mid };
 }
 
-export function createCityLife({ plinthTop = 0.3, extent = 4.0, profile = null } = {}) {
+export function createCityLife({ plinthTop = 0.3, extent = 4.0, profile = null, carCount = 12, pedCount = 14 } = {}) {
   const group = new THREE.Group();
   const graph = buildGraph();
   const { nodes, edges } = graph;
@@ -147,7 +147,7 @@ export function createCityLife({ plinthTop = 0.3, extent = 4.0, profile = null }
   }
 
   /* ---- CARS — one InstancedMesh, per-instance colour + matrix ----------------------- */
-  const CARS = 12;                                    // sparse theater (rush-hour scales how many are OUT)
+  const CARS = carCount;                              // sparse theater by default (rush-hour scales how many are OUT); ARC A-LIVE: tunable, default unchanged
   // Slimmed vs the L11 rim cars so a vehicle sits cleanly INSIDE the 0.55-wu street gap with a
   // right-lane offset (a fat car would mount the kerb). Long axis along local +Z (we yaw it).
   const carGeo = new THREE.BoxGeometry(0.34, 0.26, 0.74);
@@ -181,6 +181,25 @@ export function createCityLife({ plinthTop = 0.3, extent = 4.0, profile = null }
     size: 0.72, sizeAttenuation: true, map: makeGlowTexture(), vertexColors: true,
     transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
   });
+  /* NEAR-CAMERA GUARD (2026-08-05, metropolis defect-4 — probe-proven): these glow sprites were sized
+     for the AERIAL miniature (0.72 wu ≈ 2× the car body). A first-person camera sharing the street
+     (metropolis/hoard2 walk, cockpit POV) can stand within ~1-2 wu of a lit car, where sizeAttenuation
+     projects the sprite to hundreds of px and the dusk-lowered bloom threshold blows it into a blob
+     covering the road. Two guards, both no-ops from the aerial framing (distance > 2 wu → fade 1, and
+     the px cap only binds at point-blank): fade alpha to 0 inside 0.5-1.8 wu, and cap gl_PointSize.
+     Every consumer inherits (engine-first). */
+  lightMat.customProgramCacheKey = () => 'lgr-agent-glow';
+  lightMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\n varying float vNearFade;')
+      .replace('#include <fog_vertex>', `#include <fog_vertex>
+        vNearFade = smoothstep(0.5, 1.8, -mvPosition.z);
+        gl_PointSize = min(gl_PointSize, 120.0);`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\n varying float vNearFade;')
+      .replace('#include <map_particle_fragment>', `#include <map_particle_fragment>
+        diffuseColor.a *= vNearFade;`);
+  };
   const lights = new THREE.Points(lightGeo, lightMat);
   lights.frustumCulled = false; lights.raycast = () => {};
 
@@ -248,7 +267,7 @@ export function createCityLife({ plinthTop = 0.3, extent = 4.0, profile = null }
   const CAR_Y = LAYOUT.PLINTH_TOP + 0.02 + 0.13;      // rest the body ON the street slab
 
   /* ---- PEDESTRIANS — kept from L11: stroll the waterfront promenade (rim ring) -------- */
-  const PEDS = 14;
+  const PEDS = pedCount;                              // ARC A-LIVE: tunable, default unchanged
   const peds = new THREE.InstancedMesh(
     new THREE.CapsuleGeometry(0.04, 0.10, 3, 6),
     vectorize(new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.8 })), PEDS);

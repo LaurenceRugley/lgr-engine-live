@@ -31,7 +31,9 @@ uniform float uChromaScale;      // L09: scales the refraction colour-split. 1 =
                                  // rainbow fringe reads loud against flat cel bands.
 uniform mat3  uNormalMatrix;     // OBJECT→WORLD normal transform (Lesson 04)
 uniform vec3  uLightDir;         // world-space direction toward the key light
-uniform vec3  uInk;              // Deep Ink  #2A2218 — water tint
+uniform vec3  uInk;              // Deep Ink  #2A2218 — water tint (stylized tiers)
+uniform vec3  uDeepCol;          // art pass: beauty deep-sea colour  #1B4A66
+uniform vec3  uShallowCol;       // art pass: beauty shallows colour  #4FA3A8
 uniform vec3  uGold;             // Atelier Gold #B89968 — sheen / glints
 uniform float uSkyRefl;          // L108: beauty-only sky-reflection amount (0 on pixel/toon → the mix is a no-op)
 uniform vec3  uSkyReflCol;       // L108: the SunRig sky colour the sea reflects (by-ref → tracks day/night)
@@ -39,6 +41,7 @@ uniform sampler2D uReflect;      // L108 planar mirror: the mirrored skyline ren
 uniform float uReflStrength;     // L108: THE mirror gate — beauty?1:0 AND governor-shed → 0 = no-op (byte-identical) + the shipped sky-tint fallback below runs instead
 uniform float uReflDistortMul;   // L108: how much the sim-normal tilt wobbles the reflection sample (reuses the refraction off, so they ripple coherently)
 uniform float uFoamStrength;     // L112: THE foam/shoreline gate — 0 on pixel/toon → the whole term is a no-op → byte-identical
+uniform float uStylizedSea;      // A-SEA (2026-08-06): 0 = legacy stylized water (byte-identical baselines); 1 = the sea read on stylized tiers
 uniform float uTime;             // L112: churn + lapping animation clock
 uniform sampler2D uGrabDepth;    // L112: the grab pass's depth (what's behind the water) → shoreline thinness + depth tint
 uniform float uNear;             // L112: active render camera near/far (linearize the grab depth — copied from the post-toon pattern)
@@ -113,17 +116,30 @@ void main() {
 
   // L112 DEPTH-TINT absorption (item f, rides the foam gate): thin water = turquoise, deep = ink. Gated so stylized
   // keeps EXACTLY 0.12 (no depth sample taken there → byte-identical + cheaper).
-  float absorb = 0.12;
+  /* A-SEA: the STYLIZED tiers' water was 88% raw refraction with a sepia tint and a gold sheen —
+     under the toon post the bright near-island refraction quantizes to a WHITE ring, and the bay
+     never reads as sea. uStylizedSea (default 0 → the legacy numbers exactly, tier baselines green)
+     lifts the flat absorb toward opaque sea colour and mutes the gold terms — no depth sample, so
+     the stylized tiers stay as cheap as before. */
+  float absorb = mix(0.12, 0.62, uStylizedSea);
   float waterThick = 0.0;
+  vec3 seaCol = mix(uInk, uDeepCol, uStylizedSea);
   if (uFoamStrength > 0.0) {
     float sceneEye = lin(texture2D(uGrabDepth, screenUV).x);   // distance to what's BEHIND the water
     float fragEye  = lin(gl_FragCoord.z);                      // this water fragment's own distance
     waterThick = sceneEye - fragEye;                           // how much water is in front of the background
-    absorb = mix(0.06, 0.30, smoothstep(0.0, 1.2, waterThick));// shallow → deep
+    /* ART PASS (2026-08-06, look bible section 4): the sea gets a COLOUR OF ITS OWN. The old path was
+       70-94% refracted seabed with a thin lerp toward uInk — a warm sepia BROWN — which is why every
+       capture read bronze/olive rather than sea. Depth ramp per the bible: shallow #4FA3A8 → deep
+       #1B4A66, opacity ~40% at the waterline rising to ~85% at depth (sand stays visible in the
+       shallows, tinted teal; deep water is never black glass — nor brown). Stylized tiers keep the
+       EXACT old path (seaCol=uInk, absorb 0.12) — this whole branch rides the existing beauty gate. */
+    absorb = mix(0.38, 0.85, smoothstep(0.0, 1.2, waterThick));
+    seaCol = mix(uShallowCol, uDeepCol, smoothstep(0.03, 0.9, waterThick));
   }
-  vec3 col = mix(refr, uInk, absorb);                    // water absorption (0.12 flat on stylized, depth-varying on beauty)
-  col = mix(col, uGold, fres * 0.28);                    // gold reflective sheen at grazing
-  col += uGold * spec * 0.8;                             // crest glints
+  vec3 col = mix(refr, seaCol, absorb);                  // water absorption (0.12 flat on stylized, depth-varying on beauty)
+  col = mix(col, uGold, fres * 0.28 * (1.0 - 0.72 * uStylizedSea));   // gold sheen (muted in sea mode)
+  col += uGold * spec * 0.8 * (1.0 - 0.6 * uStylizedSea);             // crest glints (softened in sea mode)
 
   // L112 SUN GLINT — the studio glitter path. Beauty-only (uGlintK=0 on pixel/toon → this whole block is a no-op →
   // byte-identical; the gold spec above is UNTOUCHED so stylized keeps its exact crest glints). uGlintK also carries
@@ -171,6 +187,14 @@ void main() {
     float foam  = max(crest + 0.6 * slope, thin * lapPulse);
     foam *= 0.75 + 0.25 * hash21(vUv * 512.0 + uTime);                    // churn breakup
     col = mix(col, vec3(0.93, 0.95, 0.94), clamp(foam, 0.0, 1.0) * uFoamStrength);
+
+    /* HORIZON DISSOLVE (bible section 4, "the plate rim"): the sea is a finite 28×28 plate that
+       simply ENDS. Fade the far water to the live sky colour (uSkyReflCol is by-ref sunRig.sky, so
+       it tracks every hour) so the plate melts into the horizon instead of presenting a hard
+       geometric rim over void. Runs AFTER foam so the surf never rides out to the edge. Beauty-gated
+       with everything else in this branch. */
+    float rim = smoothstep(9.5, 13.6, length(vWorldPos.xz));
+    col = mix(col, uSkyReflCol, rim);
   }
 
   gl_FragColor = vec4(col, 1.0);

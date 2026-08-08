@@ -7,6 +7,10 @@ import glsl from 'vite-plugin-glsl';
 //
 // emptyOutDir: false — appends to dist-lib alongside the full + slim-core entries (both run first).
 // Single entry avoids shared-chunk extraction (the J self-containment rule).
+//
+// THREE EXTERNALIZED (2026-08-02, docs/efficiency-audit-2026-08-02.md §8) — see
+// vite.lib.config.js's own comment for the full rationale + consumer check; same change, same
+// reasoning, applied to this entry too.
 export default defineConfig({
   base: './',
   plugins: [glsl()],
@@ -20,5 +24,6 @@ export default defineConfig({
     emptyOutDir: false,
     assetsDir: 'assets',
     chunkSizeWarningLimit: 900,
+    rollupOptions: { external: ['three'] },
   },
 });

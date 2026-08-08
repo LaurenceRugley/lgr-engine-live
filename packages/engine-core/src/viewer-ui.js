@@ -408,6 +408,28 @@ export function createViewerUI({ controls, state, show, coarse }) {
   const timeWrap = document.createElement('div'); timeWrap.style.cssText = 'display:flex;align-items:center;gap:6px;';
   const tlbl = document.createElement('span'); tlbl.className = 'lbl'; tlbl.textContent = 'Day';
   timeWrap.append(tlbl, slider);
+
+  // ARC A-DUSK — pace (day-cycle speed), Live-Sky-shaped: 0..100 on a LOG range, 600s/day (slow) down
+  // to 2s/day (fast timelapse) — the EXACT formula lgr-live-sky/src/main.js's applySpeed() uses, so
+  // the two apps' speed sliders feel like one family. controls.pace is OPTIONAL (guarded, `&&`) —
+  // unlike controls.time/controls.auto (called unconditionally, so every viewer-ui consumer already
+  // implements them), pace is new this arc and only city wires it; every other project silently
+  // no-ops rather than throwing on a missing verb.
+  const paceSlider = document.createElement('input');
+  paceSlider.type = 'range'; paceSlider.min = '0'; paceSlider.max = '100'; paceSlider.step = '1'; paceSlider.value = '33';
+  paceSlider.title = 'Day-cycle speed'; paceSlider.setAttribute('aria-label', 'Day-cycle speed');
+  const paceLbl = document.createElement('span'); paceLbl.className = 'lbl'; paceLbl.textContent = 'Speed';
+  const paceVal = document.createElement('span'); paceVal.className = 'lbl';
+  function applyPace() {
+    const s = parseFloat(paceSlider.value) / 100;
+    const cs = 600 * Math.pow(2 / 600, s);   // 0..100 -> 600s..2s per day, log range (matches lgr-live-sky)
+    if (controls.pace) controls.pace(cs);
+    paceVal.textContent = cs < 60 ? `${Math.round(cs)}s/day` : `${(cs / 60).toFixed(1)}min/day`;
+  }
+  paceSlider.addEventListener('input', applyPace);
+  const paceWrap = document.createElement('div'); paceWrap.style.cssText = 'display:flex;align-items:center;gap:6px;';
+  paceWrap.append(paceLbl, paceSlider, paceVal);
+  if (controls.pace) applyPace();   // seed the label + engine pace at the default 33 (~90s/day, matching sun-rig's own default)
   // L97 — the still-key-only Shadows (H) + Theme (P) are now surfaced as bar controls (inside the env expander).
   const shadowsBtn = btn('☀ Shadows', () => controls.shadows && controls.shadows(), 'Sun shadows on/off (H)');
   const themeBtn = btn('◐ Theme', () => controls.theme && controls.theme(), 'Swap the UI palette: ink/gold ↔ terminal (P)');
@@ -507,7 +529,7 @@ export function createViewerUI({ controls, state, show, coarse }) {
       cityBtn, shuffleBtn, skinBtn, propsBtn, inspectBtn, sep(),                                 // scene content (mode-gated)
       worldRerollBtn, worldResetBtn, worldPresetBtn, sculptBtn, sep(),                           // world-edit (world only)
       styleSeg.seg, realisticBtn, vectorBtn, eraBtn, sep(), timeWrap, envBtn, sep(), camSeg.seg, cmdkBtn, infoBtn, sep(), minBtn);
-    envPanel.append(playBtn, wxBtn, seasonBtn, shadowsBtn, themeBtn);                            // L97: the environment expander contents
+    envPanel.append(playBtn, paceWrap, wxBtn, seasonBtn, shadowsBtn, themeBtn);                   // L97: the environment expander contents (ARC A-DUSK: + pace)
   }
 
   /* L63 INSPECT readout panel (top-left): a kind chip, the live behaviour line, and a [▸ Next] / [✕]

@@ -14,13 +14,15 @@ export { createEngine } from './src/createEngine.js';
 export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.js';
 export { createCityWorld } from './src/createCityWorld.js';
 export { createCameraRig, CAM } from './src/camera-rig.js';
-export { createCity, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32 } from './src/citygen.js';
+export { measureBounds, autoFrame } from './src/asset-viewer.js';   // Arc A-VIEW: bbox auto-framing
+export { createCameraPath, bankAngleFromCurvature } from './src/camera-path.js';
+export { createCity, makePalm, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32, tintTower, seabedY, SEABED } from './src/citygen.js';   // A-FISH: seabedY is THE shared depth function — the seabed mesh and the physics sampler both call it
 // A9 text→world + A18 portable bundle — so a no-build consumer can build a world from a recipe/bundle.
 export { defaultRecipe, normalizeRecipe, mergeRecipes, RECIPE_BIOMES } from './src/world-recipe.js';
 export { createWorldFromRecipe } from './src/createWorldFromRecipe.js';
 export { recipeFromText, describeVocabulary } from './src/world-recipe-text.js';
 export { BUNDLE_FORMAT, BUNDLE_VERSION, buildManifest, validateManifest, isVersionCompatible, parseVersion } from './src/world-bundle.js';
-export { createSunRig, validateSunKeyframes } from './src/sun-rig.js';
+export { createSunRig, validateSunKeyframes, lowSunWashK } from './src/sun-rig.js';
 export { createCityLife, buildGraph } from './src/agents.js';
 export { createStreetLights } from './src/street-lights.js';
 export { createWaterLife } from './src/water-life.js';
@@ -31,10 +33,13 @@ export { createCelestials } from './src/celestials.js';
 export { createCapture } from './src/capture.js';
 export { createViewerUI } from './src/viewer-ui.js';
 export { createHints } from './src/hints.js';
+export { createTouchControls } from './src/touch-controls.js';   // 2026-08-06: the floating thumbstick + look-drag — touch input was built 5x in projects and never in core
+export { createPedestrians } from './src/pedestrians.js';   // A-PEDS 2026-08-06: skinned humans strolling block perimeters (bible §6 item 4) — composes createCharacterRig + the promoted survivor.glb
 export { createAppShell, readAppFlags } from './src/app-shell.js';
 export { THEME, applyThemeToRoot } from './src/diagram-theme.js';
 export { createMorphTimeline, easeInOutCubic } from './src/math/morph-timeline.js';
 export { createMatrixGrid } from './src/math/matrix-grid.js';
+export { createTween } from './src/math/tween.js';   // Arc A-TWEEN: fixed-duration eased tween (gap 5)
 export { validateSceneSpec, fromURLParams, toURLParams, applySceneSpec, SCENE_SPEC_VERSION } from './src/scene-spec.js';
 export { createProductStage } from './src/product-stage.js';
 export { createDevMode } from './src/dev-mode.js';
@@ -45,7 +50,7 @@ export { createPlacedLife } from './src/placed-life.js';
 export { createHiddenProp } from './src/hidden-prop.js';
 export { pickStreetIntersection, createProximityLatch } from './src/hidden-prop-logic.js';
 export { createEditor } from './src/editor.js';
-export { createPilotController, createGroundModel, createSpacecraftModel, ATV_PROFILE, CRAFT_PROFILE } from './src/pilot.js';
+export { createPilotController, createGroundModel, createSpacecraftModel, createRoadModel, createBoatModel, createBirdModel, createFishModel, carryMomentum, ATV_PROFILE, CRAFT_PROFILE, ROAD_PROFILE, BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE } from './src/pilot.js';   // A-FEEL: createRoadModel = a car that corners on a street grid (curvature-limited steering, R grows with v squared)
 export { createCockpit } from './src/cockpit.js';
 export { createGyroLook, mapGyroToLook } from './src/gyro-look.js';
 export { createTracer }                  from './src/tracer.js';
@@ -71,7 +76,7 @@ export { createTorchLight, torchFlicker } from './src/createTorchLight.js';
 export { createWaterSurface } from './src/createWaterSurface.js';
 export { createWeaponKit } from './src/createWeaponKit.js';
 export { createDebugOverlay } from './src/debug-overlay.js';
-export { HOARD_SURFACES, WEAPON_SKINS, forgeHoardMaterials } from './src/forge-recipes.js';
+export { HOARD_SURFACES, WEAPON_SKINS, forgeHoardMaterials, CITY_SURFACES, forgeCityMaterials, CITY_LOOKS } from './src/forge-recipes.js';
 export { SIM_DEFAULTS } from './src/graph-sim.js';
 export { applyGroundMacro } from './src/ground-macro.js';
 export { DECREPIT_TOWERS, buildDecrepitProfile, buildIntactProfile } from './src/world-profiles.js';
@@ -97,7 +102,7 @@ export { createCelestial } from './src/createCelestial.js';
 export { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 export { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 export { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-export { limitingMagnitude, skyGlow, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
+export { limitingMagnitude, skyGlow, skyBrightnessSQM, skyGlowIntensity, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
 export { planetPosition, PLANET_KEYS } from './src/planets.js';
 export { createTrueStars } from './src/createTrueStars.js';
 export { createConstellations } from './src/createConstellations.js';
@@ -117,6 +122,16 @@ export { createCharacterHorde } from './src/createCharacterHorde.js';
 // createCodePanel OMITTED — its shiki dynamic import emits 200+ grammar chunks that lib consumers never load.
 export { damp, clamp, angleDelta } from './src/math.js';
 export { createScrollDirector } from './src/scroll-director.js';
+export { buildChapterChain, readChapterChain, createScrollNarrative } from './src/scroll-narrative.js';
+export { create2DLayer } from './src/create2DLayer.js';
+export { createSpriteBatcher } from './src/sprite-batcher.js';
+export { createSlotAllocator } from './src/sprite-slots.js';
+export { createTextureAtlas, createShelfPacker } from './src/texture-atlas.js';
+export { create2DPicking } from './src/2d-picking.js';
+export { createGlyphAtlas } from './src/glyph-atlas.js';
+export { computeTextLayout, createTextBlock } from './src/text-block.js';
+export { computeNineSliceLayout, createNineSlicePanel } from './src/nine-slice.js';
+export { layoutBox, LAYOUT_ANCHORS } from './src/layout-box.js';
 export { createSmoothScroll } from './src/createSmoothScroll.js';
 export { createHeroDirector } from './src/hero/createHeroDirector.js';
 export { createHeroWipe }      from './src/hero/createHeroWipe.js';
@@ -149,8 +164,9 @@ export { detectLakes, buildLakeGroup, createWorldLakes } from './src/world-water
 export { createWaterFlow } from './src/water-flow.js';
 export { reprojectScatter } from './src/scatter.js';
 export { scatterAdd, scatterErase } from './src/scatter.js';
-export { createCatalog, seedWorldEditorCatalog } from './src/catalog.js';
+export { createCatalog, seedWorldEditorCatalog, registerAssetCatalog } from './src/catalog.js';
 export { createSkyAtmosphere } from './src/sky-atmosphere.js';
+export { createHillaireSky, GROUND_MM, ATMOS_MM } from './src/hillaire-sky.js';   // A-SKYDOME: the physically-based all-hours sky (Rayleigh+Mie+ozone, RGBA8 LUTs — mobile-safe). Lifted from lgr-live-sky 2026-08-05; barrel-exported so it is reachable through the public API, not just as an internal seam (the index's CORE_UNBARRELED class).
 export { makeContactShadow, makeVignette, createSeatedLook } from './src/interior.js';
 export {
   vectorOn, vectorTint, vectorShadow, weatherSnow, weatherCloud, weatherCloudOff,

@@ -61,6 +61,12 @@ export function createPlayer(ctx) {
   // A8-1: survivor foot-lock opt-in — the SAME ?footik=1 flag the zombie horde reads (sim/index.js), so one
   // switch A/B-s the plant on both the horde and the hero. Default OFF pending the owner's by-feel review.
   const _footIkOn = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('footik') === '1');
+  // ARC A-NEXT: ?reloadclip=1 A/B-s the AUTHORED "Reload" clip (tools/blender/build_reload.py →
+  // models/survivor-reload.glb, Path B of the asset pipeline) against the A8-3 PROCEDURAL reloadBeat()
+  // layer. Additive only — default OFF means byte-identical to before (no extra clip fetch, reloadBeat()
+  // stays the fallback), per the prior decision this arc does not re-litigate. Measured in
+  // docs/captures/hoard2/a-next-reload-ab/ (tools/capture-reload-ab.mjs).
+  const _reloadClipOn = !!(ctx.flags && ctx.flags.q && ctx.flags.q.get('reloadclip') === '1');
 
   /* ---- the ground pose (the pinned facade field SIM/FX read) ---- */
   const player = { x: 0, z: 0, facing: 0, vx: 0, vz: 0 };
@@ -70,12 +76,20 @@ export function createPlayer(ctx) {
   let _workCd = 0;   // A2: harvest/build gesture cooldown (s) — throttles the Working clip re-trigger
   // A2 ACTION COVERAGE: the survivor.glb ships a WORKING clip — wire it as the harvest/build gesture so the
   // survivor visibly chops/works instead of standing idle at a node. (Clip inventory: Idle/Walk/Run/Punch/
-  // Death/Jump/Working — no reload or eat clip, and those events don't exist in the sim, so they're out of
-  // scope this arc; fire-recoil + melee are the existing B4 procedural gestures.)
+  // Death/Jump/Working — no eat clip, and that event doesn't exist in the sim, so it's out of scope this
+  // arc; fire-recoil + melee are the existing B4 procedural gestures. Reload NOW has an authored clip too —
+  // Arc A-NEXT, gated behind ?reloadclip=1 — see startReload() below.)
   // A8-1: ?locoease=<n> A/B lever for the blend-ease rate (1/s). Omitted → the rig default (10). A large
   // value (?locoease=200) ≈ the pre-A8 instant blend, so the transition probe can measure the pop it removes.
   const _locoEaseFlag = ctx.flags && ctx.flags.q && ctx.flags.q.get('locoease');
-  const charRig = createCharacterRig({ url: 'models/survivor.glb', states: { idle: 'Idle', walk: 'Walk', run: 'Run', attack: 'Punch', hit: 'HitReact', death: 'Death', work: 'Working' }, locoEase: _locoEaseFlag != null ? +_locoEaseFlag : undefined });
+  const charRig = createCharacterRig({
+    url: 'models/survivor.glb',
+    // ARC A-NEXT: the authored clip only loads when the A/B flag is on — the default path fetches
+    // nothing extra (extraClips: [] is the engine's own no-op default, see createCharacterRig.js:145).
+    extraClips: _reloadClipOn ? ['models/survivor-reload.glb'] : [],
+    states: { idle: 'Idle', walk: 'Walk', run: 'Run', attack: 'Punch', hit: 'HitReact', death: 'Death', work: 'Working', reload: 'Reload' },
+    locoEase: _locoEaseFlag != null ? +_locoEaseFlag : undefined,
+  });
   charRig.ready.then(() => {
     // M1 MOBILE TRUTH: the survivor opts OUT of shadow-casting on mobile. The shadow map is near-frozen there
     // (static casters only — see world.setShadowThrottle), and a MOVING caster under a frozen map would drag a
@@ -420,7 +434,10 @@ export function createPlayer(ctx) {
   function startReload() {
     if (_reloadT > 0) return;
     _reloadT = MAG.reloadS;
-    if (survivor) survivor.reloadBeat();          // iso: the survivor's gun-arm drops + racks (rig layer)
+    // ARC A-NEXT A/B: ?reloadclip=1 plays the AUTHORED "Reload" clip (a real Blender-made action,
+    // findClip-bound like any built-in state) instead of the A8-3 PROCEDURAL reloadBeat() layer. Default
+    // OFF → reloadBeat() stays the fallback (prior decision #3 — additive only, not re-litigated).
+    if (survivor) { if (_reloadClipOn) survivor.playAction('reload'); else survivor.reloadBeat(); }
     events.emit('weapon:reload', _reloadEvt);      // named hook (future SFX); no listener required
   }
   function doFire() {
@@ -567,7 +584,14 @@ export function createPlayer(ctx) {
         // hidden in the dive; the FP viewmodel already points down the camera/reticle).
         // A8-3: drop the aim layer while reloading so the gun-arm actually comes OFF aim for the dip (the rig
         // reloadBeat lowers it; a held aim would fight that). It re-aims the instant the reload completes.
-        if (!dive.active && !dead && !survivor.reloading) {
+        // ARC A-NEXT FIX: gate on the LOCAL _reloadT (this file's single source of truth for "mid-reload",
+        // already used at every other reload check above), not survivor.reloading — that getter only
+        // reflects the RIG's OWN procedural reloadT timer, which stays -1 the whole time when the ?reloadclip=1
+        // A/B branch plays the authored clip via playAction() instead of reloadBeat(). Reading the wrong flag
+        // meant the aim layer kept fighting the authored clip's arm rotation for its entire duration — found
+        // BY the A/B measurement (the authored clip's gun-hand travel measured ~5x smaller than the
+        // procedural version's, despite matching angles) before it was traced to this stale check.
+        if (!dive.active && !dead && _reloadT === 0) {
           const ad = computeAim();
           const tgt = getSim().queryCone(player.x, player.z, ad.x, ad.z, ASSIST.cosHalf, ASSIST.range);
           survivor.setAim(tgt
@@ -597,6 +621,16 @@ export function createPlayer(ctx) {
   ctx.probe.melee = () => doMelee();
   ctx.probe.survivorBlend = () => (survivor ? survivor.locoBlend : null);   // A8-1: transition-probe reads the blend weights
   ctx.probe.weaponState = () => ({ ammo: _ammo, reloading: _reloadT > 0, drawing: _fpDrawT > 0, fpLower: +_fpLower.toFixed(3) });   // A8-3: reload/draw beat probe
+  // ARC A-NEXT: the gun-hand's WORLD position, so a capture script can measure how far the reload beat
+  // actually moves the arm — the same "did the clip/layer really drive the rig" proof capture-custom-clip.mjs
+  // uses, applied here to A/B the authored clip against the procedural reloadBeat() layer.
+  ctx.probe.gunHandPos = () => {
+    if (!survivor) return null;
+    const b = survivor.object.getObjectByName('RightHand'); if (!b) return null;
+    b.updateWorldMatrix(true, false);
+    const p = new THREE.Vector3(); b.getWorldPosition(p);
+    return { x: p.x, y: p.y, z: p.z };
+  };
 
   /* ============================================================
      TOUCH CONTROLS (mobile) — v2 was WASD/mouse-only; this is the v1-style touch layer so a phone tap

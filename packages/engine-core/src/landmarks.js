@@ -28,6 +28,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { vectorizeTower } from './vector-style.js';
 import { ICONIC_KEYS, ICONIC_HEIGHT, buildIconic } from './landmarks-iconic.js';
+// PER-INSTANCE TINT (2026-08-02 follow-up to the Blender bounded proof) — reuse citygen.js's OWN
+// tintTower + mulberry32, the exact mechanism procedural buildings already use for per-building
+// colour variety. One tint mechanism in the engine, not two. citygen.js never imports this
+// module (landmarkFactory is handed to it as a dependency, not imported), so this is safe — no
+// circular import.
+import { tintTower, mulberry32 } from './citygen.js';
 
 // `?url` asks Vite to treat the .glb as a static ASSET: it copies the file into the build
 // output (dist/assets, content-hashed for caching) and hands us back the final URL string —
@@ -36,6 +42,16 @@ import { ICONIC_KEYS, ICONIC_HEIGHT, buildIconic } from './landmarks-iconic.js';
 import skyscraperUrl from '../assets/models/building-skyscraper-d.glb?url';
 import midriseUrl    from '../assets/models/building-n.glb?url';
 import setbackUrl    from '../assets/models/building-g.glb?url';
+// BLENDER BOUNDED PROOF (tools/blender/build_building_kit.py) — first-party, hip-roof
+// building-kit pieces authored in Blender, round-tripped headlessly through pipeline_lib.py's
+// kit_piece() generator (Arc A-KIT: a FAMILY of 5, not the original proof's single hardcoded
+// piece). Same ?url asset-pipeline convention as the Kenney kit above (content-hashed at
+// build); ADDITIVE — no existing MODELS entry is touched.
+import kitTowerAUrl  from '../assets/models/kit_tower_a.glb?url';   // the original proof piece, unchanged
+import kitTowerBUrl  from '../assets/models/kit_tower_b.glb?url';   // taller, narrower
+import kitTowerCUrl  from '../assets/models/kit_tower_c.glb?url';   // wider, squat
+import kitTowerDUrl  from '../assets/models/kit_tower_d.glb?url';   // dramatically steep roof
+import kitTowerEUrl  from '../assets/models/kit_tower_e.glb?url';   // two-tier setback (the different-silhouette piece)
 // The kit's GLBs reference a SHARED palette atlas by relative path ("Textures/colormap.png").
 // Our `?url` build serves each GLB from a hashed path, so that relative lookup 404s. We import
 // the atlas as its own asset and redirect the loader to it (below) — the texture gives lit
@@ -51,6 +67,17 @@ const MODELS = {
   skyscraper: { url: skyscraperUrl, color: '#9cc1dd', fill: 0.92 },  // glass hero tower
   midrise:    { url: midriseUrl,    color: '#c9a07a', fill: 0.96 },  // warm stone mid-rise
   setback:    { url: setbackUrl,    color: '#d9c7a0', fill: 0.90 },  // tan setback tower
+  // ARC A-KIT — our own first-party kit FAMILY (tools/blender/build_building_kit.py's kit_piece()
+  // generator, pipeline_lib.py), 5 pieces varying footprint/height/roof-pitch plus one genuinely
+  // different silhouette (kitTowerE's two-tier setback). No baked texture on any of them (adopt()
+  // below overrides materials with the flat/window shader, same as the Kenney kit). fill=1.0 for
+  // all five: hip_roof_building's bounding box already IS each piece's full silhouette (roof —
+  // and for E, both tiers — included), unlike the Kenney meshes which need headroom.
+  kitTowerA:  { url: kitTowerAUrl,  color: '#c9a07a', fill: 1.0 },   // the original proof piece, unchanged
+  kitTowerB:  { url: kitTowerBUrl,  color: '#b58a5a', fill: 1.0 },   // taller, narrower
+  kitTowerC:  { url: kitTowerCUrl,  color: '#d9b98a', fill: 1.0 },   // wider, squat
+  kitTowerD:  { url: kitTowerDUrl,  color: '#c2895f', fill: 1.0 },   // dramatically steep roof
+  kitTowerE:  { url: kitTowerEUrl,  color: '#a8875f', fill: 1.0 },   // two-tier setback
 };
 
 /* The factory: loads the prototypes once, then hands out adopted CLONES on demand.
@@ -106,12 +133,35 @@ export function createLandmarkFactory({ windowGlow, manager } = {}) {
     } else {
       // ADOPT the GLB's loaded materials into our system (flat tiers + night windows), using the
       // active profile's night-window palette/lit-fraction so heroes match their skyline.
+      // PER-INSTANCE TINT — computed ONCE per landmark instance (not per mesh/material, so a
+      // multi-part model's pieces stay consistent with each other), seeded from this instance's
+      // OWN placement (slot.x/slot.z) rather than the shared factory-lifetime `lid` counter — so
+      // it's deterministic per CITY (same seed → same landmark positions → same tints) without
+      // depending on how many landmarks were placed earlier in this session. Free: `adopt()`
+      // already clones the material per instance below (m.clone()) even with a fixed colour — a
+      // different colour value costs nothing extra, no new material, no new draw call.
+      const tintSeed = ((slot.x * 92821 + slot.z * 51349) | 0) >>> 0;
+      const tint = tintTower(MODELS[key].color, { next: mulberry32(tintSeed) });
       obj.traverse((o) => {
         if (!o.isMesh) return;
         o.castShadow = false; o.raycast = () => {};
-        const adopt = (m) => vectorizeTower(m.clone(), {
-          color: MODELS[key].color, id: ++lid, windowGlow, winColors: opts.winColors, litFrac: opts.litFrac,
-        });
+        const adopt = (m) => {
+          const mat = vectorizeTower(m.clone(), {
+            color: tint, id: ++lid, windowGlow, winColors: opts.winColors, litFrac: opts.litFrac,
+          });
+          // vectorizeTower's `color` option only feeds `uVecColor`, a uniform its shader reads
+          // ONLY in the flat-vector tier (`if (uVector > 0.5)`); the beauty/lit tier's diffuse
+          // comes from THREE's own `material.color` via the standard PBR pipeline, which
+          // vectorizeTower never touches (procedural TOWER BODIES have this same gap — only their
+          // separately-constructed accent parts, e.g. shopfront bands, set `.color` directly).
+          // Without this line the beauty tier would keep showing the GLB's own baked colour,
+          // identical for every instance, no matter what `tint` computes — verified by pixel-
+          // sampling the rendered canvas before adding this line and finding literally 0-1 unit
+          // RGB deltas across instances (Rule 15: caught by checking the actual pixels, not by
+          // trusting that passing a different `color` value must have done something).
+          mat.color.set(tint);
+          return mat;
+        };
         o.material = Array.isArray(o.material) ? o.material.map(adopt) : adopt(o.material);
       });
     }

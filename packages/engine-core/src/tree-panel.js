@@ -38,7 +38,7 @@ function slotTree(n) {
   return nodes[0];
 }
 
-export function createTreePanel({ kind = 'binary-search-tree', inserts, target, extracts, reducedMotion = false, msPerStep = 620 } = {}) {
+export function createTreePanel({ kind = 'binary-search-tree', inserts, target, extracts, reducedMotion = false, secondsPerStep = 0.62 } = {}) {
   const spec = STRUCTURES[kind];
   if (!spec) throw new Error(`createTreePanel: unknown structure "${kind}" (have: ${Object.keys(STRUCTURES).join(', ')})`);
 
@@ -62,7 +62,7 @@ export function createTreePanel({ kind = 'binary-search-tree', inserts, target, 
   const root = isHeap ? slotTree(keys.length) : result.root;
   const ops = tracer.getOps();
   const keyframes = tracer.getKeyframes();
-  const player = createTracePlayer(tracer, { msPerStep });
+  const player = createTracePlayer(tracer, { secondsPerStep });
 
   /* The FINAL tree is what we lay out — nodes that do not exist yet are simply not drawn (their reveal
      is 0 until the step that inserts them). Laying out the final shape once, rather than re-laying it on
@@ -263,7 +263,7 @@ export function createTreePanel({ kind = 'binary-search-tree', inserts, target, 
   player.onUpdate((i) => render(i));
   render(0);
 
-  function update(dtMs) { player.update(dtMs); }
+  function update(dt) { player.update(dt); }
   function dispose() { player.pause(); node.replaceChildren(); }
 
   return { node, update, dispose, player, tracer, ops, spec, root, depth, render, get stepIndex() { return player.stepIndex; } };

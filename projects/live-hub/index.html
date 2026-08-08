@@ -73,6 +73,11 @@
     a.world {
       position: relative; display: block; border-radius: 9px; overflow: hidden; text-decoration: none;
       border: 1px solid var(--line); aspect-ratio: 16 / 10;
+      /* `color` was never set, so these anchors inherited the browser default #0000EE. Invisible while
+         the thumbnails load (the label span sets its own white), but when a thumbnail FAILS the alt
+         text paints blue on the near-black page — about 1.5:1 contrast, i.e. unreadable at exactly the
+         moment alt text is meant to carry the page. Found by the lgr-taste audit's accent-count check. */
+      color: var(--ink);
     }
     a.world img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.15s ease; }
     a.world:hover img { transform: scale(1.05); }
@@ -80,6 +85,11 @@
       position: absolute; left: 0; right: 0; bottom: 0; padding: 0.3rem 0.45rem;
       background: linear-gradient(0deg, #000c, transparent); color: #fff;
       font: 650 0.72rem/1.2 ui-sans-serif, system-ui, sans-serif;
+    }
+    /* the newest card's tag carries the same NEW badge idiom as a world tile (2026-08-06) */
+    .tag.new::after {
+      content: "NEW"; margin-left: 0.5rem; background: var(--accent5); color: #201a02;
+      font: 750 0.6rem/1 ui-monospace, monospace; letter-spacing: 0.06em; padding: 0.15rem 0.32rem; border-radius: 5px;
     }
     a.world.new::after {
       content: "NEW"; position: absolute; top: 0.3rem; right: 0.3rem; background: var(--accent5); color: #201a02;
@@ -133,6 +143,34 @@
 
     <h2 class="section"><b>Engine demos</b> — the WebGL engine itself, running live</h2>
     <div class="grid">
+      <!-- SHOWCASE — the scroll-flight narrative + product configurator. Added to the hub 2026-08-07,
+           the same day it was added to the deploy set; before that it was built but published nowhere. -->
+      <section class="card" style="--edge: var(--accent2)">
+        <img class="thumb" src="img/metropolis.jpg" alt="A procedurally generated city seen from the air at golden hour, the view a scroll-driven flight passes through" loading="lazy" width="720" height="405">
+        <span class="tag">Scroll-driven flight · product configurator</span>
+        <h2>The Showcase</h2>
+        <p>One continuous shot: the camera flies a procedural city while you scroll, the day runs from golden hour to night, and the art style morphs mid-flight from realistic to toon and back. At the bottom you <b>take the controls</b> and become one of four bodies in that same city, then a studio-lit product turns on its own stage with live colourways.</p>
+        <div class="fact"><b>The interesting part:</b> the sun is a function of your scroll position rather than a clock, and the style morph is a live re-render of the post pipeline, not a filter over a video. The whole page is one engine.</div>
+        <div class="actions">
+          <a class="btn" href="showcase-lab/">Open the Showcase →</a>
+        </div>
+      </section>
+
+      <!-- METROPOLIS — the newest build; the engine's full stack in one place -->
+      <section class="card" style="--edge: var(--accent4)">
+        <img class="thumb" src="img/metropolis.jpg" alt="Metropolis at golden hour — a harbour city seen from the air, thousands of lit windows, streetlamps glowing along the avenues, the sea burning orange to the horizon" loading="lazy" width="720" height="405">
+        <span class="tag new">Newest · six bodies, one seam</span>
+        <h2>Metropolis</h2>
+        <p>The whole engine in one place, and six ways to be in it: <b>fly</b> over the harbour, <b>drive</b> its streets, <b>walk</b> at eye level, take the <b>helm of a boat</b>, ride the air <b>as a gull</b> — then bring the gull down onto the water and keep going <b>as a fish</b>. Click any tower and the camera dives <b>through the glass</b> into a warm office interior, the living city still moving outside the window. Scrub the day from pre-dawn to midnight, roll in rain, snow or fog, and switch on a real-astronomy sky for the actual stars above that date.</p>
+        <div class="fact"><b>The interesting part:</b> all six bodies share one movement contract, and each one's character is a <i>law</i> rather than a set of numbers. The car's turning circle grows with the square of its speed — so at full boost it physically cannot make a ninety-degree turn in a city street, and you have to lift off before the junction. The gull is always falling: climbing spends airspeed and diving buys it back, so a hard banked turn costs you altitude. The fish never falls at all, pivots on the spot the way a body with no inertia does, and treats the surface as a ceiling it can break — the breach arc is genuinely ballistic, not an animation.</div>
+        <div class="fact"><b>Also:</b> the sky is a physically-based atmosphere — Rayleigh, Mie and ozone scattering computed into lookup tables every frame — so twilight, the sunrise wavefront and this golden hour fall out of the physics rather than being painted. The people on the sidewalks are skinned characters walking real paths, and the whole thing runs on a phone.</div>
+        <div class="controls"><b>Controls:</b> WASD · <b>Shift</b> to sprint or boost · <b>Space / C</b> to climb and dive · drag to look · scroll to zoom · <b>click a tower</b> to step inside · Esc to leave · six body buttons in the dock. <b>The crossing:</b> as the gull, ride down onto the sea and tap dive — you enter the water as the fish, carrying your speed. <b>On a phone:</b> the bottom half moves and the top half looks, ⤒/⤓ climb and dive, and pushing the stick past its ring is the sprint.</div>
+        <div class="actions">
+          <a class="btn" href="metropolis/">Open Metropolis →</a>
+          <a class="btn ghost" href="metropolis/?profile=neoTokyo">Neo-Tokyo palette</a>
+        </div>
+      </section>
+
       <!-- CITY — the engine showcase -->
       <section class="card" style="--edge: var(--accent2)">
         <img class="thumb" src="img/city.jpg" alt="The Open City — a procedural skyline at golden hour, toon-style rendering" loading="lazy" width="720" height="405">

@@ -72,7 +72,12 @@ function makeWoodTexture() {
 
 /* small helpers — a lit box and a thin slab, so the body reads as furniture not boilerplate.
    L46: optional `map` (+ `mapRepeat` to tile it per-surface — the map is cloned so each box tiles solo). */
-function box(w, h, d, color, { rough = 0.62, metal = 0.0, x = 0, y = 0, z = 0, emissive = null, emissiveIntensity = 1, map = null, mapRepeat = null } = {}) {
+/* ART PASS (2026-08-06, look-bible §5 material rank #1: "wood value variation per panel + roughness
+   so window light gives it life"). Every walnut surface shared ONE texture at ONE tone, so the room
+   read as printed wallpaper rather than joinery. `shade` tints a surface's albedo (a small per-panel
+   value delta) and `rough` already varies — together the floor/ceiling/walls stop being the same
+   flat brown. Deterministic per call site (an explicit number, not rng) so the room never churns. */
+function box(w, h, d, color, { rough = 0.62, metal = 0.0, x = 0, y = 0, z = 0, emissive = null, emissiveIntensity = 1, map = null, mapRepeat = null, shade = 1 } = {}) {
   let useMap = map;
   if (map && mapRepeat) {
     useMap = map.clone(); useMap.needsUpdate = true;
@@ -84,7 +89,12 @@ function box(w, h, d, color, { rough = 0.62, metal = 0.0, x = 0, y = 0, z = 0, e
   // near-black (the L46 double-darkening bug). Unmapped boxes keep their flat `color` as before.
   const m = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color: useMap ? '#ffffff' : color, roughness: rough, metalness: metal, ...(useMap ? { map: useMap } : {}), ...(emissive ? { emissive, emissiveIntensity } : {}) }),
+    new THREE.MeshStandardMaterial({
+      // `shade` multiplies the mapped albedo (white × shade) or darkens/lifts a flat colour — the
+      // per-panel value variation. shade:1 (the default) is the exact previous behaviour.
+      color: useMap ? new THREE.Color(shade, shade, shade) : new THREE.Color(color).multiplyScalar(shade),
+      roughness: rough, metalness: metal, ...(useMap ? { map: useMap } : {}), ...(emissive ? { emissive, emissiveIntensity } : {}),
+    }),
   );
   m.position.set(x, y, z);
   return m;
@@ -167,8 +177,8 @@ export function createOffice({ tier = 'corner', layout: layout0 = 'straight-on' 
      CORNER FITOUT — the warm walnut office with the glass corner window (L19/L22).
      ============================================================ */
   // FLOOR + CEILING (corner). L46: warm walnut grain on both; ceiling gets a simple beam coffer below.
-  cornerGroup.add(box(11, 0.2, 11, FLOOR, { rough: 0.5, y: -0.1, map: wood, mapRepeat: [5, 5] }));
-  cornerGroup.add(box(11, 0.2, 11, CEIL, { rough: 0.9, y: 3.0, map: wood, mapRepeat: [4, 4] }));
+  cornerGroup.add(box(11, 0.2, 11, FLOOR, { rough: 0.44, y: -0.1, map: wood, mapRepeat: [5, 5], shade: 1.06 }));   // floor: slightly brighter + glossier → it CATCHES the window light
+  cornerGroup.add(box(11, 0.2, 11, CEIL, { rough: 0.94, y: 3.0, map: wood, mapRepeat: [4, 4], shade: 0.82 }));     // ceiling: darker + matte → the room gains a top-to-bottom value gradient
   // L46 CEILING BEAMS — a few dark-walnut beams across the ceiling (a coffer read, exec-office feel).
   for (const bx of [-2.4, 0, 2.4]) cornerGroup.add(box(0.18, 0.16, 7.4, WALL_TRIM, { rough: 0.7, x: bx, y: 2.9, z: 0, map: wood, mapRepeat: [1, 4] }));
   for (const bz of [-2.0, 0.4] ) cornerGroup.add(box(7.4, 0.16, 0.18, WALL_TRIM, { rough: 0.7, x: 0, y: 2.88, z: bz, map: wood, mapRepeat: [4, 1] }));
@@ -178,7 +188,9 @@ export function createOffice({ tier = 'corner', layout: layout0 = 'straight-on' 
   function panelWall(side) {                       // side = -1 (left) | +1 (right)
     const g = new THREE.Group();
     // L46: warm walnut grain on the wall face (was flat single-colour). Tiled ~3× along the 8m run.
-    g.add(box(0.2, 3.2, 8.0, WALL, { rough: 0.7, x: side * 3.6, y: 1.5, z: 0.0, map: wood, mapRepeat: [3, 1.4] }));
+    // per-WALL value split (art pass): the window-side wall reads lighter, its opposite darker, so the
+    // room has a light direction instead of two identically-toned slabs. `side` is -1/+1.
+    g.add(box(0.2, 3.2, 8.0, WALL, { rough: 0.68, x: side * 3.6, y: 1.5, z: 0.0, map: wood, mapRepeat: [3, 1.4], shade: side < 0 ? 1.10 : 0.86 }));
     /* L48b — proud WAINSCOTING that actually READS as depth. (Bug fix: the L46 moldings were placed at
        |x|≈3.585, which is INSIDE the 0.2-thick wall slab — behind the inner face at |x|=3.5 — so they were
        buried and barely visible. Now everything sits PROUD of the inner face toward the room at |x|≈3.45.) */
@@ -292,12 +304,29 @@ export function createOffice({ tier = 'corner', layout: layout0 = 'straight-on' 
      (glassS sits just in front). Hidden until setLayout('straight-on'). */
   const straightGroup = new THREE.Group();
   straightGroup.add(box(11, 3.2, 0.2, WALL, { rough: 0.7, x: 0, y: 1.5, z: CORNER_Z - 0.05, map: wood, mapRepeat: [4, 1.4] })); // flat back wall
-  straightGroup.add(box(5.8, 0.14, 0.12, WALL_TRIM, { x: 0, y: GLASS_Y + 1.35, z: CORNER_Z + 0.2 }));   // window head
-  straightGroup.add(box(5.8, 0.14, 0.12, WALL_TRIM, { x: 0, y: GLASS_Y - 1.35, z: CORNER_Z + 0.2 }));   // window sill rail
-  straightGroup.add(box(0.14, 2.84, 0.12, WALL_TRIM, { x: -2.8, y: GLASS_Y, z: CORNER_Z + 0.2 }));      // left jamb
-  straightGroup.add(box(0.14, 2.84, 0.12, WALL_TRIM, { x: 2.8, y: GLASS_Y, z: CORNER_Z + 0.2 }));       // right jamb
-  straightGroup.add(box(0.09, 2.6, 0.09, WALL_TRIM, { x: 0, y: GLASS_Y, z: CORNER_Z + 0.21 }));         // centre mullion
+  /* ART PASS (2026-08-06, look-bible §5 material rank #3: "window frame + mullions with real depth").
+     The frame was five flat sticks at one z — from the dive camera it read as a decal ON the wall
+     rather than an opening THROUGH it. Now the casing steps forward in two planes (a deep outer
+     casing + a proud inner stop), the head/sill are chunkier than the jambs the way real joinery is,
+     and horizontal muntins join the centre mullion so the glass reads as PANES. Every piece is a
+     box() — no new primitive types, no new material. */
+  const CAS_Z = CORNER_Z + 0.16, STOP_Z = CORNER_Z + 0.26;
+  straightGroup.add(box(6.1, 0.26, 0.22, WALL_TRIM, { x: 0, y: GLASS_Y + 1.44, z: CAS_Z, shade: 0.94 }));   // deep outer casing — head
+  straightGroup.add(box(6.1, 0.30, 0.24, WALL_TRIM, { x: 0, y: GLASS_Y - 1.46, z: CAS_Z, shade: 1.04 }));   // sill: the chunkiest member, catches light
+  straightGroup.add(box(0.24, 3.10, 0.22, WALL_TRIM, { x: -2.92, y: GLASS_Y, z: CAS_Z, shade: 0.9 }));      // left casing
+  straightGroup.add(box(0.24, 3.10, 0.22, WALL_TRIM, { x: 2.92, y: GLASS_Y, z: CAS_Z, shade: 0.9 }));       // right casing
+  straightGroup.add(box(5.8, 0.10, 0.10, WALL_TRIM, { x: 0, y: GLASS_Y + 1.32, z: STOP_Z, shade: 1.08 }));  // inner stop — head
+  straightGroup.add(box(5.8, 0.10, 0.10, WALL_TRIM, { x: 0, y: GLASS_Y - 1.32, z: STOP_Z, shade: 1.08 }));  // inner stop — sill
+  straightGroup.add(box(0.10, 2.74, 0.10, WALL_TRIM, { x: -2.74, y: GLASS_Y, z: STOP_Z, shade: 1.02 }));    // inner stop — left
+  straightGroup.add(box(0.10, 2.74, 0.10, WALL_TRIM, { x: 2.74, y: GLASS_Y, z: STOP_Z, shade: 1.02 }));     // inner stop — right
+  straightGroup.add(box(0.09, 2.6, 0.09, WALL_TRIM, { x: 0, y: GLASS_Y, z: CORNER_Z + 0.21 }));             // centre mullion
+  for (const my of [GLASS_Y + 0.62, GLASS_Y - 0.62]) {                                                       // horizontal muntins → real panes
+    straightGroup.add(box(5.5, 0.06, 0.07, WALL_TRIM, { x: 0, y: my, z: CORNER_Z + 0.205, shade: 0.96 }));
+  }
   straightGroup.add(box(5.4, 0.5, 0.3, DESK, { x: 0, y: 0.25, z: CORNER_Z + 0.35 }));                   // sill cabinet
+  // ART PASS material rank #4 — contact AO: the sill cabinet met the floor with a hard seam and read
+  // as floating. A soft quad grounds it (the makeContactShadow idiom already used across the room).
+  straightGroup.add(makeContactShadow({ w: 5.6, d: 0.7, x: 0, y: 0.02, z: CORNER_Z + 0.4, opacity: 0.5 }));
 
   /* L50b — BEAUTIFY the straight-on hero: furnish the bare window wall (Laurence: "beautify everything
      around the desk and behind on the walls and artwork"). A CREDENZA left of the window with books on
@@ -467,17 +496,30 @@ export function createOffice({ tier = 'corner', layout: layout0 = 'straight-on' 
   lamp.add(box(0.06, 0.5, 0.06, '#2a1c10', { x: -1.15, y: 1.15, z: 1.6 }));
   const shade = new THREE.Mesh(
     new THREE.ConeGeometry(0.22, 0.26, 16, 1, true),
-    new THREE.MeshStandardMaterial({ color: '#c2802e', roughness: 0.5, side: THREE.DoubleSide, emissive: '#3a2208', emissiveIntensity: 0.6 }),
+    /* ART PASS (2026-08-06, look-bible §5): the shade emissive was '#3a2208' — a dark BROWN, which
+       under the ACES tonemap reads as the muddy/greenish cast the bible called out.
+       CORRECTED TWICE, by looking: the bible's literal '#FFD9A0' cream washed the shade to a pale
+       dead beige — cream is what lamp light looks like ON A WALL, but a TINTED SHADE lit from inside
+       glows in its own hue, amplified. Warm amber at a higher intensity reads as lit-from-within,
+       which is what the note actually wanted. */
+    new THREE.MeshStandardMaterial({ color: '#c2802e', roughness: 0.5, side: THREE.DoubleSide, emissive: '#FF9A3C', emissiveIntensity: 0.85 }),
   );
   shade.position.set(-1.15, 1.42, 1.6);
   lamp.add(shade);
-  const lampLight = new THREE.PointLight('#ffb15a', 7.0, 7.0, 1.8);
+  /* 2700 K warm (#FFB868, the bible's lamp colour) with decay 2 = TRUE inverse-square: the pool
+     falls off like a real bulb instead of the artificial decay-1.8 reach. Intensity is raised to
+     compensate for the steeper curve (physical falloff needs more at the source for the same
+     desk-level brightness). */
+  const lampLight = new THREE.PointLight('#FFB868', 11.0, 6.0, 2.0);
   lampLight.position.set(-1.15, 1.34, 1.6);
   lamp.add(lampLight);
-  // L48d — a soft warm GLOW halo at the lamp mouth (additive sprite) so the lamp visibly *casts* light,
-  // not just lights the desk invisibly. (The point light does the work; this sells where it comes from.)
-  const lampGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeDotTexture(), color: '#ffcf8a', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
-  lampGlow.scale.set(0.85, 0.85, 1); lampGlow.position.set(-1.15, 1.35, 1.6); lampGlow.raycast = () => {};
+  /* L48d's additive GLOW halo, RETUNED (2026-08-06, look-bible §5: "kill the billboard halo discs;
+     glow must come from tonemapped highlights, not sprites"). Not deleted outright — it does real
+     work selling WHERE the light comes from, and deleting it left the lamp mouth dead. Instead it
+     shrinks to a tight mouth-sized core (0.85 → 0.30) at half opacity, so what reads as glow is the
+     bloom on the lit shade rather than a fuzzy disc floating in the room. */
+  const lampGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeDotTexture(), color: '#FFD9A0', transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending }));
+  lampGlow.scale.set(0.30, 0.30, 1); lampGlow.position.set(-1.15, 1.35, 1.6); lampGlow.raycast = () => {};
   lamp.add(lampGlow);
   // L62 desk pass — the lamp shade (built at x=-1.15) overhung the tank's back-left corner (cleared by
   // only ~2 cm of height). Offset the whole lamp GROUP another 0.30 to the left so the shade clears the
@@ -555,7 +597,13 @@ export function createOffice({ tier = 'corner', layout: layout0 = 'straight-on' 
   tank.add(box(TANK_W, 0.05, TANK_D, '#3a3026', { y: -TANK_H / 2 + 0.02 }));   // gravel
   const waterVol = new THREE.Mesh(
     new THREE.BoxGeometry(TANK_W - 0.04, TANK_H - 0.08, TANK_D - 0.04),
-    new THREE.MeshStandardMaterial({ color: '#1f9fc0', transparent: true, opacity: 0.26, roughness: 0.1,
+    /* ART PASS material rank #5 — FRESNEL on the tank glass. A flat 26%-opacity box read as tinted
+       plastic: real glass is nearly invisible face-on and mirror-bright at grazing angles. Standard's
+       transparency has no Fresnel term, so this becomes a PHYSICAL material — the engine already
+       ships three.js, and `transmission` + `ior` give the grazing-angle brightening for free. Kept
+       cheap: no thickness/volume, no envMap requirement, opacity path retained as the fallback look. */
+    new THREE.MeshPhysicalMaterial({ color: '#1f9fc0', transparent: true, opacity: 0.26, roughness: 0.08,
+      metalness: 0.0, ior: 1.33, reflectivity: 0.55, specularIntensity: 1.0,
       emissive: '#0a3a4a', emissiveIntensity: 0.4, depthWrite: false }),
   );
   waterVol.position.y = 0.02;

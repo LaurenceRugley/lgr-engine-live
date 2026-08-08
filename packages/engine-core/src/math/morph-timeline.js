@@ -4,9 +4,15 @@
    Owns ONE scalar t ∈ [0,1].
    - scrub(t) — set t directly (for a slider / drag); immediate.
    - play(from, to, { ease, duration }) — start auto-playback from `from` to `to`.
-   - update(dt) — advance playback by dt ms; call inside the render loop.
+   - update(dt) — advance playback by dt SECONDS; call inside the render loop.
    - onUpdate(fn) — register a callback fired on every t change.
    - get t — current value.
+
+   UNIT (Arc A-UNIT): seconds, matching the house convention — app-shell.js hands every
+   frame(dt,t) consumer a dt in seconds (getDelta(), clamped at 0.1s), and camera-rig / sun-rig /
+   tween.js all take their rates and durations per-second. This module was the lone ms outlier;
+   every consumer converted alongside it (trace-player, tree-panel, step-panel, and the
+   atlas/lessons/tracer projects).
 
    Generalizes the sun-rig one-scalar-t pattern (sun-rig.js:update(dt) → t advances
    along keyframes) into a reusable tween engine. No GSAP — first-party ease.
@@ -23,11 +29,11 @@ export function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-export function createMorphTimeline({ duration = 1000, ease = easeInOutCubic } = {}) {
+export function createMorphTimeline({ duration = 1, ease = easeInOutCubic } = {}) {
   let _t       = 0;      // current value (output, ∈ [0,1] for play; exact for scrub)
   let _from    = 0;      // play start value
   let _to      = 1;      // play end value
-  let _elapsed = 0;      // ms since play() was called
+  let _elapsed = 0;      // seconds since play() was called
   let _dur     = duration;
   let _ease    = ease;
   let _playing = false;
@@ -52,7 +58,7 @@ export function createMorphTimeline({ duration = 1000, ease = easeInOutCubic } =
     if (_cb) _cb(_t);
   }
 
-  // update — advance playback by dt milliseconds. Call inside the render loop.
+  // update — advance playback by dt seconds. Call inside the render loop.
   function update(dt) {
     if (!_playing) return;
     _elapsed += dt;

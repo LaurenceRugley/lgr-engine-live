@@ -31,9 +31,11 @@
       light OBJECTS aren't uniforms, so those few we .copy() each frame.)
 
    CONTROLS are the owner's job; this module just offers the verbs: cyclePreset()
-   (jump to the next dawn/noon/dusk/night, eased), nudge(hours) (scrub), toggleAuto()
-   (a slow ~90 s auto-cycle), setReducedMotion() (freeze the auto-cycle — WCAG 2.3.1:
-   never flash/animate the whole screen faster than a few seconds per cycle).
+   (jump to the next dawn/noon/dusk/night, eased), nudge(hours) (scrub, relative),
+   goTo(t) (scrub, absolute), toggleAuto()/setAuto(v) (a ~90 s default auto-cycle),
+   setPace(seconds) (ARC A-DUSK: how many seconds one full auto-cycle takes, 1.5..900,
+   matching lgr-live-sky's own speed range), setReducedMotion() (freeze the auto-cycle
+   — WCAG 2.3.1: never flash/animate the whole screen faster than a few seconds per cycle).
    ============================================================ */
 import * as THREE from 'three';
 
@@ -42,8 +44,13 @@ const TILT   = 0.70;   // ~40° tilt of the arc PLANE from vertical → the sun 
                        // ~50° (never the zenith, which would light only flat tops and
                        // leave the side faces we see in dimetric black) and always keeps
                        // a horizontal component, so shadows always have a direction.
-const CYCLE_SECONDS = 90;  // a full auto day (WCAG-safe: tens of seconds, never a strobe)
+const CYCLE_SECONDS = 90;  // default full-auto-day pace (WCAG-safe: tens of seconds, never a strobe)
 const EASE_K = 6;          // preset/scrub easing rate (~0.8 s to settle)
+// ARC A-DUSK — pace is now a runtime setter (setPace), not just this fixed default. Bounds match
+// lgr-live-sky's own setTimeSpeed clamp (1.5..900s/day) so the two apps' time controls feel like
+// one family, per the brief. Default unchanged (CYCLE_SECONDS=90) — a consumer that never calls
+// setPace() is byte-identical to before this arc.
+const PACE_MIN = 1.5, PACE_MAX = 900;
 
 /* L-dusk-washout: LOW-SUN WASH tamer — bump on sun ELEVATION, ~1 through golden hour + afternoon dusk,
    0 at noon AND ~0 at/below the horizon. Low edge extended to y=−0.06 (vs the old 0.02) so the corona
@@ -128,6 +135,7 @@ export function validateSunKeyframes(keyframes) {
 export function createSunRig({ t = 0.5, keyframes = KEYFRAMES } = {}) {   // boot at noon; default keyframes byte-identical
   let currT = t, goalT = t;
   let auto = false, reducedMotion = false;
+  let cycleSeconds = CYCLE_SECONDS;   // ARC A-DUSK: was the module-level const directly; now per-instance + settable
 
   validateSunKeyframes(keyframes);   // fail loud at construction on a malformed client set
 
@@ -240,13 +248,23 @@ export function createSunRig({ t = 0.5, keyframes = KEYFRAMES } = {}) {   // boo
     // the render loop, so the exception escapes before the trailing requestAnimationFrame and the loop dies on frame 1.
     // Guarding here means EVERY consumer (the ?t= boot param, the capture director, viewerControls.time) inherits it.
     nudge(hours)  { if (Number.isFinite(hours)) goalT += hours / 24; },  // scrub ± time
-    goTo(t)       { if (Number.isFinite(t)) goalT = t; },                // L15: ease to an absolute time (director verb)
+    /* L15: ease to an absolute time (director verb). `snap` (2026-08-05, metropolis scrub fix): a
+       LIVE SLIDER cannot ride the damp — measured in the headed browser, the eased chase lags the
+       thumb by 1-2.5 s, so a user drags to sunset, sees noon, and watches the sky drift after
+       releasing ("the scrub doesn't work"). snap=true lands currT on the target this frame; default
+       false keeps every existing caller (director, ?t= boot, cyclePreset) byte-identical. */
+    goTo(t, snap = false) { if (Number.isFinite(t)) { goalT = t; if (snap) currT = t; } },
     toggleAuto()  { auto = !auto; },
     setAuto(v)    { auto = !!v; },
+    // ARC A-DUSK — pace: seconds for one full auto-cycle. Same clamp as lgr-live-sky's setTimeSpeed
+    // (1.5..900) so a shared UI slider's log-range formula produces the same feel in both apps.
+    // Rejects non-finite input at the seam, same discipline as goTo/nudge above.
+    setPace(seconds) { if (Number.isFinite(seconds)) cycleSeconds = THREE.MathUtils.clamp(seconds, PACE_MIN, PACE_MAX); },
+    get pace() { return cycleSeconds; },
     setReducedMotion(v) { reducedMotion = v; },
 
     update(dt) {
-      if (auto && !reducedMotion) goalT += dt / CYCLE_SECONDS;  // creep the day forward
+      if (auto && !reducedMotion) goalT += dt / cycleSeconds;   // creep the day forward, at the current pace
       currT = damp(currT, goalT, dt);                           // ease toward goal/auto
       applyEnvironment(currT);
     },

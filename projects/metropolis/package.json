@@ -1,0 +1,17 @@
+{
+  "name": "@lgr/metropolis",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Arc A-METRO — a beautiful, drivable/walkable/flyable city that COMPOSES the whole engine (citygen + agents + water-life + collision + walker + real astronomy + celestials + clouds + weather + texture forge + planar reflection + camera-rig), instead of patching projects/city. Boots straight to beauty, no AUTO tier ladder, no byte-identical baggage — a fresh project with no baseline to preserve.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lgr/engine-core": "*",
+    "@lgr/office": "*"
+  }
+}

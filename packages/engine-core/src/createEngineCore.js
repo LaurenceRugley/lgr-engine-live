@@ -271,7 +271,26 @@ export function createEngineCore(opts = {}) {
     blurMaterial.uniforms.uDir.value.set(0, 1.6 / bloomH);
     runPass(blurMaterial, bloomA);
     filmicMaterial.uniforms.uBloom.value = bloomA.texture;
-    filmicMaterial.uniforms.uBloomStrength.value = BLOOM_BASE * (0.32 + 0.95 * lowSun);
+    // ARC A-DUSK ROOT CAUSE: was `lowSun` — a ONE-SIDED ramp (1 - clamp(y*2.2,0,1)) that reaches its
+    // ceiling by y~0.4545 and NEVER comes back down as the sun keeps descending through dusk and all
+    // of night (unlike _duskGate/lowSunWashK just above, a proper BUMP that ramps up THEN back down).
+    // Measured at the dusk keyframe (t=0.75, y~0): uBloomStrength was 1.07 — ~3.9x the noon value
+    // (0.272) — while the scene is STILL near its brightest ("L93: city IGNITES at dusk... the hero
+    // beat", sun-rig.js's dusk keyframe), so bloom massively over-amplified exactly the moment there
+    // was the most bright content to grab, reading as a blown-out sky washing out the whole frame —
+    // isolated by directly diffing every filmicMaterial uniform noon-vs-dusk, not guessed (see
+    // HANDOFF.md Arc A-DUSK). _duskGate is ALREADY computed above for the bloom THRESHOLD; reusing it
+    // here for STRENGTH too makes both dampers agree on the same (correct) shape. _duskGate=0 at noon
+    // (identical to old `lowSun` there) -> byte-identical at noon, proven by tier-guard + this arc's
+    // own noon A/B.
+    // RE-TUNED 2026-08-05 (metropolis defect-4, measured live): 0.95 was calibrated when NOTHING else
+    // glowed at dusk — window emissive was suppressed by a wiring bug everywhere, there was no
+    // volumetric deck, and no eye-level mode. With windows actually lit (HDR 4.5 emissive) and a cloud
+    // deck in frame, the ~1.04 dusk strength blew every pane to a 4-6x halo (the Fable-5 art bar for
+    // eye-level frames: <= 2x the emitter) and washed street views. A live uBloomStrength sweep in the
+    // headed browser found 0.5 keeps the golden-hour glow while panes resolve crisp -> 0.27 lands the
+    // dusk peak at ~0.50. Noon/night byte-identical (_duskGate=0 there; the 0.32 floor unchanged).
+    filmicMaterial.uniforms.uBloomStrength.value = BLOOM_BASE * (0.32 + 0.27 * _duskGate);
   }
 
   /* L107 GOD RAYS — screen-space crepuscular shafts, beauty-tier only. */

@@ -26,7 +26,7 @@ import { ALGORITHMS, countOps } from './algorithms.js';
    Renders: the array as labeled cells (active pair lit, done cells settled), the source lines with the
    current one highlighted, a transport (play/pause · step ± · scrub), and a live op counter — the same
    number the Big-O chart plots, so the student watches the measurement accumulate. */
-export function createStepPanel({ kind, input, target, reducedMotion = false, msPerStep = 650 } = {}) {
+export function createStepPanel({ kind, input, target, reducedMotion = false, secondsPerStep = 0.65 } = {}) {
   const spec = ALGORITHMS[kind];
   if (!spec) throw new Error(`createStepPanel: unknown algorithm "${kind}" (have: ${Object.keys(ALGORITHMS).join(', ')})`);
 
@@ -38,7 +38,7 @@ export function createStepPanel({ kind, input, target, reducedMotion = false, ms
   const keyframes = tracer.getKeyframes();
   const counts = countOps(ops);
 
-  const player = createTracePlayer(tracer, { msPerStep });
+  const player = createTracePlayer(tracer, { secondsPerStep });
 
   // ---- DOM ----
   const node = document.createElement('div');
@@ -158,9 +158,9 @@ export function createStepPanel({ kind, input, target, reducedMotion = false, ms
   player.onUpdate((stepIndex) => render(stepIndex));
   render(0);
 
-  /* update(dtMs) — the consumer's animation frame drives the player (the reader owns its own rAF; the
-     panel never starts a loop of its own — a hidden panel must cost nothing). */
-  function update(dtMs) { player.update(dtMs); }
+  /* update(dt) — the consumer's animation frame drives the player, dt in SECONDS (the reader owns
+     its own rAF; the panel never starts a loop of its own — a hidden panel must cost nothing). */
+  function update(dt) { player.update(dt); }
 
   function dispose() { player.pause(); node.replaceChildren(); }
 

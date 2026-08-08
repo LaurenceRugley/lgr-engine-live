@@ -32,7 +32,7 @@ import {
   THREE, createEngine, CAM, PROFILES, PROFILE_KEYS, createCapture, createViewerUI,
   createAppShell, readAppFlags, fromURLParams, createDiveController, createDevMode,
   createAudioBus, createAmbientBed, createPositionalField, createRotor,
-  createGyroLook, createDebugOverlay,
+  createGyroLook, createDebugOverlay, createFirstPersonWalker,
 } from '@lgr/engine-core';
 // L114: the loop Timer is now owned by createAppShell (was `const { Timer } = THREE` here); createHints is wrapped by shell.hints.
 
@@ -70,6 +70,55 @@ const params = new URLSearchParams(window.location.search);
 let citySeed = (params.get('city') ? Number(params.get('city')) : 0) || ((Math.random() * 1e9) | 0);
 let profileIndex = Math.max(0, PROFILE_KEYS.indexOf(params.get('profile') || 'manhattan'));
 
+/* BLENDER BOUNDED PROOF (2026-08-01) — `?cityKit=1` opts into a NEW, ADDITIVE recipe that
+   populates a district with tools/blender/build_building_kit.py's Blender-authored kit FAMILY
+   (landmarks.js's kitTowerA..E — Arc A-KIT closed gap 3: 5 pieces, not the original proof's one).
+   This is a custom `profile` OBJECT handed straight to createCity (the ARC A21 override
+   citygen.js has supported since the city generator arc — this project's own city just never
+   exposed it until createCityWorld's new `cityProfile` passthrough above).
+   `?city=`/`?profile=` are COMPLETELY untouched by this: manhattan/paris/neoTokyo still resolve
+   through PROFILES[profileIndex] exactly as before whenever cityProfile stays null (the default). */
+const CITY_KIT = params.get('cityKit') === '1';
+const KIT_FAMILY = ['kitTowerA', 'kitTowerB', 'kitTowerC', 'kitTowerD', 'kitTowerE'];
+const KIT_PROFILE = {
+  key: 'kitDistrict', name: 'Kit District',
+  towers: ['#c9a07a', '#d9b98a', '#b58a5a'],
+  ground: '#8CC46A', street: '#9AA0A6', sidewalk: '#C8CCD0', park: '#5DB347', water: '#3FA8C8',
+  shopfronts: ['#C04A3A', '#3A7AC0', '#C09A2A'], glass: '#7FA8CC',
+  winColors: ['#ffd27a', '#9ad6ff'],
+  hMax: 1.8, sigma: 0.6, roofRate: 0.3, pSplit: 0.6, nightLit: 0.5, roofTint: null,
+  coast: { base: 0.75, out: 0.8, in: 0.5, jag: 0.8 },
+  // 10 landmark SLOTS, cycling through all 5 family pieces twice — the monotony Arc A-KIT exists
+  // to fix (was Array(10).fill('kitTower'), 10 instances of ONE piece).
+  landmarks: Array.from({ length: 10 }, (_, i) => KIT_FAMILY[i % KIT_FAMILY.length]),
+};
+
+/* ARC A-LIVE — `?live=1` opts into the SHOWCASE profile: volumetric clouds (createVolumetricClouds,
+   built during the reel work, wired to nothing until this arc) + population pushed toward showcase
+   density. Fully additive, same shape as ?cityKit= above: `?city=`/`?profile=`/`?cityKit=` are
+   untouched, and manhattan/paris/neoTokyo stay byte-identical when ?live is absent (proven by
+   tier-guard — this arc's report has the numbers). Coverage/counts are DATA passed into
+   createEngine, not hardcoded engine-core defaults — and each is its OWN URL param on top of
+   `?live=1`'s baseline, so the measurement harness (and any later tuning pass) can sweep density
+   without an engine-core edit. Defaults below are "clearly denser than the deliberately-sparse
+   baseline (12/14/4/4), not asserted to already BE the ceiling" — see HANDOFF.md Arc A-LIVE for
+   the measured fps/draw-call numbers this was chosen against, and where the real ceiling sits. */
+const LIVE = params.get('live') === '1';
+const LIVE_CARS     = Number(params.get('cars')     ?? 24);
+const LIVE_PEDS     = Number(params.get('peds')     ?? 28);
+const LIVE_BOATS    = Number(params.get('boats')    ?? 8);
+const LIVE_GULLS    = Number(params.get('gulls')    ?? 8);
+const LIVE_COVERAGE = Number(params.get('coverage') ?? 0.5);
+// ARC A-ART — the texture forge, opt-in behind ?live=1 (same additive shape as clouds/population
+// above: default null → createCityWorld allocates zero forge state, every existing profile stays
+// byte-identical). ?look=warm|glass|contrast picks which of the three shipped looks bakes; an
+// unrecognised or missing value falls back to 'warm' — DELIVER OPTIONS, DO NOT PICK (the brief):
+// all three are real, live URL variants for the owner to compare, not a converged default.
+// ?forge=0 forces the flat pre-forge fallback while keeping clouds/population — the same escape
+// hatch hoard2's own wiring already uses for its critic-panel A/B (projects/hoard2/src/world/index.js),
+// here so the forge's OWN cost can be isolated from ?live=1's other additions during measurement.
+const LIVE_LOOK = LIVE && params.get('forge') !== '0' ? (['warm', 'glass', 'contrast'].includes(params.get('look')) ? params.get('look') : 'warm') : null;
+
 /* THE "!" STING — the hidden cardboard box's payoff (egg v2). The ENGINE owns noticing (the
    proximity latch in createHiddenProp); this consumer owns REACTING. Same fixed-chip idiom as
    the mute button below: inject a <style> once, append one element, no framework, no audio.
@@ -102,8 +151,24 @@ function _showEggChip() {
 
 /* ENGINE BOOTSTRAP — build the renderer/scene/sim/city/post stack and grab the handles.
    Everything below is the consumer: behaviour that reads these handles. */
-const engine = createEngine({ demo: DEMO, citySeed, profileIndex, onEggFound: _showEggChip });
+const engine = createEngine({
+  demo: DEMO, citySeed, profileIndex, cityProfile: CITY_KIT ? KIT_PROFILE : null, onEggFound: _showEggChip,
+  volumetricClouds: LIVE ? { coverage: LIVE_COVERAGE } : null,
+  population: LIVE ? { cars: LIVE_CARS, peds: LIVE_PEDS, boats: LIVE_BOATS, gulls: LIVE_GULLS } : null,
+  forgeLook: LIVE_LOOK,
+});
 window.__engine = engine;   // L114 debug/harness handle (cf. __worldApi) — tools/dive-probe.mjs drives the reset-siting regression guard through it
+// ARC A-BEAUTY Finding 2 — beauty is UNREACHABLE by default: the city boots on mode 3 (AUTO), and
+// createEngineCore.js's own _computeStyle() has an early-return for AUTO that only ever produces
+// toon/pixel/blend from rig.styleT — mode 2 (beauty) is reachable ONLY by an explicit setPostMode(2)
+// call (the '2' key, or here). Consequence: every beauty-gated capability shipped so far — volumetric
+// clouds (createCityWorld.js's cloudsComposite, beauty-only), the planar water reflection, the forge
+// looks (Arc A-ART) — has been invisible to the owner by default this whole time.
+// FIX (the brief's own suggested, defensible route — NOT a default-boot-tier change, which stays AUTO
+// for the bare URL): `?live=1` already means "show the showcase capability set" (clouds/population/
+// forge); it now ALSO means "show it in the tier that can actually render it." The bare/default city
+// is completely untouched — this is gated on LIVE alone, same as every other ?live=1 addition.
+if (LIVE) engine.setPostMode(2);
 
 // L114 app-shell — city is the FULL, blocking adoption (the money path). The shell owns the loop skeleton +
 // pause-on-hidden + readiness + footer + resize/visibility wiring; the loop BODY (below) stays 100% city.
@@ -416,10 +481,42 @@ if (typeof window !== 'undefined') window.__worldApi = engine.world;   // debug/
 // so world-mode's own sea + office are untouched — the spec's plain sceneMode check would have clobbered them.)
 const _isCityBay = (x, z) => sceneMode === 'city' && !worldMode && !city.isLand(x, z);   // open water outside the coastline
 engine.setPilotWaterSampler((x, z) => _isCityBay(x, z) ? 0 : null);                  // sea SURFACE at y=0 over the bay
+// ARC A-CAM+WALK — build this ONE ground-height function and feed it to every consumer that needs
+// "how high is the ground here" (the owner's own B2 instruction: setSpringArm already takes a
+// getGroundY and the walker needs a ground sampler — build groundY(x,z) once, do not write two).
+// Same shape as the pilot ground sampler right below (which predates this arc): city land sits flat
+// at PLINTH_TOP (0.3), the bay floor sits at -2.4, everything else (office/world/hub) defers to null/0.
+function cityGroundY(x, z) { return _isCityBay(x, z) ? -2.4 : (sceneMode === 'city' && !worldMode ? 0.3 : 0); }
 // L108 (collision part C): over city LAND the craft now settles on the STREET (y ≥ 0.3 = PLINTH_TOP, the island top),
 // not the flat y=0 that let it sink 0.3 into the island. Over the BAY it still dives to the seabed (-2.4). World/office
 // defer to the default (null). This is the pilot-scoped ground (never worldHeightAt → the ambient heli/attract unmoved).
 engine.setPilotGroundSampler((x, z) => _isCityBay(x, z) ? -2.4 : (sceneMode === 'city' && !worldMode ? 0.3 : null));
+// ARC A-CAM+WALK Part A — GROUND-CLAMP + NO-CLIP for the free-fly camera: reuse the SAME spring-arm
+// mechanism the piloted chase-cam already sweeps (pilot.js:317/433's `rig.setSpringArm`), not new
+// clamp/sweep code. engine.collider.segmentHit is the SAME sweep the debug probe + pilot chase
+// already use; a wider radius (0.4) than the pilot's cabin-cheat 0.25 since a free-flying viewpoint
+// has no cockpit glass to forgive a graze.
+// NOT armed at boot (measured, found the hard way): tier-guard's own default noon shot went RED —
+// the segment sweep from the DEFAULT static camera framing grazes a nearby building even before any
+// input, shortening armDist and shifting the rendered frame. Byte-identical-by-default means arming
+// LAZILY, on the first REAL free-fly key (inside the L88 block below) — the tier-guard scenario never
+// presses a key, so armEnabled stays false there, exactly matching pre-arc behaviour. Re-armed after
+// every releasePilot() too (pilot.js's own release() fully disarms the rig; a piloted craft's arm
+// settings are craft-specific and must not leak into the next possession).
+let _freeFlyArmed = false;
+function armFreeFlyCamera() { rig.setSpringArm({ segmentQuery: engine.collider.segmentHit, getGroundY: cityGroundY, radius: 0.4, enabled: true }); _freeFlyArmed = true; }
+// ARC A-DUSK ROOT CAUSE (dominant lever, measured): the IBL env map only rebuilds when a coarse
+// t-bucket changes (createCityWorld's ensureEnv, default _envSegments=4 → a bucket spans a full
+// 6-hour quarter-day). Sitting mid-bucket, the env holds a STALE sample from wherever the bucket
+// last rebuilt, then SNAPS at the boundary — at the dusk bucket this stale env can be the BRIGHT
+// midday sample while the direct-light/surface damping has already engaged for low sun, producing
+// the reported asymmetry (sky reads blown-bright off the stale env while buildings read dark).
+// Confirmed via direct screenshot A/B: 4 segments (default) shows the blowout at t=0.75; 96
+// segments does not (matches hoard2's own A6-0a fix, projects/hoard2/src/world/index.js:69-73,
+// same knob, same reasoning — city just never opted in). City default stays 4 (byte-identical,
+// tier-guard proof untouched) for any OTHER consumer that doesn't call this; city itself now opts
+// in, same as hoard2. ?envseg=<n> is the A/B knob while verifying.
+engine.setEnvSegments?.(_q.has('envseg') ? +_q.get('envseg') : 96);
 function toggleWorld() {
   if (sceneMode !== 'city') return;                   // only from the open city view
   endAttract();                                       // L110 (audit P0-2): leaving the city ends the boot attract-loop — else the heli camera-follow, the coach chip, and the canvas seize-intercept leak into the wrong mode
@@ -558,6 +655,70 @@ function pilotHold(tok, on) { if (on) heldPilot.add(tok); else heldPilot.delete(
 // L77: Space = climb, Shift = descend (the universal flight verbs) — added alongside the L76 throttle/steer keys.
 const PILOT_KEY = { w: 'up', s: 'down', a: 'left', d: 'right', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', ' ': 'rise', Shift: 'fall' };
 
+// ============================================================
+// ARC A-CAM+WALK Part B — WALK THE CITY. The owner's ONE hard requirement: "you're not just walking
+// through walls." createFirstPersonWalker (Lesson M2, hoard2's dive-and-walk) is a CAMERA CONTROLLER,
+// never an animated character — per the owner's own scope narrowing, this arc adds NO mesh, NO
+// skeleton, NO per-person art (that's a later, separate pass). Walking is its own lightweight mode,
+// structurally parallel to piloting's enter/exit bookkeeping (not forced through spawnSeizeCraft's
+// entity-spawn machinery — that seam reparents a MESH-bearing placedLife entity into a visible group,
+// which has nothing to attach for a mesh-less camera mode; a finding reported honestly rather than
+// bent to fit, see HANDOFF.md).
+let walking = false;
+window.__walking = false;
+let walker = null;
+const heldWalk = new Set();   // 'up'/'down'/'left'/'right' — keyboard only this arc (touch is a follow-up)
+const WALK_KEY = { w: 'up', s: 'down', a: 'left', d: 'right', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+function walkHold(tok, on) { if (on) heldWalk.add(tok); else heldWalk.delete(tok); }
+
+// Built once, lazily (never at boot — matches Part A's own "byte-identical until first real use"
+// discipline). groundY = the SAME cityGroundY every other consumer (pilot sampler, free-fly spring
+// arm) shares — built once, fed everywhere (the owner's own B2 instruction, honoured here too).
+// resolveSpatial = engine.collider.resolveSphere directly: the walker's OWN throwaway per-frame state
+// adapter (createFirstPersonWalker.js) feeds it, so the SAME 400-700-building spatial hash the piloted
+// craft already sweeps becomes the walker's walls — never a second collision system.
+function ensureWalker() {
+  if (walker) return walker;
+  walker = createFirstPersonWalker({ groundY: cityGroundY, resolveSpatial: engine.collider.resolveSphere, radius: 0.35, eyeHeight: 1.6 });
+  return walker;
+}
+
+function startWalking() {
+  if (walking || sceneMode !== 'city' || worldMode) return false;
+  if (piloting) releasePilot();
+  if (engine.inspector.focus) engine.inspector.release();
+  endAttract();
+  ensureWalker();
+  // start where the camera is currently looking (the orbit target's XZ), facing the same direction —
+  // pan()'s forward convention is (-sin(az),-cos(az)) (camera-rig.js), the walker's is (sin(yaw),cos(yaw)),
+  // so matching direction needs yaw = azimuth + π (a rotation, not the same number).
+  walker.setPosition(rig.target.x, rig.target.z);
+  walker.setYaw(rig.azimuth + Math.PI);
+  walker.recenterPitch();
+  walking = true; window.__walking = true;
+  renderer.domElement.requestPointerLock?.();
+  if (viewerUI) viewerUI.announce('Walking. Mouse to look, W A S D to move, Escape to exit.');
+  return true;
+}
+function stopWalking() {
+  if (!walking) return false;
+  walking = false; window.__walking = false;
+  heldWalk.clear();
+  rig.clearEye();
+  if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+  if (viewerUI) viewerUI.announce('Stopped walking. Free camera restored.');
+  return true;
+}
+// The browser can drop pointer lock on its own (native Escape, alt-tab, …) — stay in sync rather than
+// leaving `walking` true with no mouse-look actually happening (Mario-Odyssey "always get out" rule).
+document.addEventListener('pointerlockchange', () => {
+  if (walking && document.pointerLockElement !== renderer.domElement) stopWalking();
+});
+window.addEventListener('mousemove', (e) => {
+  if (walking && document.pointerLockElement === renderer.domElement) walker.addLook(e.movementX, e.movementY);
+});
+window.__walk = () => startWalking();     // headless/verify trigger, same shape as window.__fly/__drive
+
 const pilotables = () => engine.world.placedLife.getFollowables().filter((f) => f.pilot);   // placed pilotable craft
 // CANONICAL possess: hand the camera from inspector → pilot (one owner), set the flags, refresh the HUD.
 function doPossess(f) {
@@ -601,6 +762,23 @@ function flyPossess() {
     takeoverMorph(); if (_cityHints) _cityHints.dismiss(false);   // item 6 morph; item-8 fix: drop the first-run hints so they don't overlap the pilot stick
     if (_fromFocus) { const x = document.querySelector('.pilot-exit'); if (x) x.focus(); }   // L110 (audit B13): hand keyboard focus to the pilot Exit so it isn't dropped when the chip hides
   }
+  return ok;
+}
+// ARC A-CAM+WALK Part A2 — DRIVE: a second, cheaper way to move through the city, through the SAME
+// proven seam flyPossess already uses (spawnSeizeCraft + doPossess), never a new spawn/possess path.
+// `engine.seizeCraft` is a SINGLE GLOBAL SLOT (spawnSeizeCraft's own code: it despawns whatever craft
+// currently occupies it before spawning the new one) — driving therefore REPLACES the hovering heli
+// in the scene for as long as you drive, same as the heli would replace an ATV. Spawned ON DEMAND
+// (not at boot) so the default city — heli hovering over the skyline — stays byte-identical; only
+// pressing V (or calling window.__drive()) trades it for a street-level ATV. Ground position (0,0) is
+// the city's central street intersection (agents.js buildGraph's own linePos(N/2)=0 for both axes) —
+// guaranteed pavement, never inside a building, by the same grid citygen and the street graph share.
+function drivePossess() {
+  const _fromFocus = document.activeElement === renderer.domElement;
+  endAttract();
+  engine.spawnSeizeCraft('atv', 0, 0, {});
+  const ok = doPossess(engine.seizeCraft);
+  if (ok && _fromFocus) { const x = document.querySelector('.pilot-exit'); if (x) x.focus(); }
   return ok;
 }
 let _cityHints = null;                        // the first-run coachmark handle (assigned at boot) — dismissed on seize
@@ -707,9 +885,59 @@ function ensureChips() {
     _chipRow.appendChild(b); return b;
   };
   _flyChip  = mk('lgr-fly-chip',  '🚁 Fly',  'Fly the helicopter', () => flyPossess());
-  _timeChip = mk('lgr-time-chip', '🌅 Time', 'Change the time of day', () => cycleTime());
+  _timeChip = mk('lgr-time-chip', '🌅 Time', 'Change the time of day — tap to cycle, drag or scroll to scrub', () => cycleTime());
   _cityChip = mk('lgr-city-chip', '🏙 City', 'Generate a new procedural city', () => cityChipCycle());
   document.body.appendChild(_chipRow);
+  wireTimeScrub();
+}
+// ARC A-ART — ROOT CAUSE of "I can't reach the time slider" (A-DUSK's honest gap): viewer-ui.js's full
+// `.vui` bar is gated behind AUTHOR mode (ui-mode.js — `editorChrome:false` in PRESENT, the DELIBERATE
+// default for every bare public URL: "in-world HUD only, ZERO editor chrome"). `available` is captured
+// ONCE at boot from that gate and `setHidden()`'s very first branch force-hides the bar whenever
+// `available` is false — no key, click, or gesture can ever recover it, by design, because the design's
+// job is to keep sculpt/dev/world-editor chrome off shared/public screens. That is NOT a bug to patch —
+// it is a REAL security/privacy boundary (ui-mode.js's own header: "the owner badge fires ONLY for
+// AUTHOR... so shared/screen-shared browsers never silently expose editor chrome"). Blowing it open for
+// everyone would trade one real problem (reachability) for a bigger one (every visitor gets sculpt
+// tools). The owner is a PRESENT-mode visitor by construction — what he actually needs reachable is
+// TIME, not the whole editor. Fix: upgrade the chip that ALREADY survives PRESENT mode (this one, always
+// rendered regardless of AUTHOR/PRESENT) with a real drag-to-scrub gesture, reusing the EXACT verbs
+// Arc A-DUSK already built (`sunRig.nudge`/`.clock`) — no new button, no touching the AUTHOR gate.
+function wireTimeScrub() {
+  const SCRUB_PX_PER_HOUR = 14;   // ~24px of drag ≈ 1.7h — fast enough to reach any time in one gesture, fine enough to land on golden hour
+  const CLICK_SLOP_PX = 6;        // a drag shorter than this still counts as the original tap-to-cycle
+  let dragging = false, lastX = 0, moved = 0, justDragged = false;
+  _timeChip.addEventListener('pointerdown', (e) => {
+    dragging = true; lastX = e.clientX; moved = 0;
+    _timeChip.setPointerCapture(e.pointerId);
+  });
+  _timeChip.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX; lastX = e.clientX; moved += Math.abs(dx);
+    if (moved > CLICK_SLOP_PX) sunRig.nudge(dx / SCRUB_PX_PER_HOUR);
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (moved > CLICK_SLOP_PX) {
+      justDragged = true;                       // a real scrub happened — swallow the click `mk()` is about to fire
+      officeUI.toast('🌅  ' + sunRig.clock);     // confirm the landed time, same toast shape cycleTime() already uses
+    }
+  };
+  _timeChip.addEventListener('pointerup', endDrag);
+  _timeChip.addEventListener('pointercancel', endDrag);
+  // CAPTURE phase, ahead of mk()'s own bubble-phase click→cycleTime() listener: a real drag suppresses
+  // that click outright (else releasing a drag would ALSO cycle to the next preset — two conflicting
+  // time changes from one gesture). A plain tap (no drag) never sets the flag, so cycleTime() still
+  // fires normally — the original click-to-cycle behavior is fully preserved.
+  _timeChip.addEventListener('click', (e) => {
+    if (justDragged) { justDragged = false; e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
+  // desktop wheel — the same nudge verb, no drag needed. preventDefault so the page itself never scrolls.
+  _timeChip.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    sunRig.nudge(-e.deltaY / (SCRUB_PX_PER_HOUR * 8));
+  }, { passive: false });
 }
 // cycle to the NEXT time-of-day stop strictly after the current sun time (so it continues from a ?t= boot); night 0.0
 // is ordered as 1.0 then wraps to Dawn. sunRig.goTo eases (damped), so the sun visibly POURS to the new time.
@@ -733,6 +961,7 @@ function refreshChips() {
   const cityScene = sceneMode === 'city';
   _flyChip.classList.toggle('on', !!air && !piloting && !attractActive && (cityScene || worldMode));
   _timeChip.classList.toggle('on', cityScene && !attractActive);                            // incl. while piloting — the mid-flight sun-morph is the money shot
+  _timeChip.textContent = '🌅 ' + sunRig.clock;   // ARC A-ART: the chip now READS the current time too, not just a static label — drag/wheel it to scrub
   _cityChip.classList.toggle('on', cityScene && !worldMode && !piloting && !attractActive);
 }
 // L104 — auto FLY/DRIVE label by the nearest/possessed craft's medium (air→Fly, ground ATV→Drive). For Phase 2's verb bar.
@@ -786,6 +1015,7 @@ function releasePilot() {
   if (_gyroLook && _gyroLook.enabled) _gyroLook.disable();
   if (_gyroChip) _gyroChip.style.display = 'none';
   engine.pilot.release(); piloting = false; window.__piloting = false; heldPilot.clear(); recomputeAxes();
+  armFreeFlyCamera();   // ARC A-CAM+WALK: pilot.release() disarms the spring-arm entirely; re-arm it for the free camera
   refreshPilotHUD();
   if (_returnFocus && _flyChip && _flyChip.classList.contains('on')) _flyChip.focus();
   if (viewerUI) viewerUI.announce('Exited the craft. Free camera restored.');   // L104 a11y (WCAG 4.1.3)
@@ -1118,6 +1348,7 @@ function endPreviewToExplore() {                       // the Explore button: dr
   previewUI.caption('', false); previewUI.showExplore(false);
   document.body.classList.remove('preview-cinematic');
   engine.pilot.release();                             // free the camera → drag to orbit the authored world
+  armFreeFlyCamera();   // ARC A-CAM+WALK: re-arm ground-clamp/no-clip for the explore camera too
 }
 
 const brushRing = new THREE.Mesh(
@@ -1346,6 +1577,13 @@ window.addEventListener('keydown', (e) => {
     const tok = PILOT_KEY[e.key.length === 1 ? e.key.toLowerCase() : e.key];
     if (tok) { pilotHold(tok, true); e.preventDefault(); return; }
   }
+  // ARC A-CAM+WALK Part B — WALKING owns WASD (→ move) + Esc (always-available exit) while active,
+  // same priority tier as piloting (intercepted before inspect/free-fly so 'w' MOVES, not pans/flies).
+  if (walking) {
+    if (e.key === 'Escape') { stopWalking(); e.preventDefault(); return; }
+    const tok = WALK_KEY[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+    if (tok) { walkHold(tok, true); e.preventDefault(); return; }
+  }
   // L76: while INSPECTING a pilotable (a followed ATV), Enter / Return possesses it ("drive" the craft).
   if (e.key === 'Enter' && inspecting && !piloting) { tryPossess(); e.preventDefault(); return; }
   // L63 INSPECT MODE owns WASD-fly + Tab-cycle + Esc-release while active — intercept BEFORE the global
@@ -1383,10 +1621,17 @@ window.addEventListener('keydown', (e) => {
     const FLY = 2.4;                                  // a brisk pan step → reads as flying through the city
     const k = e.key.toLowerCase();
     if (attractActive && 'wasd'.includes(k)) endAttract();   // L106: WASD = explore intent → drop to free control (dismisses the coach)
+    if ('wasdqe'.includes(k) && !_freeFlyArmed) armFreeFlyCamera();   // arm on the FIRST real free-fly key, never before
     if (k === 'w') { rig.pan(0,  FLY); e.preventDefault(); return; }   // forward
     if (k === 's') { rig.pan(0, -FLY); e.preventDefault(); return; }   // back
     if (k === 'a') { rig.pan(-FLY, 0); e.preventDefault(); return; }   // left
     if (k === 'd') { rig.pan( FLY, 0); e.preventDefault(); return; }   // right
+    // ARC A-CAM+WALK Part A — the one missing degree of freedom: Q/E fly down/up (camera-rig.js's
+    // pan() grew a 3rd `dyUp` arg for exactly this). `!worldMode` dodges the EXISTING 'E' = erosion
+    // toggle a few lines down (worldMode's own WASD story is a separate, pre-existing concern this
+    // arc doesn't touch — vertical fly is scoped to the plain city view, matching the objective).
+    if (k === 'q' && !worldMode) { rig.pan(0, 0, -FLY); e.preventDefault(); return; }   // down
+    if (k === 'e' && !worldMode) { rig.pan(0, 0,  FLY); e.preventDefault(); return; }   // up
   }
   // (L110: the isTextTarget early-return moved to the TOP of this handler — see P0-4 note above.)
   // L74: while the ✎ editor is open, number keys 1–5 are the MODE RAIL (pick tool), not post/cam.
@@ -1399,6 +1644,8 @@ window.addEventListener('keydown', (e) => {
     flyPossess(); e.preventDefault(); return;
   }
   if ((e.key === 'f' || e.key === 'F') && !piloting && (sceneMode === 'city' || worldMode)) { flyPossess(); e.preventDefault(); }   // L104: FLY → seize the air craft (the city heli)
+  if ((e.key === 'v' || e.key === 'V') && !piloting && sceneMode === 'city' && !worldMode) { drivePossess(); e.preventDefault(); }   // ARC A-CAM+WALK: DRIVE → seize a ground ATV
+  if ((e.key === 'z' || e.key === 'Z') && !worldMode && !piloting && !walking) { startWalking(); e.preventDefault(); }   // ARC A-CAM+WALK: WALK → on foot, pointer-locked. !worldMode dodges the existing undo binding.
   if (e.key === '`' && DEV_OK) { setDev(!devMode); e.preventDefault(); return; }   // L104 P3: hidden key — toggle owner Developer Mode
   if (e.key === '1' || e.key === '2' || e.key === '3') setPostMode(Number(e.key));
   if (e.key === '7' || e.key === '8') setPostMode(Number(e.key));
@@ -1452,6 +1699,7 @@ window.addEventListener('keyup', (e) => {
   if (LOOK_KEY[e.key]) lookKeys[LOOK_KEY[e.key]] = false;
   // L76: release the held throttle/steer token (so the ATV coasts to a stop when you let go).
   if (piloting) { const tok = PILOT_KEY[e.key.length === 1 ? e.key.toLowerCase() : e.key]; if (tok) pilotHold(tok, false); }
+  if (walking) { const tok = WALK_KEY[e.key.length === 1 ? e.key.toLowerCase() : e.key]; if (tok) walkHold(tok, false); }
 });
 
 /* prefers-reduced-motion → freeze the auto-cycle (WCAG 2.3.1: don't animate the whole
@@ -1818,6 +2066,16 @@ const frame = (dt, t) => {
   // out via its `piloted` gate (it runs inside updateWorld, after this). If the controller released itself, sync.
   if (piloting) { engine.pilot.step(dt, pilotAxes); if (!engine.pilot.active) { piloting = false; window.__piloting = false; refreshPilotHUD(); } }
   else if (heroActive) heroUpdate(dt);                  // L79: the scripted hero drives the possessed craft + chase cam
+  // ARC A-CAM+WALK Part B — step the walker (input → move → resolve against the city's spatial-hash
+  // collider) and feed its eye straight into rig.setEye — the SAME first-person override pilot.js's
+  // cockpit view uses, bypassing orbit entirely while walking.
+  if (walking) {
+    const h = (t) => heldWalk.has(t);
+    const fwd = (h('up') ? 1 : 0) + (h('down') ? -1 : 0);
+    const strafe = (h('right') ? 1 : 0) + (h('left') ? -1 : 0);
+    walker.update(dt, { x: strafe, y: fwd });
+    rig.setEye(walker.eyePosition(), walker.eyeDirection());
+  }
   rig.update(dt);
   // L-audio-full-layer-slice1: update positional source positions + rotor gain (after rig + pilot, before render).
   if (_audioTick) _audioTick(dt);
@@ -1948,7 +2206,12 @@ const viewerControls = {
   cam: (m) => { rig.setMode({ iso: CAM.ISOMETRIC, dimetric: CAM.DIMETRIC, persp: CAM.PERSPECTIVE }[m]); window.__camMode = rig.mode; },
   // L55: POST-mode (the crunch chain) and VECTOR (the flat-shade material flag) are INDEPENDENT — the UI exposes
   // them as a radio + a chip, so they compose (Vector + Pixel, etc.). Direct calls into the engine.
-  post: (s) => setPostMode({ auto: 3, pixel: 7, toon: 8, none: 1 }[s]),   // 3=auto-LOD 7=pixel 8=toon 1=raw
+  // ARC A-BEAUTY: added 'beauty' to this map for completeness (any future direct caller can now reach
+  // it by name). NOTE, checked not assumed: scene-spec.js's own POSTS/POST_MODE enums do NOT include
+  // 'beauty' — a URL's ?style=beauty is validated-rejected before it would ever reach this function, so
+  // this alone does not make beauty URL-reachable; the actual reachability fix is ?live=1 booting
+  // straight into setPostMode(2), below.
+  post: (s) => setPostMode({ auto: 3, pixel: 7, toon: 8, none: 1, beauty: 2 }[s]),   // 3=auto-LOD 7=pixel 8=toon 1=raw 2=beauty
   vector: () => toggleVector(),          // toggle flat-vector materials
   era: () => cycleEra(),                 // L27: cycle the pixel era (native→GB→8-bit→16-bit→Modern)
   city: () => cycleCityProfile(),        // next city profile
@@ -1960,6 +2223,7 @@ const viewerControls = {
   officeProps: () => toggleOfficeProps(),// L30: painted ↔ live-3D props (under a skin)
   time: (t) => sunRig.goTo(t),
   auto: () => toggleSunAuto(),           // slow auto day/night cycle
+  pace: (seconds) => sunRig.setPace(seconds),   // ARC A-DUSK: seconds per full auto-cycle (Live-Sky-shaped speed control)
   inspect: () => toggleInspect(),        // L63: enter/exit the inspection lens (free-fly + follow)
   inspectNext: () => { const f = engine.inspector.cycle(1); window.__followKind = f ? f.kind : null; window.__followLabel = f ? f.label : null; },  // L63: tap-friendly "next target"
   mode: (m) => goToMode(m),              // L97: the unified segmented mode-switch (City·World·Office·Hoard)
@@ -2061,6 +2325,40 @@ if (sceneSpec.camera) viewerControls.cam(sceneSpec.camera);
 if (sceneSpec.post) viewerControls.post(sceneSpec.post);
 if (sceneSpec.vector && !engine.vector) viewerControls.vector();
 if (sceneSpec.time != null) sunRig.goTo(sceneSpec.time);
+// ARC A-CAM+WALK Part A — VIEWPOINT URL: ?vp=az,el,dist,tx,ty,tz round-trips a shared/returned-to
+// look. Compact (one param, six comma-floats) rather than six separate params — same "one thing to
+// copy/paste" shape as the rest of this file's URL contract (?city, ?t, …). snap=true on every setter
+// (no damped ease-in on a direct link load — the view should be EXACTLY where the link says, on frame 1).
+const _vp = _q.get('vp');
+if (_vp) {
+  const parts = _vp.split(',').map(Number);
+  if (parts.length === 6 && parts.every(Number.isFinite)) {
+    const [az, el, dist, tx, ty, tz] = parts;
+    rig.setAzimuth(az, true); rig.setElevation(el, true);
+    if (rig.mode === CAM.PERSPECTIVE) rig.setDistance(dist, true); else rig.setZoom(dist, true);
+    rig.setTarget(tx, ty, tz, true);
+  }
+}
+// window.__viewpointURL() — the generator half: read the LIVE rig state back (the getters Part A
+// added) into the same compact ?vp= shape, so "share this view" is one call away from either a UI
+// button or the console. Perspective reads back `distance`; ortho reads back `zoom` — the same
+// mode-dependent "span" duality the rig's own styleT accessor already has to handle.
+window.__viewpointURL = () => {
+  const t = rig.target;
+  const span = rig.mode === CAM.PERSPECTIVE ? rig.distance : rig.zoom;
+  const vp = [rig.azimuth, rig.elevation, span, t.x, t.y, t.z].map((n) => +n.toFixed(4)).join(',');
+  const u = new URL(window.location.href);
+  u.searchParams.set('vp', vp);
+  return u.toString();
+};
+// 'L' (link) — copy the current viewpoint URL, same discoverable-by-key shape as every other single-
+// purpose city verb (F fly, V drive, I inspect). Toasts confirmation via the existing officeUI.toast.
+window.addEventListener('keydown', (e) => {
+  if ((e.key === 'l' || e.key === 'L') && !isTextTarget(e) && sceneMode === 'city') {
+    const href = window.__viewpointURL();
+    navigator.clipboard?.writeText(href).then(() => officeUI.toast('🔗 Viewpoint link copied')).catch(() => officeUI.toast('🔗 ' + href));
+  }
+});
 if (sceneSpec.weather) { weatherRig.setKind(sceneSpec.weather); window.__weather = weatherRig.kind; }
 const skinParam = _q.get('officeskin'); if (['3d', 'smooth', 'charm'].includes(skinParam)) setOfficeSkin(skinParam);  // L29
 const propsParam = _q.get('officeprops'); if (['painted', '3d'].includes(propsParam)) setOfficeProps(propsParam);   // L30
@@ -2123,6 +2421,7 @@ if (sceneMode === 'city') {
 }
 if (typeof window !== 'undefined') {
   window.__fly = () => flyPossess();                                    // headless/verify trigger for the FLY action
+  window.__drive = () => drivePossess();                                // ARC A-CAM+WALK: headless/verify trigger for DRIVE
   window.__heli = () => (engine.seizeCraft ? engine.seizeCraft.label : null);   // the seize craft's label (null if none)
   window.__flyLabel = () => flyVerbLabel();                            // 'Fly' (air) | 'Drive' (ground) — for Phase-2's verb bar
   window.__postMode = () => engine.mode;                               // L104 P2: current post tier (1/2 beauty · 7 pixel · 8 toon · 3 auto) — morph probe

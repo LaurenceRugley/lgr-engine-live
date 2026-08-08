@@ -32,12 +32,23 @@
    the Hoard's, just parameterized. No per-frame allocation (scratch vectors reused).
 
    Contract: createFirstPersonWalker(opts) -> {
-     setPosition(x,z), setYaw(rad), setColliders(list), recenterPitch(),
+     setPosition(x,z), setYaw(rad), setColliders(list), setAabbs(list), recenterPitch(),
      addLook(dx,dy),                    // pointer-lock / drag delta → unbounded yaw + clamped pitch (DIRECT)
      update(dt, { x, y, sprint }),      // x=strafe(+right) y=forward(+fwd); moves + resolves collision
+                                        // `boost` (0..1) is accepted as an alias for `sprint` — one word across the engine
      eyePosition(out), eyeDirection(out),
      x, z, yaw, pitch, moving,
    }
+
+   ARC A-CAM+WALK — two ADDITIVE hooks (both null by default; every existing hoard2 call site, which
+   passes neither, is byte-identical to before this arc):
+     opts.groundY(x,z) / setGroundY(fn)        — eye height tracks this instead of the constant eyeY
+                                                  (paired with the separate `eyeHeight` option).
+     opts.resolveSpatial(state,dt,cfg) / setResolveSpatial(fn) — collide.js's OWN resolveSphere shape;
+                                                  when set, runs AFTER the existing circle/aabb loop,
+                                                  so a project can hand the walker a city's spatial-hash
+                                                  collider (400-700 building AABBs) instead of (or
+                                                  alongside) a hand-built circle/aabb list.
    ============================================================ */
 
 export function createFirstPersonWalker(opts = {}) {
@@ -45,6 +56,15 @@ export function createFirstPersonWalker(opts = {}) {
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
   const eyeY = opts.eyeY != null ? opts.eyeY : 1.4;
+  // ARC A-CAM+WALK — the groundY(x,z) HOOK (additive; createFirstPersonWalker.js:118-120's own
+  // documented gap: eyePosition() returned a CONSTANT eyeY, fine for hoard2's near-flat forest arena,
+  // wrong for the city where the street sits at LAYOUT.PLINTH_TOP, not 0). `groundY` is null by
+  // default — every existing hoard2 call site (no groundY passed) computes out.y EXACTLY as before
+  // (`eyeY` unchanged, same fallback, same constant). Only a caller that supplies `groundY` gets
+  // eye-height-ABOVE-ground instead of an absolute eyeY — a different (and separately configurable)
+  // knob, `eyeHeight`, so the two modes never fight over one option's meaning.
+  let groundYFn = opts.groundY || null;
+  const eyeHeight = opts.eyeHeight != null ? opts.eyeHeight : eyeY;
   const moveSpeed = opts.moveSpeed != null ? opts.moveSpeed : 3.0;
   const sprintSpeed = opts.sprintSpeed != null ? opts.sprintSpeed : 5.0;
   const accel = opts.accel != null ? opts.accel : 14;
@@ -56,6 +76,17 @@ export function createFirstPersonWalker(opts = {}) {
 
   let colliders = opts.colliders || [];
   let aabbs = opts.aabbs || [];
+  // ARC A-CAM+WALK — the SPATIAL-HASH collision hook (additive; null by default, so hoard2's own
+  // circle/aabb list above is completely untouched). `resolveSpatial` is collide.js's OWN
+  // `resolveSphere(state, dt, cfg)` shape (createCityWorld.js's `collider.resolveSphere`) — the SAME
+  // broad-phase grid + push-out the piloted craft already uses over the city's 400-700 building
+  // AABBs, reused rather than re-deriving a second collision system (per the brief: "consume
+  // collide.js's spatial hash instead of its own circle list"). The walker has no speed/yaw/vy
+  // concept of its own, so `_spatialState` is a throwaway per-frame adapter: x/z are the walker's
+  // real position (read back after the resolve), everything else is a scratch value resolveSphere
+  // needs but nothing here reads afterward (speed=0 so its friction scrub is inert; vy/yaw likewise).
+  let spatialResolve = opts.resolveSpatial || null;
+  const _spatialState = { x: 0, y: 0, z: 0, speed: 0, yaw: 0, vy: 0 };
 
   let x = opts.x || 0, z = opts.z || 0;
   let yaw = opts.yaw || 0, pitch = opts.pitch || 0;   // yaw UNBOUNDED (radians); pitch clamped
@@ -70,8 +101,9 @@ export function createFirstPersonWalker(opts = {}) {
     pitch = clamp(pitch - dy * sensitivity, -pitchDown, pitchUp);
   }
 
-  // Push the body OUT of any obstacle it ended up inside this frame (arena bound, then circles, then boxes).
-  function resolveCollision() {
+  // Push the body OUT of any obstacle it ended up inside this frame (arena bound, then circles, then
+  // boxes, then the spatial-hash grid if one was wired in).
+  function resolveCollision(dt) {
     if (arenaRadius !== Infinity) {
       const r = Math.hypot(x, z);
       if (r > arenaRadius) { const k = arenaRadius / r; x *= k; z *= k; vx = 0; vz = 0; }
@@ -92,6 +124,12 @@ export function createFirstPersonWalker(opts = {}) {
         if (m === pxl) { x = mnx; } else if (m === pxr) { x = mxx; } else if (m === pzl) { z = mnz; } else { z = mxz; }
       }
     }
+    if (spatialResolve) {
+      _spatialState.x = x; _spatialState.y = groundYFn ? groundYFn(x, z) : 0; _spatialState.z = z;
+      _spatialState.speed = 0; _spatialState.yaw = 0; _spatialState.vy = 0;
+      spatialResolve(_spatialState, dt, { r: radius, yOff: 0 });
+      x = _spatialState.x; z = _spatialState.z;
+    }
   }
 
   // Move one step. `input.x` = strafe (+right), `input.y` = forward (+forward), `input.sprint` = bool.
@@ -106,17 +144,22 @@ export function createFirstPersonWalker(opts = {}) {
     // cross(up, -forward) = (-cos yaw, sin yaw). The old basis (cos, -sin) was the NEGATION → D strafed LEFT.
     // Fixed at the source (not by flipping the input) so every consumer's D = camera-right, at any yaw.
     const fx = Math.sin(yaw), fz = Math.cos(yaw), sx = -Math.cos(yaw), sz = Math.sin(yaw);
-    const sp = input.sprint ? sprintSpeed : moveSpeed;
+    /* A-SPRINT (2026-08-07): `boost` is the name the PILOT seam uses for this exact concept (pilot.js's
+       bk()), and one engine should not have two words for one verb. Accepted as an alias here rather
+       than renamed, because four projects (city, office, hoard, hoard2) already pass `sprint`.
+       Analog-tolerant: a thumbstick pushed past its rim sends a float, so anything over half counts. */
+    const sp = (input.sprint || (input.boost || 0) > 0.5) ? sprintSpeed : moveSpeed;
     const desVx = (fx * ny + sx * nx) * sp, desVz = (fz * ny + sz * nx) * sp;
     const k = 1 - Math.exp(-accel * dt);
     vx += (desVx - vx) * k; vz += (desVz - vz) * k;
     x += vx * dt; z += vz * dt;
-    resolveCollision();
+    resolveCollision(dt);
     if (moving) bobT += dt; else bobT *= (1 - Math.min(1, dt * 4));   // bob settles when you stop
   }
 
   function eyePosition(out = _eye) {
-    out.x = x; out.y = eyeY + Math.sin(bobT * 9) * 0.03 * (moving ? 1 : 0); out.z = z;
+    const baseY = groundYFn ? groundYFn(x, z) + eyeHeight : eyeY;
+    out.x = x; out.y = baseY + Math.sin(bobT * 9) * 0.03 * (moving ? 1 : 0); out.z = z;
     return out;
   }
   function eyeDirection(out = _dir) {
@@ -131,6 +174,8 @@ export function createFirstPersonWalker(opts = {}) {
     setYaw(r) { yaw = r; },
     setColliders(list) { colliders = list || []; },
     setAabbs(list) { aabbs = list || []; },
+    setGroundY(fn) { groundYFn = fn || null; },
+    setResolveSpatial(fn) { spatialResolve = fn || null; },
     recenterPitch() { pitch = 0; },
     get x() { return x; }, get z() { return z; },
     get yaw() { return yaw; }, get pitch() { return pitch; },

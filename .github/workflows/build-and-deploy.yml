@@ -41,15 +41,23 @@ jobs:
           npm run build:office
           npm run build:hoard
           npm run build:hoard2
+          npm run build:metropolis
+          npm run build:showcase-lab
 
       - name: Assemble site (hub at root · demos under stable paths)
         run: |
           rm -rf _site
-          mkdir -p _site/live _site/hoard _site/hoard2 _site/office
+          mkdir -p _site/live _site/hoard _site/hoard2 _site/office _site/metropolis _site/showcase-lab
           cp -R projects/city/dist/*   _site/live/
           cp -R projects/hoard/dist/*  _site/hoard/
           cp -R projects/hoard2/dist/* _site/hoard2/    # the one-shot Hoard v2 → /hoard2/ (base:'./')
           cp -R projects/office/dist/* _site/office/
+          # metropolis + showcase-lab (added 2026-08-07). The hub has linked /metropolis/ for a while
+          # and it returned 404 in production, because this list is hard-coded and nobody added it when
+          # the card shipped. deploy-live.sh deliberately never syncs .github, so this file only changes
+          # here — which is exactly how it drifted from the hub it serves.
+          cp -R projects/metropolis/dist/*   _site/metropolis/
+          cp -R projects/showcase-lab/dist/* _site/showcase-lab/
           cp -R projects/live-hub/*    _site/          # the capability hub → site root
           touch _site/.nojekyll                        # keep _-prefixed Vite asset dirs
 

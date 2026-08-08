@@ -27,8 +27,12 @@ export { createEngine } from './src/createEngine.js';
 export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.js';
 export { createCityWorld } from './src/createCityWorld.js';
 export { createCameraRig, CAM } from './src/camera-rig.js';
-export { createCity, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32 } from './src/citygen.js';
-export { createSunRig, validateSunKeyframes } from './src/sun-rig.js';
+// C2-ish flight path + curvature-derived banking (2026-08-01) — pairs with camera-rig's setEye(pos,lookDir,roll).
+export { createCameraPath, bankAngleFromCurvature } from './src/camera-path.js';
+// Arc A-VIEW — auto-frame a camera-rig from a loaded object's bounding box (the asset viewer's one new ability).
+export { measureBounds, autoFrame } from './src/asset-viewer.js';
+export { createCity, makePalm, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32, tintTower, seabedY, SEABED } from './src/citygen.js';   // A-FISH: seabedY is THE shared depth function — the seabed mesh and the physics sampler both call it, so they cannot disagree
+export { createSunRig, validateSunKeyframes, lowSunWashK } from './src/sun-rig.js';   // lowSunWashK: THE shared low-sun curve (celestials/createCityWorld already treat it as canon) — exported so a project shaping a per-frame drive (metropolis dusk windows) reuses the curve instead of duplicating it
 export { createCityLife, buildGraph } from './src/agents.js';
 // L-streetlamps — warm glow sprites along the city street graph (night-only, byte-identical-safe).
 export { createStreetLights } from './src/street-lights.js';
@@ -47,6 +51,8 @@ export { createViewerUI } from './src/viewer-ui.js';
 
 // First-run coachmark/hints system (L42).
 export { createHints } from './src/hints.js';
+export { createTouchControls } from './src/touch-controls.js';   // 2026-08-06: the floating thumbstick + look-drag — touch input was built 5x in projects and never in core
+export { createPedestrians } from './src/pedestrians.js';   // A-PEDS 2026-08-06: skinned humans strolling block perimeters (bible §6 item 4) — composes createCharacterRig + the promoted survivor.glb
 
 // L114 — createAppShell + readAppFlags: the ONE place per-page BOOT plumbing lives (loop brackets, pause-on-hidden,
 // readiness flag, footer policy, hints/resize/capture wiring) so the three project pages can't drift it.
@@ -57,6 +63,10 @@ export { createAppShell, readAppFlags } from './src/app-shell.js';
 export { THEME, THEMES, applyThemeToRoot } from './src/diagram-theme.js';   // THEMES.paper = the STUDIO light set (slice 12)
 export { createMorphTimeline, easeInOutCubic } from './src/math/morph-timeline.js';
 export { createMatrixGrid } from './src/math/matrix-grid.js';
+// Arc A-TWEEN — the fixed-duration eased tween (2D track gap ⑤): from->to over D seconds along a
+// chosen curve, then done. A DIFFERENT primitive from damp() (continuous ease toward a live target) —
+// see tween.js's own header. Reuses math/easing.js's existing curve set; does not duplicate it.
+export { createTween } from './src/math/tween.js';
 
 // L109 — SceneSpec v1: one versioned scene document (validate/from-URL/to-URL/apply). The contract the embed SDK,
 // poster generator, site-gen + prompt layer target; the seed of the site-builder cockpit (versioned, tolerant of
@@ -65,7 +75,7 @@ export { validateSceneSpec, fromURLParams, toURLParams, applySceneSpec, SCENE_SP
 
 // VIZ SLICE 3 — GraphSpec v1 (scene-spec's sibling for graph data): validate/index + the deterministic
 // radial layout + the memory-vault ingester. Lifted from projects/atlas/ once createEngineCore landed.
-export { validateGraphSpec, indexNodes, KINDS, RELS, GRAPH_SPEC_VERSION, heatFromAgeDays, HEAT_TAU_DAYS, classifyMedia, hasMedia, DEEP_CHARS, ALGORITHM_KINDS, mediaGlyph, mediaGlyphCode, MEDIA_GLYPHS, classifyHealth, worstState, SLOW_MS } from './src/graph-spec.js';
+export { validateGraphSpec, indexNodes, KINDS, RELS, STATES, GRAPH_SPEC_VERSION, heatFromAgeDays, HEAT_TAU_DAYS, classifyMedia, hasMedia, DEEP_CHARS, ALGORITHM_KINDS, mediaGlyph, mediaGlyphCode, MEDIA_GLYPHS, classifyHealth, worstState, SLOW_MS } from './src/graph-spec.js';
 export { createGraphLayout, DEFAULT_RINGS } from './src/graph-layout.js';
 export { parseFrontmatter, extractLinks, extractMarkdownLinks, noteToRecords, buildGraphSpec, extractExcerpt } from './src/ingest-vault.js';
 
@@ -96,7 +106,7 @@ export { pickStreetIntersection, createProximityLatch } from './src/hidden-prop-
 export { createEditor } from './src/editor.js';
 
 // L76 — POSSESSION: the PilotController + ground MovementModel (drive a placed craft, e.g. the all-terrain vehicle).
-export { createPilotController, createGroundModel, createSpacecraftModel, ATV_PROFILE, CRAFT_PROFILE } from './src/pilot.js';
+export { createPilotController, createGroundModel, createSpacecraftModel, createRoadModel, createBoatModel, createBirdModel, createFishModel, carryMomentum, ATV_PROFILE, CRAFT_PROFILE, ROAD_PROFILE, BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE } from './src/pilot.js';   // A-FEEL: createRoadModel = a car that corners on a street grid (curvature-limited steering, R grows with v squared). A-FISH: createFishModel = neutral buoyancy + pivot-in-place turning + a ballistic breach
 
 // L-cockpit: bare canopy-frame ring (A-pillars + roof arc + dash bar). Parented to the craft at profile.eye;
 // placed-life.js wires it; pilot.js toggles visibility on cockpit/chase transitions.
@@ -149,6 +159,29 @@ export { damp, clamp, angleDelta } from './src/math.js';
 // F02 lift — native-scroll → damped [0,1] progress, PUMPED from the host loop (NOT self-driven → cannot repro F07).
 export { createScrollDirector } from './src/scroll-director.js';
 
+// The chaptered CONTENT layer that consumes createScrollDirector's scalar — segment-chain math (also
+// importable standalone for a project's camera code) + the DOM copy/nav/rail layer. See scroll-narrative.js.
+export { buildChapterChain, readChapterChain, createScrollNarrative } from './src/scroll-narrative.js';
+
+// 2D LAYER PHASE 1 — a first-party 2D capability (owner decision 2026-08-01: build on Three.js, not
+// Pixi/Phaser — see create2DLayer.js header). Composition seam (create2DLayer) + InstancedMesh sprite
+// batcher + texture atlas/packer + pointer picking. sprite-slots.js is the pure id<->slot allocator
+// the batcher's swap-remove compaction is built on (node-tested standalone).
+export { create2DLayer } from './src/create2DLayer.js';
+export { createSpriteBatcher } from './src/sprite-batcher.js';
+export { createSlotAllocator } from './src/sprite-slots.js';
+export { createTextureAtlas, createShelfPacker } from './src/texture-atlas.js';
+export { create2DPicking } from './src/2d-picking.js';
+
+// 2D LAYER PHASE 2 — text + UI. Bitmap glyph atlas (defended vs SDF in HANDOFF.md) batched onto the
+// SAME sprite batcher as everything else; 9-slice panels (also just batcher sprites, no new shader);
+// a minimal anchor/align/padding box for HUD placement. Per-sprite alpha landed in sprite-batcher.js
+// itself (Phase 2's Q2 — bundled, not a separate export).
+export { createGlyphAtlas } from './src/glyph-atlas.js';
+export { computeTextLayout, createTextBlock } from './src/text-block.js';
+export { computeNineSliceLayout, createNineSlicePanel } from './src/nine-slice.js';
+export { layoutBox, LAYOUT_ANCHORS } from './src/layout-box.js';
+
 // L78 — ENGINE HARDENING: honest profiling (p95/p99 + GPU-ms + leak gate) + adaptive quality (lock a smooth fps).
 export { createEngineProfiler } from './src/profiler.js';
 export { createQualityGovernor } from './src/quality-governor.js';
@@ -181,7 +214,7 @@ export { createCelestial } from './src/createCelestial.js';
 // governs visibility for stars/planets/Messier through ONE shared shader mechanism (createCelestial's
 // starAltAz feeds all three catalogs the same precession+sidereal+refraction pipeline the sun/moon use).
 // No-op by construction (each factory's group starts invisible); real-location-mode only.
-export { limitingMagnitude, skyGlow, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
+export { limitingMagnitude, skyGlow, skyBrightnessSQM, skyGlowIntensity, LA_BORTLE, BORTLE_MIN, BORTLE_MAX } from './src/bortle.js';
 export { planetPosition, PLANET_KEYS } from './src/planets.js';
 export { createTrueStars } from './src/createTrueStars.js';
 export { createConstellations } from './src/createConstellations.js';
@@ -217,10 +250,11 @@ export { reprojectScatter } from './src/scatter.js';
 export { scatterAdd, scatterErase } from './src/scatter.js';
 
 // L71 — WORLD EDITOR: the object catalog (extensible registry of materials/scatter/entities).
-export { createCatalog, seedWorldEditorCatalog } from './src/catalog.js';
+export { createCatalog, seedWorldEditorCatalog, registerAssetCatalog } from './src/catalog.js';
 
 // L66 — PREETHAM atmospheric sky (realistic-tier; ACES + bloom live in the post chain / createEngine).
 export { createSkyAtmosphere } from './src/sky-atmosphere.js';
+export { createHillaireSky, GROUND_MM, ATMOS_MM } from './src/hillaire-sky.js';   // A-SKYDOME: the physically-based all-hours sky (Rayleigh+Mie+ozone, RGBA8 LUTs — mobile-safe). Lifted from lgr-live-sky 2026-08-05; barrel-exported so it is reachable through the public API, not just as an internal seam (the index's CORE_UNBARRELED class).
 
 // Reusable interior toolkit (L48/L51) — contact shadows / fake-AO, a cinematic vignette, + a seated free-look.
 export { makeContactShadow, makeVignette, createSeatedLook } from './src/interior.js';
@@ -263,7 +297,7 @@ export { createForest, placeForest } from './src/createForest.js';
 // at boot from periodic-noise family shaders, so a world stops being flat-coloured. Recipes live in
 // forge-recipes.js; a project wires the materials. supported=false on iOS-p0 (bake skipped, flat fallback).
 export { createTextureForge, nyquistFeatureFloor, repeatFor, FORGE_MIN_TEXELS } from './src/createTextureForge.js';
-export { HOARD_SURFACES, forgeHoardMaterials, WEAPON_SKINS } from './src/forge-recipes.js';
+export { HOARD_SURFACES, forgeHoardMaterials, WEAPON_SKINS, CITY_SURFACES, forgeCityMaterials, CITY_LOOKS } from './src/forge-recipes.js';
 // Arc A7-1 — world-scale macro de-tiling for a tiled floor (breaks the iso-distance repeat grid a single
 // tile can't, since a tile holds no feature bigger than itself). Opt-in via onBeforeCompile → byte-safe.
 export { applyGroundMacro } from './src/ground-macro.js';
@@ -347,6 +381,33 @@ export { createCorpsePool } from './src/corpse-pool.js';
 export { createBuildIn }         from './src/hero/createBuildIn.js';
 export { createShadowRig }       from './src/hero/createShadowRig.js';
 export { createBeautyPresenter } from './src/hero/createBeautyPresenter.js';
+// The REST of the hero family + a few non-hero lib-only abilities — added 2026-08-02 (adversarial guard
+// audit): these were reachable from index-lib.js/index-core-lib.js (so a no-build/lib consumer already
+// had them) but ABSENT from this workspace barrel, so `import { createAurora } from '@lgr/engine-core'`
+// inside any project failed while the built lib had it — the exact reverse-direction wiring-drift
+// barrel-coverage.test.mjs never checked for. Engine-first: these belong in the one barrel every
+// consumer inherits from, same as the three above.
+export { createSmoothScroll }   from './src/createSmoothScroll.js';
+export { createHeroDirector }   from './src/hero/createHeroDirector.js';
+export { createHeroWipe }       from './src/hero/createHeroWipe.js';
+export { createCameraDirector } from './src/hero/createCameraDirector.js';
+export { createDuskSilk }       from './src/hero/createDuskSilk.js';
+export { createConstellation }  from './src/hero/createConstellation.js';
+export { createAurora }         from './src/hero/createAurora.js';
+export { createProductMoment }  from './src/hero/createProductMoment.js';
+export { createObservatory }    from './src/hero/createObservatory.js';
+export { createPixelMorph }     from './src/hero/createPixelMorph.js';
+export { createMaterialStudy }  from './src/hero/createMaterialStudy.js';
+export { createLattice }        from './src/hero/createLattice.js';
+export { createLiquidMetal }    from './src/hero/createLiquidMetal.js';
+export { createLivingInk }      from './src/hero/createLivingInk.js';
+export { createCaustics }       from './src/hero/createCaustics.js';
+export { createLetterpress }    from './src/hero/createLetterpress.js';
+export { createCathedralLight } from './src/hero/createCathedralLight.js';
+export { createFirstLight }     from './src/hero/createFirstLight.js';
+export { createEdgeField }      from './src/createEdgeField.js';
+export { createBeforeAfter }    from './src/createBeforeAfter.js';
+export { createLookReel }       from './src/createLookReel.js';
 
 // Raw shader strings a few app-level materials compose directly (the dive crossfade; the
 // pixelate tool). Exporting them keeps projects from reaching into the package's src/shaders.

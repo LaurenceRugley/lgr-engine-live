@@ -12,7 +12,8 @@
     "./src/graph-layout.js": "./src/graph-layout.js",
     "./src/ingest-vault.js": "./src/ingest-vault.js",
     "./src/corpse-pool.js": "./src/corpse-pool.js",
-    "./src/reel-grammar.js": "./src/reel-grammar.js"
+    "./src/reel-grammar.js": "./src/reel-grammar.js",
+    "./assets/*": "./assets/*"
   },
   "scripts": {
     "build:lib": "vite build --config vite.lib.config.js && vite build --config vite.lib.core.config.js && vite build --config vite.lib.hero.config.js"

@@ -101,7 +101,13 @@ export function createCloudField({ extent = 8, count = 16, enabled = true } = {}
     const visibleFrac = Math.min(1, 0.4 + 0.6 * rain + 0.5 * fog);
     // SunRig sky tint (bright white-ish by day, warm at golden hour, blue/violet at night). We start
     // from the sky colour and lift it toward white so midday clouds read bright, then rain greys it.
-    _tint.copy(sunRig.sky).lerp(WHITE, 0.62);
+    // NIGHT DIMMING (2026-08-05, metropolis defect-2 — probe-proven): the unconditional 62% white-lerp
+    // turned night clouds into bright pale blobs against a near-black scene (hiding the group removed
+    // every soft white blob, direct AND water-mirrored). Gate on the sun being BELOW the horizon
+    // (0 at y≥0 → noon/dusk byte-identical) so night clouds sit dim blue-grey like the night sky
+    // (the art bar: dark, ≲15% luminance, never white), and fade their opacity too.
+    const night = smooth(-sunRig.sunArc.y, 0, 0.06);
+    _tint.copy(sunRig.sky).lerp(WHITE, 0.62 * (1 - 0.85 * night));
     _tint.lerp(DARK, 0.6 * rain);                     // storm clouds darken
 
     for (let i = 0; i < clouds.length; i++) {
@@ -117,7 +123,7 @@ export function createCloudField({ extent = 8, count = 16, enabled = true } = {}
       // per-weather opacity: fog = ultra-transparent mist; rain = heavier; clear = medium. The
       // cloud's personal ceiling (op) + wisp factor give the VARIED transparency Laurence asked for.
       const wispFade = 1 - 0.5 * c.wisp;               // wispy clouds are fainter (but not invisible)
-      const weatherOp = 0.72 * Math.max(0, 1 - fog - rain) + 1.0 * rain + 0.42 * fog;
+      const weatherOp = (0.72 * Math.max(0, 1 - fog - rain) + 1.0 * rain + 0.42 * fog) * (1 - 0.55 * night);   // defect-2: night clouds fade with the same below-horizon gate as the tint
       const targetOp = active ? Math.max(0, weatherOp) * c.op * wispFade * edge : 0;
       c.mat.opacity += (targetOp - c.mat.opacity) * Math.min(1, dt * 2.5);   // ease so changes glide
       c.mat.color.copy(_tint);
