@@ -27,7 +27,22 @@ export function createProductStage({
   envIntensity = 1.0,             // IBL strength
   exposure = 1.05,                // ACES tone-mapping exposure for the product frame only (save/restored)
   autoRotate = 0.25,              // rad/s idle turntable (0 = off)
-  minDist = 1.6, maxDist = 6.0,   // zoom clamps (× model radius applied at frame time)
+  /* Breathing room around the fitted silhouette. 1.25 made the product a technically correct HERO
+     that ate its own caption: measured 18% of frame, with the heading and sub-copy sitting on top of
+     a busy blue mesh and unreadable. The fit maths was the bug; this is the composition. */
+  fitMargin = 1.78,
+  /* Vertical framing bias as a fraction of model height: NEGATIVE aims the camera below the model, so
+     the model rides HIGH in frame and leaves the lower third for copy. A product stage whose consumer
+     puts a caption under it needs this; centring the model dead-centre is only right for a bare
+     viewer. */
+  frameBias = -0.52,
+  /* Zoom clamps, as MULTIPLES OF THE FIT DISTANCE (2026-08-07). They used to be absolute world units
+     while this comment claimed they were relative, and the mismatch had teeth: for the showcase shoe
+     the fit landed on 1.60 and the absolute floor was ALSO 1.60, so the camera opened pinned exactly
+     at its zoom-in limit. Zooming in did nothing at all (measured: camera y unchanged after twelve
+     zoomBy(0.7) calls) and only zoom-out had travel, which read as "the zoom is broken". Relative
+     clamps cannot collapse like that whatever the model's size. */
+  minDist = 0.55, maxDist = 2.4,
   minPolar = 0.22, maxPolar = 1.45,  // pitch clamps (radians from +Y) — never under the floor, never over the pole
 } = {}) {
   if (!renderer) throw new Error('createProductStage: pass the shared { renderer }');
@@ -101,6 +116,16 @@ export function createProductStage({
         the camera can't dip under the floor, flip the pole, or zoom into the mesh). --- */
   const orbit = { az: 0.7, azG: 0.7, pol: 1.05, polG: 1.05, dist: 3, distG: 3, target: new THREE.Vector3() };
   let _minD = minDist, _maxD = maxDist;
+  const _size = new THREE.Vector3(); let _fit = 3;
+  /* The camera distance at which `_size` just fills the frame, given the CURRENT aspect. Depends on
+     aspect, so it has to be recomputable — see resize(). */
+  function fitDistance() {
+    const vFov = (camera.fov * Math.PI) / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.0001, camera.aspect));
+    const dV = (_size.y * 0.5) / Math.tan(vFov / 2);
+    const dH = (Math.max(_size.x, _size.z) * 0.5) / Math.tan(hFov / 2);
+    return Math.max(dV, dH, 0.0001) * fitMargin;
+  }
   const orbitBy = (dAz, dPol) => { orbit.azG += dAz; orbit.polG = clamp(orbit.polG - dPol, minPolar, maxPolar); };
   const zoomBy = (f) => { orbit.distG = clamp(orbit.distG * f, _minD, _maxD); };
 
@@ -111,10 +136,19 @@ export function createProductStage({
     model.position.sub(center);                          // recenter the model on the origin
     ground.position.y = box.min.y - center.y;            // drop the shadow catcher to the model's underside
     key.target.position.set(0, 0, 0);
-    const r = 0.5 * Math.hypot(size.x, size.y, size.z);  // bounding radius
-    _minD = Math.max(minDist, r * 1.15); _maxD = Math.max(_minD + 0.5, r * 3.2);
-    orbit.dist = orbit.distG = clamp(r * 2.0, _minD, _maxD);
-    orbit.target.set(0, 0, 0);
+    /* FIT TO THE PROJECTED SILHOUETTE, not the bounding DIAGONAL (2026-08-07). The old fit used
+       0.5*hypot(x,y,z) as a radius, which for a long low object like a shoe massively overestimates
+       how much of the frame it actually covers: the diagonal is dominated by length while the camera
+       is constrained by height. Result, measured on this page — the product filled roughly 7% of a
+       1440px frame on the one section pitching commercial work.
+       The honest fit solves the projection instead: how far back must the camera sit for the object's
+       height to fill the vertical FOV, and for its width to fill the horizontal FOV, then take the
+       binding one. `fitMargin` is the breathing room around it. */
+    _size.copy(size);
+    _fit = fitDistance();
+    _minD = _fit * minDist; _maxD = Math.max(_minD + 0.01, _fit * maxDist);
+    orbit.dist = orbit.distG = _fit;
+    orbit.target.set(0, _size.y * frameBias, 0);
   }
 
   function update(dt) {
@@ -129,7 +163,21 @@ export function createProductStage({
     camera.lookAt(orbit.target);
   }
 
-  function resize(w, h) { camera.aspect = (h > 0 ? w / h : 1); camera.updateProjectionMatrix(); }
+  /* RE-FIT ON RESIZE. This only updated `aspect` before, so a wider viewport made the framing WORSE
+     rather than reframing — the fit had been computed once, at whatever aspect happened to be current
+     at load. The visitor's own zoom is preserved as a RATIO of the fit, so a window resize reframes
+     without yanking someone who deliberately zoomed in. */
+  function resize(w, h) {
+    camera.aspect = (h > 0 ? w / h : 1);
+    camera.updateProjectionMatrix();
+    if (!model) return;
+    const prev = _fit;
+    _fit = fitDistance();
+    const k = prev > 0 ? _fit / prev : 1;
+    _minD = _fit * minDist; _maxD = Math.max(_minD + 0.01, _fit * maxDist);
+    orbit.distG = clamp(orbit.distG * k, _minD, _maxD);
+    orbit.dist = clamp(orbit.dist * k, _minD, _maxD);
+  }
 
   /* --- THE BYTE-IDENTICAL SEAM. Borrow the shared renderer for one draw, save every global we change, restore it all.
         This is why the city hero A/B is pixel-unchanged after a product frame renders. --- */

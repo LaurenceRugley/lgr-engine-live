@@ -135,7 +135,12 @@ function boot() {
   /* --- CONFIGURATOR (P2) — createProductStage sharing this renderer (state save/restored → no hero bleed). --- */
   const VARIANTS = ['midnight', 'beach', 'street'];
   let productReady = false, productLoadStarted = false, currentVariant = VARIANTS[0];
-  const product = createProductStage({ renderer, backdrop: '#efe9df', envIntensity: 1.1, exposure: 1.05, autoRotate: 0.3 });
+  /* autoRotate honours prefers-reduced-motion (2026-08-07). _reduceMotion was already threaded into
+   sunRig, the scroll director, the narrative and the post-morph band, but this turntable was passed
+   0.3 unconditionally — and the CSS reduced-motion block cannot touch it, because it is a WebGL
+   orbit advanced in the render loop, not a transition. It was the one animation on the page that
+   never stopped for a visitor who asked everything to stop. */
+const product = createProductStage({ renderer, backdrop: '#efe9df', envIntensity: 1.1, exposure: 1.05, autoRotate: _reduceMotion ? 0 : 0.3 });
   function loadProduct() {
     if (productLoadStarted) return;   // the observer + the eager fallback below can't both fire twice
     productLoadStarted = true;
@@ -398,6 +403,7 @@ function boot() {
      scrollTop and damps it. Pumped from the shell loop below FIRST, before any branch (the F07 fix). --- */
   const scroll = createScrollDirector({ reducedMotion: _reduceMotion });   // module owns RM; smooth defaults 6 (house ease)
   window.__scrollDirector = scroll;   // harness handle — .scrollTo(p) / .progress (eased) / .targetProgress (raw)
+  window.__product = product;         // harness handle — verifying zoom needs the camera (house convention, cf. __engine/__walker)
   let scrollT = 0;
   const rail = document.getElementById('rail');
   // The five side effects, lifted from an event callback into a per-frame reader. SPLIT: CONTINUOUS consumers read the
@@ -432,6 +438,38 @@ function boot() {
   cfgEl?.addEventListener('pointerdown', (e) => { if (!configActiveNow() || e.target.closest('button')) return; cfgDrag = true; cfgX = e.clientX; cfgY = e.clientY; });
   window.addEventListener('pointermove', (e) => { if (!cfgDrag) return; product.orbitBy((e.clientX - cfgX) * 0.008, (e.clientY - cfgY) * 0.008); cfgX = e.clientX; cfgY = e.clientY; });
   window.addEventListener('pointerup', () => { cfgDrag = false; });
+
+  /* ZOOM, because the copy already promised it (2026-08-07). product-stage has exported zoomBy since
+     it was written and this page had ZERO call sites, so "scroll-pinch to zoom" was a promise the
+     page did not keep. Wiring it is a better answer than deleting the sentence: on the one section
+     pitching commercial work, a product you can actually inspect is the point.
+     Wheel is passive:false because it must preventDefault — otherwise the page scrolls away from the
+     configurator while you are trying to zoom into it. Both paths are gated on configActiveNow() so
+     nothing is hijacked while the visitor is still flying the city. */
+  cfgEl?.addEventListener('wheel', (e) => {
+    if (!configActiveNow()) return;
+    e.preventDefault();
+    product.zoomBy(Math.exp(e.deltaY * 0.0012));
+  }, { passive: false });
+
+  /* PINCH: track live pointers and drive zoom from the change in their separation. Two fingers also
+     suppress the one-finger orbit, or the gesture fights itself. */
+  const cfgPts = new Map();
+  let pinchD = 0;
+  cfgEl?.addEventListener('pointerdown', (e) => { if (configActiveNow()) cfgPts.set(e.pointerId, e); });
+  window.addEventListener('pointermove', (e) => {
+    if (!cfgPts.has(e.pointerId)) return;
+    cfgPts.set(e.pointerId, e);
+    if (cfgPts.size !== 2) return;
+    cfgDrag = false;
+    const [a, b] = [...cfgPts.values()];
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (pinchD > 0 && d > 0) product.zoomBy(pinchD / d);
+    pinchD = d;
+  });
+  const cfgDrop = (e) => { cfgPts.delete(e.pointerId); if (cfgPts.size < 2) pinchD = 0; };
+  window.addEventListener('pointerup', cfgDrop);
+  window.addEventListener('pointercancel', cfgDrop);
   const swatchWrap = document.getElementById('swatches'), pbVariant = document.getElementById('pbVariant');
   function selectVariant(name) { if (!VARIANTS.includes(name)) return; product.setVariant(name); currentVariant = name; if (pbVariant) pbVariant.textContent = name; swatchWrap?.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.variant === name))); }
   VARIANTS.forEach((name) => { const b = document.createElement('button'); b.className = `swatch sw-${name}`; b.type = 'button'; b.dataset.variant = name; b.setAttribute('aria-label', name); b.setAttribute('aria-pressed', String(name === currentVariant)); b.addEventListener('click', () => selectVariant(name)); swatchWrap?.appendChild(b); });

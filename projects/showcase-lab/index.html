@@ -68,13 +68,13 @@
     /* Fixed scroll-progress rail (premium cue) + a "scroll to fly" hint that fades on first scroll. */
     .rail { position:fixed; top:0; left:0; height:2px; width:100%; z-index:3; background:transparent; }
     .rail > i { display:block; height:100%; width:0%; background:linear-gradient(90deg, var(--accent, var(--gold)), #fff); transition:width .1s linear, background .5s ease; }
-    .hint { position:fixed; left:50%; bottom:2rem; transform:translateX(-50%); z-index:3; font-size:.85rem; letter-spacing:.14em;
+    .hint { position:fixed; left:50%; bottom:max(2rem, calc(env(safe-area-inset-bottom) + 1rem)); transform:translateX(-50%); z-index:3; font-size:.85rem; letter-spacing:.14em;
             text-transform:uppercase; color:var(--dim); transition:opacity .4s; pointer-events:none; }
     .hint::after { content:""; display:block; width:1px; height:26px; margin:.6rem auto 0; background:linear-gradient(var(--gold), transparent); }
     body.scrolled .hint { opacity:0; }
 
     /* Minimal pilot HUD — shown only after TAKE THE CONTROLS. */
-    .hud { position:fixed; left:50%; top:1.5rem; transform:translateX(-50%); z-index:4; display:none; gap:.5rem; align-items:center;
+    .hud { position:fixed; left:50%; top:max(1.5rem, calc(env(safe-area-inset-top) + 0.5rem)); transform:translateX(-50%); z-index:4; display:none; gap:.5rem; align-items:center;
            padding:.55rem 1rem; border-radius:999px; background:rgba(18,12,20,0.6); border:1px solid rgba(244,236,224,0.14);
            font-size:.8rem; letter-spacing:.12em; text-transform:uppercase; color:var(--dim); backdrop-filter:blur(8px); }
     body.piloting .hud { display:flex; }
@@ -99,7 +99,7 @@
     @keyframes spin { to { transform:rotate(360deg); } }
 
     /* sound toggle (opt-in, muted default) */
-    .sound { position:fixed; right:1.2rem; top:1.2rem; z-index:6; width:2.6rem; height:2.6rem; border-radius:50%; display:grid; place-items:center;
+    .sound { position:fixed; right:max(1.2rem, calc(env(safe-area-inset-right) + 0.5rem)); top:max(1.2rem, calc(env(safe-area-inset-top) + 0.5rem)); z-index:6; width:2.6rem; height:2.6rem; border-radius:50%; display:grid; place-items:center;
              border:1px solid rgba(244,236,224,0.18); background:rgba(18,12,20,0.4); color:var(--dim); cursor:pointer; backdrop-filter:blur(8px); font-size:1rem; transition:color .2s, border-color .2s; }
     .sound:hover { color:var(--ink); border-color:rgba(232,180,106,0.5); }
     .sound[aria-pressed="true"] { color:var(--gold); border-color:var(--gold); }
@@ -149,6 +149,7 @@
        configurator heading. Everything else — body copy, tags, buttons, the price bar, code — stays
        on the system stack, so the page pays for exactly one file. */
     .lgr-narrative-title, .config-ui h2, .loader-copy .mark { font-family: var(--display); }
+    #config { touch-action:none; }
     .config-sub code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em; background:rgba(26,23,18,0.08); padding:.1em .4em; border-radius:.3em; }
     .swatches { display:flex; gap:.9rem; justify-content:center; margin-top:1.8rem; }
     .swatch { width:2.6rem; height:2.6rem; border-radius:50%; border:2px solid rgba(26,23,18,0.15); cursor:pointer; transition:transform .18s, border-color .18s;
@@ -185,9 +186,16 @@
        viewport higher and this padding never had to do its job — measured after the flex fix, the
        swatch row still overlapped the bar by 15px. Sized from the bar's own height rather than
        guessed, with margin for the safe-area inset on a notched phone. */
-    body.config-open .config-ui { padding-bottom: clamp(7rem, 14vh, 10rem); }
+    /* STICKY, not bottom-aligned (2026-08-07). `.config-ui` sat at flex-end of a 130svh section, so its
+       distance from the VIEWPORT bottom changed as you scrolled through: the price bar is fixed at the
+       viewport bottom, so the clearance below only lined up at the very end of the section. Measured
+       across the scroll — the swatch row was clipped by 142px at 40% through and 61px at 70%, and only
+       cleared at 100%. Padding cannot fix that, because the thing it is clearing does not move with it.
+       Sticky pins the UI to the viewport for the whole section, so one clearance value holds
+       everywhere. */
+    .config-ui { position: sticky; bottom: clamp(7rem, 14vh, 10rem); }
 
-    .pricebar { position:fixed; left:0; right:0; bottom:0; z-index:5; display:flex; align-items:center; justify-content:space-between;
+    .pricebar { position:fixed; left:0; right:0; bottom:0; padding-bottom:env(safe-area-inset-bottom); z-index:5; display:flex; align-items:center; justify-content:space-between;
                 gap:1rem; padding:1rem clamp(1rem,5vw,3rem); background:rgba(250,247,242,0.86); border-top:1px solid rgba(26,23,18,0.1);
                 backdrop-filter:blur(12px); color:#1a1712; transform:translateY(110%); transition:transform .35s ease; }
     body.config-open .pricebar { transform:translateY(0); }

@@ -5163,47 +5163,47 @@ function da(e) {
 }
 //#endregion
 //#region src/product-stage.js
-function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposure: i = 1.05, autoRotate: a = .25, minDist: o = 1.6, maxDist: s = 6, minPolar: c = .22, maxPolar: l = 1.45 } = {}) {
+function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposure: i = 1.05, autoRotate: a = .25, fitMargin: o = 1.78, frameBias: s = -.52, minDist: c = .55, maxDist: l = 2.4, minPolar: u = .22, maxPolar: d = 1.45 } = {}) {
 	if (!t) throw Error("createProductStage: pass the shared { renderer }");
-	let u = new e.Scene();
-	u.background = new e.Color(n);
-	let d = new e.PerspectiveCamera(35, 1, .05, 100), f = new e.PMREMGenerator(t), p = f.fromScene(new ua(), .04);
-	u.environment = p.texture, u.environmentIntensity = r, f.dispose();
-	let m = new e.DirectionalLight(16777215, 2.4);
-	m.position.set(2.5, 4.5, 2), m.castShadow = !0, m.shadow.mapSize.set(1024, 1024), m.shadow.camera.near = .5, m.shadow.camera.far = 24, Object.assign(m.shadow.camera, {
+	let f = new e.Scene();
+	f.background = new e.Color(n);
+	let p = new e.PerspectiveCamera(35, 1, .05, 100), m = new e.PMREMGenerator(t), h = m.fromScene(new ua(), .04);
+	f.environment = h.texture, f.environmentIntensity = r, m.dispose();
+	let g = new e.DirectionalLight(16777215, 2.4);
+	g.position.set(2.5, 4.5, 2), g.castShadow = !0, g.shadow.mapSize.set(1024, 1024), g.shadow.camera.near = .5, g.shadow.camera.far = 24, Object.assign(g.shadow.camera, {
 		left: -3,
 		right: 3,
 		top: 3,
 		bottom: -3
-	}), m.shadow.bias = -4e-4, m.shadow.normalBias = .02, u.add(m, m.target);
-	let h = new e.Mesh(new e.PlaneGeometry(60, 60), new e.ShadowMaterial({ opacity: .26 }));
-	h.rotation.x = -Math.PI / 2, h.receiveShadow = !0, u.add(h);
-	let g = new di(), _ = null, v = null, y = [], b = null;
-	async function x(e) {
-		let t = await g.loadAsync(e);
-		_ && (u.remove(_), P(_)), _ = t.scene, v = t.parser, b = e, _.traverse((e) => {
-			e.isMesh && (e.castShadow = !0, e.receiveShadow = !0);
-		}), u.add(_);
-		let n = t.userData?.gltfExtensions?.KHR_materials_variants;
-		return y = n ? n.variants : [], k(), { variants: S() };
-	}
-	let S = () => y.map((e) => e.name);
+	}), g.shadow.bias = -4e-4, g.shadow.normalBias = .02, f.add(g, g.target);
+	let _ = new e.Mesh(new e.PlaneGeometry(60, 60), new e.ShadowMaterial({ opacity: .26 }));
+	_.rotation.x = -Math.PI / 2, _.receiveShadow = !0, f.add(_);
+	let v = new di(), y = null, b = null, x = [], S = null;
 	async function C(e) {
-		if (!_ || !v) return !1;
-		let t = y.findIndex((t) => t.name === e);
+		let t = await v.loadAsync(e);
+		y && (f.remove(y), z(y)), y = t.scene, b = t.parser, S = e, y.traverse((e) => {
+			e.isMesh && (e.castShadow = !0, e.receiveShadow = !0);
+		}), f.add(y);
+		let n = t.userData?.gltfExtensions?.KHR_materials_variants;
+		return x = n ? n.variants : [], P(), { variants: w() };
+	}
+	let w = () => x.map((e) => e.name);
+	async function T(e) {
+		if (!y || !b) return !1;
+		let t = x.findIndex((t) => t.name === e);
 		if (t < 0) return !1;
 		let n = [];
-		return _.traverse((e) => {
+		return y.traverse((e) => {
 			let r = e.isMesh && e.userData?.gltfExtensions?.KHR_materials_variants;
 			if (!r) return;
 			e.userData.__baseMaterial || (e.userData.__baseMaterial = e.material);
 			let i = r.mappings.find((e) => e.variants.includes(t));
 			n.push((async () => {
-				e.material = i ? await v.getDependency("material", i.material) : e.userData.__baseMaterial, v.assignFinalMaterial(e);
+				e.material = i ? await b.getDependency("material", i.material) : e.userData.__baseMaterial, b.assignFinalMaterial(e);
 			})());
 		}), await Promise.all(n), !0;
 	}
-	let w = {
+	let E = {
 		az: .7,
 		azG: .7,
 		pol: 1.05,
@@ -5211,31 +5211,38 @@ function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposur
 		dist: 3,
 		distG: 3,
 		target: new e.Vector3()
-	}, T = o, E = s, D = (e, t) => {
-		w.azG += e, w.polG = Le(w.polG - t, c, l);
-	}, O = (e) => {
-		w.distG = Le(w.distG * e, T, E);
+	}, D = c, O = l, k = new e.Vector3(), A = 3;
+	function j() {
+		let e = p.fov * Math.PI / 180, t = 2 * Math.atan(Math.tan(e / 2) * Math.max(1e-4, p.aspect)), n = k.y * .5 / Math.tan(e / 2), r = Math.max(k.x, k.z) * .5 / Math.tan(t / 2);
+		return Math.max(n, r, 1e-4) * o;
+	}
+	let M = (e, t) => {
+		E.azG += e, E.polG = Le(E.polG - t, u, d);
+	}, N = (e) => {
+		E.distG = Le(E.distG * e, D, O);
 	};
-	function k() {
-		if (!_) return;
-		let t = new e.Box3().setFromObject(_), n = t.getSize(new e.Vector3()), r = t.getCenter(new e.Vector3());
-		_.position.sub(r), h.position.y = t.min.y - r.y, m.target.position.set(0, 0, 0);
-		let i = .5 * Math.hypot(n.x, n.y, n.z);
-		T = Math.max(o, i * 1.15), E = Math.max(T + .5, i * 3.2), w.dist = w.distG = Le(i * 2, T, E), w.target.set(0, 0, 0);
+	function P() {
+		if (!y) return;
+		let t = new e.Box3().setFromObject(y), n = t.getSize(new e.Vector3()), r = t.getCenter(new e.Vector3());
+		y.position.sub(r), _.position.y = t.min.y - r.y, g.target.position.set(0, 0, 0), k.copy(n), A = j(), D = A * c, O = Math.max(D + .01, A * l), E.dist = E.distG = A, E.target.set(0, k.y * s, 0);
 	}
-	function A(e) {
-		a && (w.azG += a * e), w.az = X(w.az, w.azG, e, 6), w.pol = X(w.pol, w.polG, e, 6), w.dist = X(w.dist, w.distG, e, 6);
-		let t = Math.sin(w.pol), n = Math.cos(w.pol);
-		d.position.set(w.target.x + w.dist * t * Math.sin(w.az), w.target.y + w.dist * n, w.target.z + w.dist * t * Math.cos(w.az)), d.lookAt(w.target);
+	function F(e) {
+		a && (E.azG += a * e), E.az = X(E.az, E.azG, e, 6), E.pol = X(E.pol, E.polG, e, 6), E.dist = X(E.dist, E.distG, e, 6);
+		let t = Math.sin(E.pol), n = Math.cos(E.pol);
+		p.position.set(E.target.x + E.dist * t * Math.sin(E.az), E.target.y + E.dist * n, E.target.z + E.dist * t * Math.cos(E.az)), p.lookAt(E.target);
 	}
-	function j(e, t) {
-		d.aspect = t > 0 ? e / t : 1, d.updateProjectionMatrix();
+	function I(e, t) {
+		if (p.aspect = t > 0 ? e / t : 1, p.updateProjectionMatrix(), !y) return;
+		let n = A;
+		A = j();
+		let r = n > 0 ? A / n : 1;
+		D = A * c, O = Math.max(D + .01, A * l), E.distG = Le(E.distG * r, D, O), E.dist = Le(E.dist * r, D, O);
 	}
-	let M = {};
-	function N() {
-		M.tone = t.toneMapping, M.exp = t.toneMappingExposure, M.cs = t.outputColorSpace, M.ac = t.autoClear, M.smE = t.shadowMap.enabled, M.smT = t.shadowMap.type, M.rt = t.getRenderTarget(), t.getClearColor(M.cc = new e.Color()), M.ca = t.getClearAlpha(), t.toneMapping = e.ACESFilmicToneMapping, t.toneMappingExposure = i, t.outputColorSpace = e.SRGBColorSpace, t.autoClear = !0, t.shadowMap.enabled = !0, t.shadowMap.type = e.PCFSoftShadowMap, t.setRenderTarget(null), t.render(u, d), t.toneMapping = M.tone, t.toneMappingExposure = M.exp, t.outputColorSpace = M.cs, t.autoClear = M.ac, t.shadowMap.enabled = M.smE, t.shadowMap.type = M.smT, t.setClearColor(M.cc, M.ca), t.setRenderTarget(M.rt);
+	let L = {};
+	function R() {
+		L.tone = t.toneMapping, L.exp = t.toneMappingExposure, L.cs = t.outputColorSpace, L.ac = t.autoClear, L.smE = t.shadowMap.enabled, L.smT = t.shadowMap.type, L.rt = t.getRenderTarget(), t.getClearColor(L.cc = new e.Color()), L.ca = t.getClearAlpha(), t.toneMapping = e.ACESFilmicToneMapping, t.toneMappingExposure = i, t.outputColorSpace = e.SRGBColorSpace, t.autoClear = !0, t.shadowMap.enabled = !0, t.shadowMap.type = e.PCFSoftShadowMap, t.setRenderTarget(null), t.render(f, p), t.toneMapping = L.tone, t.toneMappingExposure = L.exp, t.outputColorSpace = L.cs, t.autoClear = L.ac, t.shadowMap.enabled = L.smE, t.shadowMap.type = L.smT, t.setClearColor(L.cc, L.ca), t.setRenderTarget(L.rt);
 	}
-	function P(e) {
+	function z(e) {
 		e.traverse((e) => {
 			e.geometry && e.geometry.dispose();
 			let t = e.material;
@@ -5248,24 +5255,24 @@ function fa({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposur
 			});
 		});
 	}
-	function F() {
-		_ && P(_), h.geometry.dispose(), h.material.dispose(), p.dispose();
+	function B() {
+		y && z(y), _.geometry.dispose(), _.material.dispose(), h.dispose();
 	}
 	return {
-		scene: u,
-		camera: d,
-		load: x,
-		listVariants: S,
-		setVariant: C,
-		frameToBounds: k,
-		orbitBy: D,
-		zoomBy: O,
-		update: A,
-		render: N,
-		resize: j,
-		dispose: F,
+		scene: f,
+		camera: p,
+		load: C,
+		listVariants: w,
+		setVariant: T,
+		frameToBounds: P,
+		orbitBy: M,
+		zoomBy: N,
+		update: F,
+		render: R,
+		resize: I,
+		dispose: B,
 		get url() {
-			return b;
+			return S;
 		}
 	};
 }

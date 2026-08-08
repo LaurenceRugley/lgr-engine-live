@@ -297,6 +297,16 @@ export function createScrollNarrative({
       const el = panelEls[i];
       el.style.opacity = op;
       el.style.pointerEvents = op > 0.5 ? 'auto' : 'none';
+      /* A11Y (2026-08-07): opacity + pointer-events hide a panel from the MOUSE and from sight, and
+         from neither the tab order nor a screen reader. Every chapter's controls stayed focusable at
+         all times, so on this page a keyboard user tabbing from the top hit the final chapter's
+         "Take the controls" button while looking at chapter one, and a screen reader read all six
+         chapters as one run-on block. `inert` removes focusability, clicks and AT exposure in a
+         single property; aria-hidden is belt-and-braces for older AT. Written alongside the opacity
+         so the three can never disagree. */
+      const hidden = op <= 0.01;
+      if (el.inert !== hidden) el.inert = hidden;
+      el.setAttribute('aria-hidden', String(hidden));
       const drift = reducedMotion ? '' : ` translateY(${((0.5 - pr) * 4).toFixed(2)}vh)`;
       el.style.transform = (sections[i].center ? 'translate(-50%,-50%)' : 'translateY(-50%)') + drift;
     }
