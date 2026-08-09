@@ -185,6 +185,38 @@ export function createColliderWorld({ cell = 2.45 } = {}) {
   }
   function boxAt(i) { const b = i * 6; return [solids[b], solids[b + 1], solids[b + 2], solids[b + 3], solids[b + 4], solids[b + 5]]; }
 
+  /* surfaceAt(x, z, yMax, r) — the highest solid TOP at or below yMax near (x,z), or -Infinity if
+     there is none. The missing half of this collider (A-ROOF, 2026-08-08): every query here answered
+     "am I INSIDE something" (depthAt/resolveSphere) or "is something IN THE WAY" (segmentHit). None
+     could answer "what am I STANDING ON", which is the one a walker and a lander both need — so the
+     city's rooftops were geometry you could collide with but never rest on.
+
+     yMax is what makes it a floor query and not just a max: standing on a low roof must NOT snap you
+     to the tower next door, so a box whose top is above your feet is something to walk into, not onto.
+     Callers pass a small tolerance above the feet so stepping UP a kerb still reads as ground.
+
+     C++ anchor: a downward ray against an AABB set, but early-outed to the top face only — we never
+     need the hit point, just the height. */
+  function surfaceAt(x, z, yMax, r = 0.18) {
+    if (!enabled || !count) return -Infinity;
+    const cx0 = Math.floor((x - r) / cell), cx1 = Math.floor((x + r) / cell);
+    const cz0 = Math.floor((z - r) / cell), cz1 = Math.floor((z + r) / cell);
+    let top = -Infinity;
+    ensureStamp(); const gen = ++stampGen;
+    for (let cx = cx0; cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) {
+      const arr = grid.get(keyOf(cx, cz)); if (!arr) continue;
+      for (let a = 0; a < arr.length; a++) {
+        const i = arr[a]; if (stamp[i] === gen) continue; stamp[i] = gen;
+        const b = i * 6;
+        if (x + r < solids[b] || x - r > solids[b + 3]) continue;      // outside in X
+        if (z + r < solids[b + 2] || z - r > solids[b + 5]) continue;  // outside in Z
+        const t = solids[b + 4];                                       // the box's top face
+        if (t <= yMax && t > top) top = t;
+      }
+    }
+    return top;
+  }
+
   /* segmentHit(o→e, radius): sweep a thin sphere along the segment target→desiredEye and return the nearest
      BLOCKING fraction t∈[0,1] (1 = clear). The camera SPRING-ARM's one query: "how far back can the eye sit
      before a building is in the way?" Same shared spatial seam as the sphere queries (engine-first — a future
@@ -228,7 +260,7 @@ export function createColliderWorld({ cell = 2.45 } = {}) {
   }
 
   return {
-    rebuild, resolveSphere, depthAt, probe, boxAt, segmentHit,
+    rebuild, resolveSphere, depthAt, probe, boxAt, segmentHit, surfaceAt,
     get count() { return count; },
     active() { return enabled && count > 0; },     // pilot gate: only run the resolve/substep when there ARE solids
     get enabled() { return enabled; },

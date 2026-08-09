@@ -29,13 +29,19 @@ export function createProductStage({
   autoRotate = 0.25,              // rad/s idle turntable (0 = off)
   /* Breathing room around the fitted silhouette. 1.25 made the product a technically correct HERO
      that ate its own caption: measured 18% of frame, with the heading and sub-copy sitting on top of
-     a busy blue mesh and unreadable. The fit maths was the bug; this is the composition. */
-  fitMargin = 1.78,
+     a busy blue mesh and unreadable. The fit maths was the bug; this is the composition.
+     1.78 → 2.46 (2026-08-08): the fit is computed ONCE at load from the model's rest bounds, but the
+     turntable keeps spinning it, and a long object's WORLD-space box grows as it turns. Measured on
+     desktop the silhouette reached 797px in a 900px viewport and clipped 128px off the top — the heel
+     and collar simply gone. Fitting the rest pose is not the same as fitting every pose it will hold;
+     the margin has to cover the WORST rotation, not the one it happened to load in. */
+  fitMargin = 2.46,
   /* Vertical framing bias as a fraction of model height: NEGATIVE aims the camera below the model, so
      the model rides HIGH in frame and leaves the lower third for copy. A product stage whose consumer
      puts a caption under it needs this; centring the model dead-centre is only right for a bare
-     viewer. */
-  frameBias = -0.66,
+     viewer. Eased -0.66 → -0.42 alongside the fitMargin change: once the silhouette fits, it no longer
+     needs shoving that far up the frame, and -0.66 was itself pushing the crown off the top edge. */
+  frameBias = -0.42,
   /* Floor on the aspect used by the WIDTH half of the fit. A long low object (a shoe) fitted across a
      390px portrait viewport pushes the camera absurdly far back — measured, the product fell to 2.9%
      of a phone frame against ~10% on desktop, small enough that at some scroll positions it left the
@@ -210,6 +216,46 @@ export function createProductStage({
     // next frame restores its map. Verified by the hero A/B: the city frame after a product frame is pixel-unchanged.
   }
 
+  /* --- PRESENCE (2026-08-08) — how present the product is, 1 = fully there, 0 = gone.
+     WHY this is an ability and not a page trick: the stage renders into a VIEWPORT-FIXED canvas while
+     the page's copy scrolls over it. That is fine while the section owns the screen, and wrong the
+     moment it stops — at the very bottom of the showcase the outgoing configurator headline scrolled
+     up INTO the shoe, so "Build your pair." was struck through by a lace and the body copy sat on a
+     blue mesh upper. The shoe never moved; the words did. No amount of framing bias fixes that, because
+     the collision happens where the section is LEAVING, not where it is composed.
+     Any page that pins this stage behind scrolling copy has the same exit problem, so the fade belongs
+     here, parameterised, rather than in one project's scroll handler.
+     Default 1 touches NOTHING — `transparent` is only forced while a fade is actually in progress, so
+     material state and render order are byte-identical to before at full presence.
+     In C++ terms: a scoped guard that restores the flags it changed. --- */
+  let _presence = 1;
+  function setPresence(a) {
+    const v = Math.min(1, Math.max(0, a));
+    if (v === _presence) return;
+    _presence = v;
+    const full = v >= 1;
+    model?.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const mat of (Array.isArray(o.material) ? o.material : [o.material])) {
+        if (!mat) continue;
+        /* Remember what the material WAS the first time we dim it, so returning to 1 restores the
+           author's own flags rather than leaving everything transparent forever. */
+        if (mat.userData._lgrOpaque === undefined) mat.userData._lgrOpaque = { t: mat.transparent, o: mat.opacity };
+        const was = mat.transparent;
+        if (full) { mat.transparent = mat.userData._lgrOpaque.t; mat.opacity = mat.userData._lgrOpaque.o; }
+        else { mat.transparent = true; mat.opacity = mat.userData._lgrOpaque.o * v; }
+        mat.depthWrite = full ? true : v > 0.92;   // keep self-sorting sane mid-fade
+        /* three.js bakes the alpha path into the compiled program, so flipping `transparent` without
+           this leaves the OPAQUE program running: the material reads transparent=true / opacity=0 and
+           the mesh still draws at full strength. Measured exactly that before adding this line —
+           the probe said faded, the screenshot said otherwise. Only on the flip, not every frame. */
+        if (was !== mat.transparent) mat.needsUpdate = true;
+      }
+    });
+    ground.material.opacity = 0.26 * v;            // the contact shadow leaves with the thing casting it
+    ground.visible = v > 0.001;
+  }
+
   function disposeObject(root) {
     root.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
@@ -223,5 +269,5 @@ export function createProductStage({
     envRT.dispose();
   }
 
-  return { scene, camera, load, listVariants, setVariant, frameToBounds, orbitBy, zoomBy, update, render, resize, dispose, get url() { return _loadedURL; } };
+  return { scene, camera, load, listVariants, setVariant, frameToBounds, orbitBy, zoomBy, update, render, resize, setPresence, dispose, get presence() { return _presence; }, get url() { return _loadedURL; } };
 }

@@ -164,14 +164,35 @@ const CSS = `
   margin-left:auto; }
 .lgr-narrative-panel.is-bottom { top:auto; bottom:clamp(3rem,10vh,7rem); max-width:52rem; }
 .lgr-narrative-panel.is-bottom .lgr-narrative-body { max-width:46ch; }
+/* LEGIBILITY OVER AN ARBITRARY RENDER (2026-08-08, visual sweep). These panels float over a LIVE
+   scene whose brightness is not knowable at authoring time: the same cream text sits over a night
+   skyline in one chapter and over sunlit near-white building faces in another. On the phone frame at
+   60% scroll the body copy and the chapter counter were close to unreadable against pale facades.
+   The shadows were not missing, they were the WRONG SHAPE: a 30px blur spreads its darkness so thinly
+   that it adds almost no contrast at the glyph EDGE, which is the only place contrast is legible.
+   The cure is TWO shadows per element — a tight, nearly-opaque one that draws an edge on a light
+   background, plus the original wide glow that still does the work on a dark one. Cheap, no scrim
+   rectangle over the art, and it degrades gracefully whatever is behind it.
+   The counter and the eyebrow had NO shadow at all — they are the smallest text on screen and were
+   relying entirely on the render staying dark. */
 .lgr-narrative-num { display:block; font:600 .74rem/1 ui-monospace,Menlo,monospace; letter-spacing:.12em;
-  color:var(--lgr-narrative-dim,rgba(244,236,224,.55)); }
+  color:var(--lgr-narrative-dim,rgba(244,236,224,.78));
+  text-shadow:0 1px 2px rgba(0,0,0,.85), 0 1px 14px rgba(0,0,0,.5); }
+/* The eyebrow is the HARDEST case on the panel and needed more than the pair above: small, thin,
+   uppercase, tracked .32em, in a LIGHT accent gold. Over sunlit near-white facades it still read as
+   ghost text after the edge shadow, because a drop shadow only darkens one side and there is barely
+   any ink to cast it. A real outline is what small light-on-light type needs, so this draws a thin
+   dark stroke UNDER the fill (paint-order keeps the stroke from eating the glyph weight). Kept the
+   brand accent rather than darkening it — the colour is the identity; the contrast is the bug. */
 .lgr-narrative-eyebrow { display:block; margin-top:1rem; font:700 .8rem/1 inherit; letter-spacing:.32em;
-  text-transform:uppercase; color:var(--lgr-narrative-accent,#e8b46a); }
+  text-transform:uppercase; color:var(--lgr-narrative-accent,#e8b46a);
+  -webkit-text-stroke:2.4px rgba(0,0,0,.55); paint-order:stroke fill;
+  text-shadow:0 1px 2px rgba(0,0,0,.55), 0 1px 14px rgba(0,0,0,.4); }
 .lgr-narrative-title { margin-top:.6rem; font-size:clamp(2.2rem,6.5vw,5rem); line-height:1.02; font-weight:700;
-  letter-spacing:-.02em; text-shadow:0 2px 30px rgba(0,0,0,.5); }
+  letter-spacing:-.02em; text-shadow:0 1px 3px rgba(0,0,0,.7), 0 2px 30px rgba(0,0,0,.5); }
 .lgr-narrative-body { margin-top:1.1rem; font-size:clamp(1rem,1.6vw,1.25rem); line-height:1.5; max-width:40ch;
-  color:var(--lgr-narrative-dim,rgba(244,236,224,.72)); text-shadow:0 1px 16px rgba(0,0,0,.55); }
+  color:var(--lgr-narrative-dim,rgba(244,236,224,.86));
+  text-shadow:0 1px 2px rgba(0,0,0,.8), 0 1px 16px rgba(0,0,0,.55); }
 .lgr-narrative-tags { list-style:none; display:flex; flex-wrap:wrap; gap:.5rem; margin:1.4rem 0 0; padding:0;
   justify-content:inherit; }
 .lgr-narrative-tags li { font-size:.8rem; font-weight:600; padding:.4rem .8rem; border-radius:999px;

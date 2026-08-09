@@ -12,7 +12,10 @@
        part of the design. Audited across every built project 2026-08-07 and found on six of them.
        One rule, and it cannot regress the canvas — this is DOM chrome only. */
     button, select, input, textarea { font: inherit; }
-    html, body { margin: 0; height: 100%; background: #0e0b07; overflow: hidden; }
+    /* The page had NO body font-family, so anything that did not set its own fell all the way
+       back to the UA default — Times. That was not theoretical: no element happened to be affected, but the default was one un-fonted element away from it. Set the
+       inherited default to the stack this project already uses everywhere else. */
+    html, body { margin: 0; font-family: ui-monospace, monospace; height: 100%; background: #0e0b07; overflow: hidden; }
     canvas { display: block; }       /* three.js appends the canvas here */
     /* L110 (audit B13): ported the city's L106 footer treatment — off-white on a dark backplate reads over a bright
        scene; the old faint-gold (rgba(184,153,104,.75), no plate) was unreadable. Wiring drift of the city fix. */
@@ -43,6 +46,6 @@
   <div id="lgr-loader"><div class="mark">LGR</div><div class="spin"></div><div>LOADING…</div></div>
   <!-- Standalone OFFICE page (deploys to /office/) — its own lean app on @lgr/engine-core. -->
   <script type="module" src="./main.js"></script>
-  <div class="hint">LGR — Office · click the laptop · phone · or the cat · Esc exits · F fitout · J skin · U props · M hides this UI · T time</div>
+  <div class="hint" data-lgr-under-hints>LGR — Office · click the laptop · phone · or the cat · Esc exits · F fitout · J skin · U props · M hides this UI · T time</div>
 </body>
 </html>

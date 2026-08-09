@@ -476,8 +476,11 @@ export function createHoard({ extent = 8, plinthTop = 0.3, ai = 'field', gun = '
     const rel = () => { touching = false; stick.x = 0; stick.y = 0; knob.style.transform = 'translate(0,0)'; };
     thumb.addEventListener('pointerup', rel); thumb.addEventListener('pointercancel', rel);
     // fire (hold) + melee (tap) buttons
-    fireBtn = document.createElement('button'); fireBtn.className = 'hoard-btn hoard-fire'; fireBtn.textContent = 'FIRE'; document.body.appendChild(fireBtn);
-    meleeBtn = document.createElement('button'); meleeBtn.className = 'hoard-btn hoard-melee'; meleeBtn.textContent = 'MELEE'; document.body.appendChild(meleeBtn);
+    /* data-lgr-under-hints: these sit in the same bottom corner as the engine's first-run card, and
+       were GHOSTING THROUGH it (MELEE legible on top of the card's own text). The attribute is the
+       engine's opt-in contract from hints.js — while the card is up they fade and stop taking taps. */
+    fireBtn = document.createElement('button'); fireBtn.className = 'hoard-btn hoard-fire'; fireBtn.textContent = 'FIRE'; fireBtn.setAttribute('data-lgr-under-hints', ''); document.body.appendChild(fireBtn);
+    meleeBtn = document.createElement('button'); meleeBtn.className = 'hoard-btn hoard-melee'; meleeBtn.textContent = 'MELEE'; meleeBtn.setAttribute('data-lgr-under-hints', ''); document.body.appendChild(meleeBtn);
     // L42: guarded haptic on the touch combat buttons (the game controls deserve the tactile feedback).
     fireBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); navigator.vibrate?.(12); firing = true; });
     fireBtn.addEventListener('pointerup', () => { firing = false; });

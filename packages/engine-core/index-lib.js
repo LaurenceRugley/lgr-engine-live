@@ -50,7 +50,7 @@ export { createPlacedLife } from './src/placed-life.js';
 export { createHiddenProp } from './src/hidden-prop.js';
 export { pickStreetIntersection, createProximityLatch } from './src/hidden-prop-logic.js';
 export { createEditor } from './src/editor.js';
-export { createPilotController, createGroundModel, createSpacecraftModel, createRoadModel, createBoatModel, createBirdModel, createFishModel, carryMomentum, ATV_PROFILE, CRAFT_PROFILE, ROAD_PROFILE, BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE } from './src/pilot.js';   // A-FEEL: createRoadModel = a car that corners on a street grid (curvature-limited steering, R grows with v squared)
+export { createPilotController, createGroundModel, createSpacecraftModel, createRoadModel, createBoatModel, createBirdModel, createFishModel, createGrappleModel, carryMomentum, ATV_PROFILE, CRAFT_PROFILE, ROAD_PROFILE, BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE, GRAPPLE_PROFILE } from './src/pilot.js';   // A-FEEL: createRoadModel = a car that corners on a street grid (curvature-limited steering, R grows with v squared)
 export { createCockpit } from './src/cockpit.js';
 export { createGyroLook, mapGyroToLook } from './src/gyro-look.js';
 export { createTracer }                  from './src/tracer.js';

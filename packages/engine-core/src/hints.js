@@ -44,8 +44,30 @@ function injectCSS() {
     background: transparent; color: #8a93a3; font: 15px/1 ui-monospace, monospace; cursor: pointer;
     border-radius: 8px; transition: transform .08s ease; }
   .lgr-hints-x:active { transform: scale(0.9); }
+  /* THE CARD SITS ON THE CONTROLS IT DESCRIBES (2026-08-08, visual sweep). This card is anchored
+     bottom-left, which is exactly where every project puts its control chrome — so on hoard's phone
+     layout the card covered the whole thumbstick cluster while its own first bullet explained the
+     thumbstick, and the MELEE button GHOSTED THROUGH the card, which just reads as broken. On city
+     and office desktop the keybind bar ran underneath it, half the text dark-on-dark.
+
+     While the card is up it owns that corner: the chrome under it stands down (and stops taking
+     taps, so a stray press near the card cannot fire a weapon behind it). The engine's OWN touch
+     chrome is covered by class here; a project's bar opts in with the data-lgr-under-hints attribute, which is
+     one greppable attribute rather than a CSS rule each project has to remember to copy — the
+     wiring-drift shape this repo keeps getting caught by.
+     Everything returns the moment the card is dismissed; nothing is permanently hidden.
+     NB: this comment lives INSIDE a template literal — no backticks in here, they close the string
+     and the build fails with a misleading 'expected a semicolon' miles away. */
+  body.lgr-hints-open .lgr-touch-zone,
+  body.lgr-hints-open .lgr-touch-stick,
+  body.lgr-hints-open .lgr-touch-lift,
+  body.lgr-hints-open [data-lgr-under-hints] {
+    opacity: 0.08; pointer-events: none; transition: opacity .25s ease;
+  }
   @media (prefers-reduced-motion: reduce) {
     .lgr-hints, .lgr-hints-ok, .lgr-hints-x { transition: none; }
+    body.lgr-hints-open .lgr-touch-zone, body.lgr-hints-open .lgr-touch-stick,
+    body.lgr-hints-open .lgr-touch-lift, body.lgr-hints-open [data-lgr-under-hints] { transition: none; }
   }`;
   document.head.appendChild(s);
 }
@@ -74,6 +96,7 @@ export function createHints({ key, title = 'Tips', tips = [], force = false } = 
     <button class="lgr-hints-x" title="Dismiss (Esc)" aria-label="Dismiss">✕</button>
   </div>`;
   document.body.appendChild(wrap);
+  document.body.classList.add('lgr-hints-open');   // the chrome under the card stands down (CSS above)
   probe.shown = true;
   if (reduce) wrap.classList.add('on'); else requestAnimationFrame(() => wrap.classList.add('on'));
 
@@ -82,6 +105,7 @@ export function createHints({ key, title = 'Tips', tips = [], force = false } = 
     if (done) return; done = true;
     if (persist) { try { localStorage.setItem(storeKey, '1'); } catch (e) { /* ignore */ } }
     probe.dismissed = true;
+    document.body.classList.remove('lgr-hints-open');   // and comes straight back
     window.removeEventListener('keydown', onKey);
     wrap.classList.remove('on');
     setTimeout(() => wrap.remove(), reduce ? 0 : 300);

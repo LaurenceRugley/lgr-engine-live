@@ -106,7 +106,7 @@ export { pickStreetIntersection, createProximityLatch } from './src/hidden-prop-
 export { createEditor } from './src/editor.js';
 
 // L76 — POSSESSION: the PilotController + ground MovementModel (drive a placed craft, e.g. the all-terrain vehicle).
-export { createPilotController, createGroundModel, createSpacecraftModel, createRoadModel, createBoatModel, createBirdModel, createFishModel, carryMomentum, ATV_PROFILE, CRAFT_PROFILE, ROAD_PROFILE, BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE } from './src/pilot.js';   // A-FEEL: createRoadModel = a car that corners on a street grid (curvature-limited steering, R grows with v squared). A-FISH: createFishModel = neutral buoyancy + pivot-in-place turning + a ballistic breach
+export { createPilotController, createGroundModel, createSpacecraftModel, createRoadModel, createBoatModel, createBirdModel, createFishModel, createGrappleModel, carryMomentum, ATV_PROFILE, CRAFT_PROFILE, ROAD_PROFILE, BOAT_PROFILE, BIRD_PROFILE, FISH_PROFILE, GRAPPLE_PROFILE } from './src/pilot.js';   // A-FEEL: createRoadModel = a car that corners on a street grid (curvature-limited steering, R grows with v squared). A-FISH: createFishModel = neutral buoyancy + pivot-in-place turning + a ballistic breach
 
 // L-cockpit: bare canopy-frame ring (A-pillars + roof arc + dash bar). Parented to the craft at profile.eye;
 // placed-life.js wires it; pilot.js toggles visibility on cockpit/chase transitions.

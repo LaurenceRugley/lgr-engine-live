@@ -770,12 +770,225 @@ export function carryMomentum(from, to, { speedScale = 1, y = null, pitch = null
   // regime latches — reset explicitly, never inherited (see the note above)
   b.vy = 0; b.bank = 0; b.airborne = false; b.stalling = false;
   b.medium = undefined; b.crossing = undefined; b.crossFrom = undefined; b.crossingT = 0;
+  /* A-SWING: the grapple's velocity VECTOR and its rope are latches too, and the nastiest kind —
+     its model adopts the shared scalar speed only when `vx` is still undefined, so a leftover vx from
+     a previous swing would silently skip that adoption and hand you the OLD arc's velocity instead of
+     the speed you actually arrived with. Clearing them here is what makes drive→swing inherit your
+     momentum and swing→walk forget it. */
+  b.vx = undefined; b.vz = undefined; b.anchor = null; b.rope = 0;
   return true;
+}
+
+/* ---- THE GRAPPLE (A-SWING, 2026-08-08) — the seventh body, and the first one whose motion is not
+   "speed along a heading".
+   ---------------------------------------------------------------------------------------------
+   WHY IT CANNOT REUSE A MODEL WE HAVE. Every model above integrates a SCALAR `speed` down a yaw
+   heading; even the bird, which climbs and dives, is really speed + pitch + yaw. A pendulum is not
+   expressible that way: on a rope the velocity direction is set by the CONSTRAINT (always tangent to
+   the sphere around the anchor), and it changes continuously without the player steering. So this
+   model carries a real velocity VECTOR on state (vx/vy/vz) and derives the visible yaw/bank FROM it,
+   which is the exact inverse of every other model here. Same `step(state, axes, dt, world)` contract,
+   opposite internals — which is the point of having a contract.
+
+   THE RESEARCH IT IMPLEMENTS. Spider-Man 2 (2004, Jamie Fristrom) is still the reference because of
+   one decision: the web attaches to REAL GEOMETRY. It casts rays from the character and wherever they
+   intersect the world becomes the anchor — as opposed to firing into empty sky and animating a fake
+   arc, which is what the games before it (and several after) did. We can do the real version cheaply
+   because `world.segmentHit` already exists for the camera spring-arm, and its own comment in
+   collide.js anticipated exactly this reuse: "a future line-of-sight test reuses it".
+
+   WHY THIS CITY SUITS IT. Swinging dies if buildings are short or far apart — the arc bottoms out in
+   the street. Measured before building: blocks are 1.9u with 0.55u streets (PITCH 2.45) and downtown
+   towers reach hMax 4.6-5.2, a height:pitch ratio around 2.1. That is Manhattan-midtown proportion and
+   plenty of canyon. It DOES fall off at the city edge where the downtown gradient drops the towers,
+   so "no anchor in range" is a first-class state here, not an error — you fall, with air control, and
+   can re-fire the moment something comes into reach.
+
+   FEEL OVER PHYSICS, deliberately. A pure pendulum feels bad, which is the other half of what the
+   post-mortems say. Three assists, all of them named constants below rather than hidden fudge:
+   `aimCone` (the anchor search forgives sloppy aim), `pump` (shortening the rope on the downswing adds
+   energy — this is what makes a swing accelerate instead of decaying to a dead hang), and `release`
+   preserving momentum so letting go converts the arc into a launch.
+
+   C++ anchor: the constraint solve is one Gram-Schmidt projection — remove the component of v along
+   the rope, keep the tangential part. `v -= n * dot(v, n)`. */
+export const GRAPPLE_PROFILE = {
+  gravity: 5.4,           // u/s² — heavier than the bird's trade; a swing should feel weighty
+  ropeMax: 3.2,           // u — longest web you can fire
+  ropeMin: 0.55,          // u — how far in you can reel before it reads as a collision
+  aimCone: 0.62,          // rad — half-angle of the anchor search fan (the aim assist)
+  aimRays: 7,             // how many rays in the fan; odd so one is dead ahead
+  aimLift: 0.42,          // rad — the fan is biased UP by this: you swing from above, not from a wall
+  pump: 1.5,              // u/s of rope shortening while the lift axis is held (the energy input)
+  airControl: 2.1,        // u/s² of lateral nudge while attached (steering the arc)
+  freeControl: 3.4,       // u/s² of control while NOT attached (more, since you have nothing else)
+  airDrag: 0.06,          // per-second velocity bleed; low, so momentum carries between swings
+  maxSpeed: 7.5,          // u/s hard cap so a long pump chain cannot go to orbit
+  climbRate: 1.15,        // u/s up a wall while clinging (Space up, C down)
+  clingReach: 0.24,       // u — how close a facade has to be to stick to it
+  skim: 0.06,             // clearance above ground/water/ROOFTOP, same idiom as the bird
+  chaseDist: 1.9, chaseElev: 0.35,
+  eye: { x: 0, y: 0.06, z: 0.04 },
+  /* A-SPRINT for a swinger is a harder pull: reel faster and steer harder. Not a speed multiplier —
+     top speed stays the reward for a well-timed release, exactly like the bird's dive. */
+  boost: { pump: 1.9, airControl: 1.5 },
+};
+export function createGrappleModel(profile = GRAPPLE_PROFILE) {
+  const _e = new THREE.Euler();
+  const P = (k) => (profile[k] !== undefined ? profile[k] : GRAPPLE_PROFILE[k]);
+
+  /* Fire a fan of rays and keep the nearest real hit. `segmentHit` returns the blocking fraction
+     t∈[0,1] (1 = clear), so an anchor exists iff some ray comes back < 1. The fan is biased upward:
+     an anchor BELOW you is a wall to smack into, not something to swing from. */
+  function findAnchor(state, world) {
+    if (!world || !world.segmentHit) return null;
+    const rays = P('aimRays'), cone = P('aimCone'), len = P('ropeMax');
+    let best = null;
+    for (let i = 0; i < rays; i++) {
+      const frac = rays === 1 ? 0 : (i / (rays - 1)) * 2 - 1;      // -1..1 across the fan
+      const yaw = state.yaw + frac * cone;
+      const el = P('aimLift') + Math.abs(frac) * 0.18;             // edges of the fan aim slightly higher
+      const dx = Math.sin(yaw) * Math.cos(el), dz = Math.cos(yaw) * Math.cos(el), dy = Math.sin(el);
+      const ex = state.x + dx * len, ey = state.y + dy * len, ez = state.z + dz * len;
+      const t = world.segmentHit(state.x, state.y, state.z, ex, ey, ez, 0.05);
+      if (t >= 1) continue;                                        // clear sky down this ray
+      const d = t * len;
+      if (d < P('ropeMin')) continue;                              // too close to swing from
+      if (!best || d < best.d) best = { d, x: state.x + dx * d, y: state.y + dy * d, z: state.z + dz * d };
+    }
+    return best;
+  }
+
+  function step(state, axes, dt, world) {
+    /* Adopt the shared fields into a real vector ONCE. Coming from another body we inherit a scalar
+       speed + yaw, so convert it — that is what makes walk→swing keep your momentum instead of
+       dropping you. carryMomentum() resets vy for every other model; we re-derive the rest here. */
+    if (typeof state.vx !== 'number') {
+      const s0 = state.speed || 0;
+      state.vx = Math.sin(state.yaw) * s0; state.vz = Math.cos(state.yaw) * s0; state.vy = 0;
+      state.anchor = null; state.rope = 0;
+    }
+
+    const boost = clamp(axes.boost || 0, 0, 1);
+    const fire = (axes.throttle || 0) > 0;
+
+    // 1) ATTACH / RELEASE. Holding throttle keeps the line; letting go cuts it, and whatever velocity
+    //    the arc has built is simply kept — the release IS the launch, no special case.
+    if (fire && !state.anchor) {
+      const a = findAnchor(state, world);
+      if (a) {
+        state.anchor = { x: a.x, y: a.y, z: a.z };
+        state.rope = Math.max(P('ropeMin'), a.d);
+      }
+    } else if (!fire && state.anchor) {
+      state.anchor = null;
+    }
+
+    /* 2) WALL CLING (A-CLIMB). Before gravity, because clinging is the absence of falling. A short
+       ray along the facing direction asks "is there a facade within arm's reach"; if so you stick,
+       and the lift axis becomes a climb instead of a pump. Only while NOT roped — a rope already
+       owns your vertical, and letting both run at once produced a jitter where the constraint and
+       the climb fought for the same axis. Costs one segmentHit per frame, and only when free. */
+    const fx = Math.sin(state.yaw), fz = Math.cos(state.yaw);
+    let clinging = false;
+    if (!state.anchor && world && world.segmentHit) {
+      const reach = P('clingReach');
+      const t = world.segmentHit(state.x, state.y, state.z, state.x + fx * reach, state.y, state.z + fz * reach, 0.05);
+      clinging = t < 1;
+    }
+    state.clinging = clinging;
+
+    // 3) FORCES. Gravity always — except while stuck to a wall, which is the whole point of sticking.
+    if (!clinging) state.vy -= P('gravity') * dt;
+    else {
+      /* Hold position against the facade and climb under the lift axis. Zeroing the horizontal
+         velocity is what makes it read as ADHESION rather than a very slow slide. */
+      state.vx *= 0.12; state.vz *= 0.12;
+      state.vy = (axes.lift || 0) * P('climbRate');
+    }
+    const ctl = (state.anchor ? P('airControl') * (1 + (P('boost').airControl - 1) * boost) : P('freeControl'));
+    if (axes.steer) {
+      // lateral nudge, perpendicular to travel — steers the arc without adding raw speed
+      const sp = Math.hypot(state.vx, state.vz) || 1;
+      const px = state.vz / sp, pz = -state.vx / sp;
+      state.vx += px * -axes.steer * ctl * dt;
+      state.vz += pz * -axes.steer * ctl * dt;
+    }
+
+    // 3) PUMP — the whole reason a swing accelerates instead of decaying. Reeling in on the downswing
+    //    does work on the pendulum; letting rope out lengthens the arc. Mirrors how a child pumps a
+    //    swing by standing up at the bottom.
+    if (state.anchor && axes.lift) {
+      const rate = P('pump') * (1 + (P('boost').pump - 1) * boost);
+      state.rope = clamp(state.rope - axes.lift * rate * dt, P('ropeMin'), P('ropeMax'));
+    }
+
+    // 4) INTEGRATE, then satisfy the rope CONSTRAINT. Position first, then pull back onto the sphere
+    //    and strip the radial velocity — that projection is the rope going taut, and it is the only
+    //    place the arc actually comes from.
+    state.x += state.vx * dt; state.y += state.vy * dt; state.z += state.vz * dt;
+    if (state.anchor) {
+      const ax = state.x - state.anchor.x, ay = state.y - state.anchor.y, az = state.z - state.anchor.z;
+      const dist = Math.hypot(ax, ay, az) || 1e-6;
+      if (dist > state.rope) {
+        const nx = ax / dist, ny = ay / dist, nz = az / dist;
+        state.x = state.anchor.x + nx * state.rope;
+        state.y = state.anchor.y + ny * state.rope;
+        state.z = state.anchor.z + nz * state.rope;
+        const radial = state.vx * nx + state.vy * ny + state.vz * nz;
+        if (radial > 0) { state.vx -= nx * radial; state.vy -= ny * radial; state.vz -= nz * radial; }
+      }
+    }
+
+    // 5) DRAG + CAP. Low drag so momentum survives between swings; the cap stops a pump chain
+    //    compounding into escape velocity.
+    const bleed = Math.max(0, 1 - P('airDrag') * dt);
+    state.vx *= bleed; state.vy *= bleed; state.vz *= bleed;
+    const sp = Math.hypot(state.vx, state.vy, state.vz);
+    if (sp > P('maxSpeed')) { const k = P('maxSpeed') / sp; state.vx *= k; state.vy *= k; state.vz *= k; }
+
+    // 6) FLOOR — land, do not tunnel. Hitting the deck kills the line and the downward component;
+    //    horizontal momentum survives so you skid out of a bad swing rather than stopping dead.
+    const gy = world && world.heightAt ? world.heightAt(state.x, state.z) : 0;
+    const wy = world && world.waterHeightAt ? world.waterHeightAt(state.x, state.z) : NO_WATER;
+    /* A-ROOF: the floor is whichever is highest — terrain, water, or a BUILDING TOP under you.
+       Without the third term a swinger fell straight through every roof in the city to the street,
+       which made "land on that tower" impossible and is why perching needed a collider query rather
+       than a new model. yMax is the feet plus a small step tolerance, so you land ON a roof you are
+       descending onto but never snap UP onto one you are swinging past. */
+    const roof = world && world.surfaceAt ? world.surfaceAt(state.x, state.z, state.y + 0.12) : -Infinity;
+    let floor = Math.max(gy, wy > NO_WATER ? wy : gy);
+    if (roof > floor) floor = roof;
+    floor += P('skim');
+    if (state.y < floor) {
+      state.y = floor;
+      if (state.vy < 0) state.vy = 0;
+      state.anchor = null;
+      state.vx *= 0.86; state.vz *= 0.86;
+      state.perched = roof > gy + 0.05;   // standing on a building, not the street — HUD/probe signal
+    } else state.perched = false;
+
+    // 7) ORIENTATION DERIVED FROM MOTION — the inverse of every other model. You face where the arc
+    //    is throwing you, and bank into the turn, because that is what reads as a swing.
+    const horiz = Math.hypot(state.vx, state.vz);
+    if (horiz > 0.05) state.yaw = Math.atan2(state.vx, state.vz);
+    state.speed = Math.hypot(state.vx, state.vy, state.vz);     // keep the shared field meaningful (HUD/chase cam)
+    const wantPitch = clamp(Math.atan2(state.vy, Math.max(horiz, 0.05)), -0.9, 0.9);
+    state.pitch = damp(typeof state.pitch === 'number' ? state.pitch : 0, wantPitch, 1 / 0.18, dt);
+    const wantBank = clamp(-(axes.steer || 0) * 0.7 + (state.anchor ? 0.25 : 0), -0.9, 0.9);
+    state.bank = damp(typeof state.bank === 'number' ? state.bank : 0, wantBank, 2.2, dt);
+    state.airborne = !state.anchor && !clinging && state.y > floor + 0.02;
+
+    _e.set(state.pitch, state.yaw, state.bank, 'YXZ');
+    state.quat.setFromEuler(_e);
+    return state;
+  }
+  return { step };
 }
 
 /* the model registry the controller dispatches on (a PilotProfile names its model by key). Adding a
    craft type = one entry here + its model factory + a PilotProfile on the entity. */
-const MODEL_FACTORIES = { ground: createGroundModel, spacecraft: createSpacecraftModel, road: createRoadModel, boat: createBoatModel, bird: createBirdModel, fish: createFishModel };
+const MODEL_FACTORIES = { ground: createGroundModel, spacecraft: createSpacecraftModel, road: createRoadModel, boat: createBoatModel, bird: createBirdModel, fish: createFishModel, grapple: createGrappleModel };
 
 const ENTER_TIME = 0.55;                 // seconds the ENTERING camera-move runs (input ignored) — "the move is the onboarding"
 const ZERO_AXES = { throttle: 0, steer: 0, lift: 0, boost: 0 };

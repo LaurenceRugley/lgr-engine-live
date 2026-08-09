@@ -497,12 +497,32 @@ const product = createProductStage({ renderer, backdrop: '#efe9df', envIntensity
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { releaseControls(); return; } if (!piloting) return; const tok = KEYMAP[e.key.toLowerCase()]; if (tok) { held.add(tok); recomputeAxes(); e.preventDefault(); } });
   window.addEventListener('keyup', (e) => { const tok = KEYMAP[e.key.toLowerCase()]; if (tok) { held.delete(tok); recomputeAxes(); } });
 
+  /* THE PRODUCT MUST LEAVE WHEN ITS SECTION DOES (2026-08-08, found by the visual sweep — no automated
+     gate could see it). The stage renders into a viewport-FIXED canvas, so the shoe holds its screen
+     position while the page scrolls. At the bottom of the page the configurator's own copy had scrolled
+     up into it: a lace ran straight through the headline "Build your pair." and the sub-copy sat on a
+     blue mesh upper, unreadable, immediately above the "Work with us" ask. The shoe never moved — the
+     words did, which is why the earlier framing-bias fix could not have caught this.
+
+     Instrument choice matters here. `signing` (the existing IntersectionObserver at 25%) is the right
+     signal for RETRACTING THE PRICE BAR, but it fires too LATE for this: by the time the closing section
+     is a quarter visible the overlap has already happened. So this reads the closing section's APPROACH
+     — a continuous distance, not a boolean — and is fully faded before its copy shares the frame.
+     Cheap: one getBoundingClientRect on an element already in hand, only on configurator frames. */
+  const signEl = document.getElementById('work');
+  function productPresence() {
+    if (!signEl) return 1;
+    const vh = window.innerHeight || 1;
+    const top = signEl.getBoundingClientRect().top;
+    return clamp((top - vh * 0.35) / (vh * 0.5), 0, 1);   // 1 while it is still below the fold, 0 by the time it owns the frame
+  }
+
   /* --- PER-FRAME BODY (city-mode slice) + the P2 configurator render switch --- */
   shell.start((dt, t) => {
     scroll.update(dt);                                      // ← PUMP FIRST, before ANY branch (the F07 fix + the §1.4 invariant)
     applyScrollUI(scroll.progress, scroll.targetProgress);  // ← continuous off eased, discrete off raw
     story.update(flightT(), clamp(scroll.targetProgress / CONFIG_START, 0, 1));  // same eased/raw split, PRE-CONFIG range
-    if (!piloting && scroll.targetProgress >= CONFIG_START && productReady) { product.update(dt); product.render(); return; }  // gate on RAW target
+    if (!piloting && scroll.targetProgress >= CONFIG_START && productReady) { product.setPresence(productPresence()); product.update(dt); product.render(); return; }  // gate on RAW target
     if (piloting) { recomputeAxes(); applyTouchAxes(); engine.pilot.step(dt, axes); }
     else if (phase === 'scroll') applyScroll(flightT());
     rig.update(dt);

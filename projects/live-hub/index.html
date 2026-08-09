@@ -48,7 +48,16 @@
     .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--edge, var(--accent)); opacity: 0.9; z-index: 1; }
     .thumb {
       display: block; width: calc(100% + clamp(2.2rem, 7vw, 3rem)); margin: calc(-1 * clamp(1.1rem, 3.5vw, 1.5rem)) calc(-1 * clamp(1.1rem, 3.5vw, 1.5rem)) 0.2rem;
-      aspect-ratio: 16 / 9; object-fit: cover; background: #000;
+      /* `height: auto` is load-bearing, not tidying. `.card` is a COLUMN flex container, so the img is
+         a flex item whose main axis is its HEIGHT — and with the height left unset, flex took the
+         image's INTRINSIC height (389px) as the flex base size and never consulted `aspect-ratio` at
+         all. Measured: the box came out 351x389, an aspect of 0.90 against the 1.78 declared right
+         here, so `object-fit: cover` was silently discarding 51% of every thumbnail off the sides.
+         That is why the Sort Race card's own title read "rt Race" and the Live Sky controls read
+         "ER" / "ODERATE". The declared ratio was never wrong; it was never applied.
+         `flex: none` keeps a tall sibling card from shrinking it back. Verified by measuring the box
+         aspect on the rendered page (1.778), not by reading the rule. */
+      aspect-ratio: 16 / 9; height: auto; flex: none; object-fit: cover; background: #000;
     }
     .card h2 { font-size: 1.2rem; font-weight: 750; letter-spacing: -0.01em; }
     .tag { color: var(--edge, var(--accent)); font: 600 0.68rem/1 ui-monospace, monospace; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -105,14 +114,18 @@
     <header>
       <div class="kicker">LGR WebGL Engine</div>
       <h1>Live demos &amp; shipped products</h1>
-      <p class="sub">Everything public in one place — engine demos below, three shipped products above. Tap a card and try it; best on a real GPU, works on phones.</p>
+      <!-- Said "engine demos below, three shipped products above" while BOTH sections sit below this
+           paragraph, and in the opposite order to the one it named (Shipped products is the next
+           heading; Engine demos follows it). A first-time visitor was being pointed at nothing.
+           Also drops an em-dash rather than adding one, per the taste rules for shipped copy. -->
+      <p class="sub">Everything public in one place: three shipped products first, then the engine demos they are built on. Tap a card and try it; best on a real GPU, works on phones.</p>
     </header>
 
     <h2 class="section"><b>Shipped products</b> — built on this engine, live at lgrwebstudios.com</h2>
     <div class="grid grid3">
       <!-- LIVE SKY -->
       <section class="card" style="--edge: var(--accent2)">
-        <img class="thumb" src="img/sky.jpg" alt="Live Sky at midnight — real stars and the Milky Way over an ocean horizon" loading="lazy" width="720" height="405">
+        <img class="thumb" src="img/sky.jpg" alt="Live Sky at midnight — real stars and the Milky Way over an ocean horizon" loading="lazy" width="720" height="389">
         <span class="tag">Real-astronomy sky sim</span>
         <h2>Live Sky</h2>
         <p>A physically-based atmosphere you scrub, fly through, and light-pollute: real weather, sea state, and a full real-sky mode — the Yale Bright Star Catalogue, all 7 planets from NASA JPL orbital elements, all 110 Messier objects, and a continuous Bortle 1–9 slider that fades stars in by real magnitude as the sky darkens.</p>
@@ -122,7 +135,7 @@
 
       <!-- IMAGE STUDIO -->
       <section class="card" style="--edge: var(--accent5)">
-        <img class="thumb" src="img/studio.jpg" alt="Image Studio — a riso-print effect applied to a flower photo" loading="lazy" width="720" height="405">
+        <img class="thumb" src="img/studio.jpg" alt="Image Studio — a riso-print effect applied to a flower photo" loading="lazy" width="720" height="389">
         <span class="tag">Client-side image/video FX</span>
         <h2>Image Studio</h2>
         <p>Seven real-time effect modes — pixel &amp; dither, blur, halftone, edge-ink, CRT, ASCII, and riso — applied to a photo, a video, or your webcam, with region masking (rectangle, brush, or preset zones) and PNG/MP4 export. Nothing ever uploads; every frame is processed on your GPU.</p>
@@ -146,7 +159,7 @@
       <!-- SHOWCASE — the scroll-flight narrative + product configurator. Added to the hub 2026-08-07,
            the same day it was added to the deploy set; before that it was built but published nowhere. -->
       <section class="card" style="--edge: var(--accent2)">
-        <img class="thumb" src="img/metropolis.jpg" alt="A procedurally generated city seen from the air at golden hour, the view a scroll-driven flight passes through" loading="lazy" width="720" height="405">
+        <img class="thumb" src="img/showcase.jpg" alt="The city rendered in a flat red toon style mid-flight, the moment the showcase morphs its whole art direction live" loading="lazy" width="720" height="405">
         <span class="tag">Scroll-driven flight · product configurator</span>
         <h2>The Showcase</h2>
         <p>One continuous shot: the camera flies a procedural city while you scroll, the day runs from golden hour to night, and the art style morphs mid-flight from realistic to toon and back. At the bottom you <b>take the controls</b> and become one of four bodies in that same city, then a studio-lit product turns on its own stage with live colourways.</p>

@@ -956,6 +956,7 @@ export function createCityWorld(core, { demo = false, citySeed = 0, profileIndex
     collide: (state, dt, cfg) => collider.resolveSphere(state, dt, cfg),
     collideActive: () => collider.active(),
     segmentHit: (ox, oy, oz, ex, ey, ez, r) => collider.segmentHit(ox, oy, oz, ex, ey, ez, r),
+    surfaceAt: (x, z, yMax, r) => collider.surfaceAt(x, z, yMax, r),   // A-ROOF: what am I standing on
   } });
 
   /* 7e) SUN SHADOW */

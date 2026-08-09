@@ -30,7 +30,10 @@
        part of the design. Audited across every built project 2026-08-07 and found on six of them.
        One rule, and it cannot regress the canvas — this is DOM chrome only. */
     button, select, input, textarea { font: inherit; }
-    html, body { margin: 0; height: 100%; background: #0e0b07; overflow: hidden; }
+    /* The page had NO body font-family, so anything that did not set its own fell all the way
+       back to the UA default — Times. That was not theoretical: the vector/toon toggle buttons and their labels were rendering in serif. Set the
+       inherited default to the stack this project already uses everywhere else. */
+    html, body { margin: 0; font-family: ui-monospace, monospace; height: 100%; background: #0e0b07; overflow: hidden; }
     canvas { display: block; }       /* three.js appends the canvas here */
     .hint {
       position: fixed; left: 16px; bottom: 14px; z-index: 1;
@@ -65,6 +68,6 @@
   <!-- This is the ONLY hand-written HTML. Everything visual is built in JS/WebGL.
        The `type="module"` script is the entry point Vite compiles + bundles. -->
   <script type="module" src="./main.js"></script>
-  <div class="hint">LGR WebGL Lab · <b style="color:#f3c97a">press F to fly</b> · WASD / drag to move &amp; look · click a building to dive in · Esc exits · T time · G reroll · C city · 7/8 style · 0 vector · M hides this</div>
+  <div class="hint" data-lgr-under-hints>LGR WebGL Lab · <b style="color:#f3c97a">press F to fly</b> · WASD / drag to move &amp; look · click a building to dive in · Esc exits · T time · G reroll · C city · 7/8 style · 0 vector · M hides this</div>
 </body>
 </html>

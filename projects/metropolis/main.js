@@ -48,7 +48,7 @@ import {
   createWeatherRig,
   createFirstPersonWalker,
   createPilotController, createGroundModel, createRoadModel, ATV_PROFILE, ROAD_PROFILE, CRAFT_PROFILE, BOAT_PROFILE, BIRD_PROFILE,
-  FISH_PROFILE,
+  FISH_PROFILE, GRAPPLE_PROFILE,
   carryMomentum,
   createTextureForge, forgeCityMaterials, CITY_LOOKS,
   createCelestial, createTrueStars, createSolarSystem, createConstellations,
@@ -380,6 +380,7 @@ const EYE = 0.28;                    // 1.70 m at 6.08 m/unit — just above the
    0.30 radius happened to exceed 0.1.) 0.02 clears the new body with margin; the city's far plane is
    100, so the depth ratio stays well inside precision comfort. */
 rig.camera.near = 0.02; rig.camera.updateProjectionMatrix();
+let walkGroundY = LAYOUT.PLINTH_TOP;   // A-ROOF: the ground accepted last frame (see groundY below)
 const walker = createFirstPersonWalker({
   // eyeHeight (NOT eyeY): with a groundY hook, eyeY is an ABSOLUTE height and PLINTH_TOP got added
   // TWICE (0.3 + (0.3 + 1.6) = 2.2 measured). eyeHeight is the above-ground knob the hook expects.
@@ -392,7 +393,19 @@ const walker = createFirstPersonWalker({
   /* A-SHORE: the ground is no longer one height — the walker STEPS DOWN from the grass (PLINTH_TOP)
      onto the sand terrace (0.12) using the city's own isLand() coast polygon; the tighter arena
      (was extent+6!) stops the old walk-on-open-water-at-plinth-height behavior at the beach rim. */
-  groundY: (x, z) => (city.isLand(x, z) ? LAYOUT.PLINTH_TOP : 0.12),
+  /* A-ROOF: the walker can now stand on BUILDINGS, not just the street. groundY(x,z) has no height
+     argument by design, so on its own it cannot tell "standing on this roof" from "standing in the
+     street beside this tower" — ask for the highest solid and you teleport onto the skyline the
+     moment you touch a wall. `walkGroundY` is the missing third coordinate: the ground we accepted
+     last frame, used as the CEILING of the query, so a roof is reachable only if it is within a
+     step of where you already are. Arrive by swinging, land on the roof, and you can walk it.
+     KNOWN v1 LIMIT, stated rather than hidden: walking off a roof edge steps you DOWN to the street
+     rather than dropping you — the walker has no fall model, and giving it one is its own arc. */
+  groundY: (x, z) => {
+    const base = city.isLand(x, z) ? LAYOUT.PLINTH_TOP : 0.12;
+    const roof = engine.collider.surfaceAt ? engine.collider.surfaceAt(x, z, walkGroundY + 0.35, 0.12) : -Infinity;
+    return roof > base ? roof : base;
+  },
   // the collider radius must AGREE with the body radius above (they were 0.30 vs 0.32 before)
   resolveSpatial: (state, dt) => engine.collider.resolveSphere(state, dt, { r: 0.09, yOff: 0.14, PUSH_MAX: 6, SLIDE_FRICTION: 0.85, SKIN: 0.02 }),
 });
@@ -430,6 +443,7 @@ const pilotWorld = {
   collide: (state, dt, cfg) => engine.collider.resolveSphere(state, dt, cfg),
   collideActive: () => engine.collider.active(),
   segmentHit: (ox, oy, oz, ex, ey, ez, r) => engine.collider.segmentHit(ox, oy, oz, ex, ey, ez, r),
+  surfaceAt: (x, z, yMax, r) => engine.collider.surfaceAt(x, z, yMax, r),   // A-ROOF: what am I standing on
 };
 const pilotCtl = createPilotController({ rig, world: pilotWorld });
 const carPilotable = {
@@ -517,13 +531,62 @@ const birdPilotable = () => (waterLife.getFollowables?.() || []).find((f) => f.p
 const boatPilotable = () => (waterLife.getFollowables?.() || []).find((f) => f.pilot && f.pilot.model === 'boat') || null;
 const HELI_HOVER = 3.2;                       // world units above the plinth — clears the tallest tower (~5.2 is the crown; this hovers over the bay side)
 const heliCraft = engine.spawnSeizeCraft?.('heli', 3.2, -2.4, { hover: HELI_HOVER }) || null;
+
+/* ---------- THE SWINGER (A-SWING, 2026-08-08) — wiring engine-core's grapple model ----------
+   The ABILITY is createGrappleModel in engine-core (a generic grapple-swing: raycast an anchor on
+   real geometry, hang a rope constraint off it, pump to add energy, release to launch). Everything
+   here is COMPOSITION: a body to look at, a rope to see, and the descriptor that hands both to the
+   shared possession seam. No physics lives in this file.
+
+   THE ROPE IS NOT DECORATION. A swing with no visible line is unreadable — you cannot tell what you
+   are attached to, so you cannot time a release, which is the entire skill of the mechanic. It is a
+   2-vertex Line rewritten each frame from the body to state.anchor, hidden when nothing is attached. */
+const swingBody = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.035, 0.075, 4, 8),
+  new THREE.MeshStandardMaterial({ color: '#232733', roughness: 0.75, flatShading: true }),
+);
+swingBody.castShadow = true; swingBody.visible = false;
+scene.add(swingBody);
+
+const ropeGeo = new THREE.BufferGeometry();
+ropeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));   // 2 verts, rewritten per frame
+const rope = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: '#f2f4f8' }));
+rope.frustumCulled = false;      // its endpoints move every frame; a stale bounding sphere would pop it out
+rope.visible = false;
+scene.add(rope);
+
+const swingState = { x: 2.0, y: 3.4, z: 2.0, yaw: 0, pitch: 0, bank: 0, speed: 0, quat: new THREE.Quaternion() };
+const swingPilotable = {
+  pilot: {
+    model: 'grapple', profile: GRAPPLE_PROFILE,
+    controlHints: 'hold W to fire + hold the line · A/D steer the arc · Space reel in · release W to launch',
+    getWorldPos: (out) => out.set(swingState.x, swingState.y, swingState.z),
+    getTransform: () => swingState,
+    setTransform: (st) => {
+      swingBody.position.set(st.x, st.y, st.z);
+      swingBody.quaternion.copy(st.quat);
+      /* Draw the line LAST, from the body to whatever the model attached to. `anchor` is null the
+         instant the model releases or lands, so visibility follows the physics rather than a
+         separate flag that could drift out of sync with it. */
+      if (st.anchor) {
+        const a = ropeGeo.attributes.position;
+        a.setXYZ(0, st.x, st.y, st.z);
+        a.setXYZ(1, st.anchor.x, st.anchor.y, st.anchor.z);
+        a.needsUpdate = true;
+        rope.visible = true;
+      } else rope.visible = false;
+    },
+    suspendAutonomy: () => {}, resumeAutonomy: () => {},
+    setBodyVisible: (v) => { swingBody.visible = v; if (!v) rope.visible = false; },
+  },
+};
 window.__heli = heliCraft;
 
 /* ---------- mode switching (fly / walk / drive) — one shared camera-rig, three input routes ---------- */
 let mode = 'fly';
 function setMode(next) {
   if (next === mode) return;
-  if (mode === 'drive' || mode === 'heli' || mode === 'boat' || mode === 'bird' || mode === 'fish') pilotCtl.release();   // both are piloted — hand the camera back before switching
+  if (mode === 'drive' || mode === 'heli' || mode === 'boat' || mode === 'bird' || mode === 'fish' || mode === 'swing') pilotCtl.release();   // both are piloted — hand the camera back before switching
   mode = next;
   document.getElementById('modeFly').setAttribute('aria-pressed', String(mode === 'fly'));
   document.getElementById('modeWalk').setAttribute('aria-pressed', String(mode === 'walk'));
@@ -532,6 +595,7 @@ function setMode(next) {
   document.getElementById('modeBoat')?.setAttribute('aria-pressed', String(mode === 'boat'));
   document.getElementById('modeBird')?.setAttribute('aria-pressed', String(mode === 'bird'));
   document.getElementById('modeFish')?.setAttribute('aria-pressed', String(mode === 'fish'));
+  document.getElementById('modeSwing')?.setAttribute('aria-pressed', String(mode === 'swing'));
   /* MOUSE-LOOK HANDOFF (A-FEEL blocker fix): the walker owns its own yaw/pitch while walking, and
      rig.orbit() is INERT in that state (camera-rig update() early-branches on fpActive and never
      reads the orbit goal) — so before this, metropolis's walk mode had NO look control at all: the
@@ -563,6 +627,23 @@ function setMode(next) {
     }
     rig.setSpringArm(null);
   }
+  else if (mode === 'swing') {
+    rig.setMode(CAM.PERSPECTIVE);
+    /* Start ABOVE the rooftops. Dropping the swinger at street level means the first anchor search
+       looks along a canyon floor and finds a wall to smack into; from up here the upward-biased fan
+       has towers to catch. citygen's downtown gradient puts the tall stock near the origin. */
+    swingState.x = 1.6; swingState.z = 1.6; swingState.y = 4.2;
+    swingState.yaw = rig.azimuth + Math.PI; swingState.speed = 1.4;
+    swingState.vx = undefined; swingState.vz = undefined; swingState.anchor = null; swingState.rope = 0;
+    pilotCtl.possess(swingPilotable);
+    /* SPRING ARM ON, and this is the opposite of heli/bird on purpose. I first copied their
+       `setSpringArm(null)` reasoning ("an airborne chase must not reel in on the geometry below it")
+       and driving it proved that wrong in one screenshot: half the frame was the inside of a black
+       facade. Heli and bird fly in OPEN SKY, where there is nothing to clip. A swinger lives in the
+       canyon BETWEEN towers by definition — it is closer to the car than to the gull, so it wants
+       the car's arm, which pulls the eye in when a wall gets behind it. */
+    rig.setSpringArm({ segmentQuery: pilotWorld.segmentHit, radius: 0.3, enabled: true });
+  }
   else if (mode === 'fish') {
     rig.setMode(CAM.PERSPECTIVE);
     const f = fishPilotable();
@@ -592,7 +673,7 @@ function setMode(next) {
    hints (tokenised {up}/{down}/{boost}) would let the engine own the whole string again. */
 // the bodies that actually drive the lift axis — the rocker shows for these and hides otherwise.
 // Declared HERE, above refreshHint(), because the boot call to refreshHint() reads it.
-const USES_LIFT = new Set(['heli', 'bird', 'fish']);
+const USES_LIFT = new Set(['heli', 'bird', 'fish', 'swing']);   // swing: the lift rocker REELS THE ROPE IN — the pump
 const HINTS = {
   fly:   'WASD pan · Shift boost · drag look · scroll zoom · click a tower to step inside',
   walk:  'WASD walk · Shift sprint · drag look',
@@ -601,6 +682,7 @@ const HINTS = {
   boat:  'W/S throttle · A/D rudder (only steers with way on) · Shift full-ahead',
   fish:  'W/S swim · A/D turn · Space up · C dive · Shift burst — build speed and hit the surface to BREACH',
   bird:  'W flap · A/D bank · Space climb · C dive · Shift beat harder — ride the water down, then press C to PLUNGE IN',
+  swing: 'HOLD W to fire a line and keep it · A/D steer the arc · Space reel in to pump · RELEASE W at the bottom to launch',
 };
 const MOBILE_HINTS = {
   fly:   'stick to move · push past the ring to boost · drag to look · tap a tower',
@@ -610,6 +692,7 @@ const MOBILE_HINTS = {
   boat:  'stick to steer · push past the ring for full ahead',
   bird:  'stick to fly · push past the ring to beat harder · tap dive at the water to plunge in',
   fish:  'stick to swim · push past the ring to burst · surface fast to breach',
+  swing: 'hold the stick forward to fire and keep the line · steer the arc · lift to reel in · let go to launch',
 };
 function refreshHint() {
   touch.setLift?.(USES_LIFT.has(mode));   // a rocker sitting inert while you drive a car is worse than none
@@ -625,6 +708,7 @@ document.getElementById('modeHeli')?.addEventListener('click', () => setMode('he
 document.getElementById('modeBoat')?.addEventListener('click', () => setMode('boat'));
 document.getElementById('modeBird')?.addEventListener('click', () => setMode('bird'));
 document.getElementById('modeFish')?.addEventListener('click', () => setMode('fish'));
+document.getElementById('modeSwing')?.addEventListener('click', () => setMode('swing'));
 
 /* ---------- A-DIVE (2026-08-05): click a tower, step inside — the L60/HOARD-2 dive seam ----------
    Everything here is a PROVEN engine/office ability; this block is pure wiring (the engine-first
@@ -843,6 +927,9 @@ function frame(dt, t) {
        running below: it is alive behind the office glass. */
   } else if (mode === 'walk') {
     walker.update(dt, axes);
+    /* Feed the accepted ground forward: eye minus eye-height IS the surface we are standing on, so
+       next frame's roof query gets a truthful ceiling instead of an assumption. */
+    walkGroundY = walker.eyePosition().y - EYE;
     rig.setEye(walker.eyePosition(), walker.eyeDirection());
   } else if (mode === 'drive') {
     pilotCtl.step(dt, { throttle: axes.y, steer: axes.x, lift: 0, boost: axes.boost });
@@ -851,6 +938,14 @@ function frame(dt, t) {
   } else if (mode === 'fish') {
     // A fish has no reverse gear worth having but CAN back-paddle; throttle passes through whole.
     pilotCtl.step(dt, { throttle: axes.y, steer: axes.x, lift: liftFromKeys(), boost: axes.boost });
+  } else if (mode === 'swing') {
+    /* WIRING DRIFT, caught by driving it (2026-08-08): setMode('swing') possessed the body and this
+       dispatch had no branch for it, so every frame fell through to the free-fly `else` and the
+       swinger sat frozen at its spawn — mode switched, camera followed, physics never ran. The
+       ability being in core and the mode button existing proves nothing; the STEP has to be wired.
+       throttle is clamped >=0: W fires and HOLDS the line, and there is no such thing as a reverse
+       grapple. lift is the pump (reel in), which is why 'swing' joins USES_LIFT. */
+    pilotCtl.step(dt, { throttle: Math.max(0, axes.y), steer: axes.x, lift: liftFromKeys(), boost: axes.boost });
   } else if (mode === 'bird') {
     // throttle is clamped ≥0: a wing has no reverse. Space climbs, C dives (see the KEY map above).
     pilotCtl.step(dt, { throttle: Math.max(0, axes.y), steer: axes.x, lift: liftFromKeys(), boost: axes.boost });
@@ -926,6 +1021,7 @@ window.__engine = engine; window.__city = city; window.__cityLife = cityLife; wi
 window.__setMode = setMode; window.__mode = () => mode;
 window.__walker = walker; window.__pilotCtl = pilotCtl; window.__playerCar = playerCar;
 window.__realSky = { trueStars, solarSystem, constellations, get on() { return realSkyOn; }, get resolved() { return realSkyResolved; } };
+window.__swing = swingState;   // A-SWING probe handle (house convention — see docs/engine-invariants.md)
 window.__frame = frame;   // debug/verification probe (matches house convention — see docs/engine-invariants.md)
 window.__cityReady = true;
 

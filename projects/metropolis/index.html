@@ -12,7 +12,10 @@
          beside a dock set in system-ui. Cover the whole class, not one element of it. */
       button, select, input, textarea { font: inherit; }
       :root { color-scheme: dark; }
-      html, body { margin: 0; height: 100dvh; background: #0e0b07; overflow: hidden; overscroll-behavior: none; position: fixed; inset: 0; width: 100%; touch-action: none; }
+      /* The page had NO body font-family, so anything that did not set its own fell all the way
+         back to the UA default — Times. That was not theoretical: no element happened to be affected, but the default was one un-fonted element away from it. Set the
+         inherited default to the stack this project already uses everywhere else. */
+      html, body { margin: 0; font-family: system-ui, sans-serif; height: 100dvh; background: #0e0b07; overflow: hidden; overscroll-behavior: none; position: fixed; inset: 0; width: 100%; touch-action: none; }
       #app { position: fixed; inset: 0; height: 100dvh; touch-action: none; }
       canvas { display: block; touch-action: none; }
       /* id is the HOUSE convention (lgr-loader + .gone) that tools/smoke.mjs waits on — see lessons/main.js:9 */
@@ -112,6 +115,7 @@
         <button id="modeBoat" aria-pressed="false" title="Take the helm of a boat (rudder only works with way on · Shift full ahead)">boat</button>
         <button id="modeBird" aria-pressed="false" title="Be a gull — W flap, A/D bank, Space climb, C dive, Shift beat harder">bird</button>
         <button id="modeFish" aria-pressed="false" title="Be a fish — W/S swim, A/D turn on the spot, Space up, C dive, Shift burst; hit the surface fast to breach">fish</button>
+        <button id="modeSwing" aria-pressed="false" title="Grapple-swing the city — hold W to fire a line at a building, A/D steer the arc, Space reels in to pump, release W to launch">swing</button>
       </div>
     </div>
     <button id="dockToggle">controls ⌄</button>
