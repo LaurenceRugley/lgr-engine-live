@@ -557,10 +557,14 @@ rope.visible = false;
 scene.add(rope);
 
 const swingState = { x: 2.0, y: 3.4, z: 2.0, yaw: 0, pitch: 0, bank: 0, speed: 0, quat: new THREE.Quaternion() };
+/* A METROPOLIS-OWNED COPY of the profile, because `aimMode` is now a runtime TOGGLE (Q) and the model
+   reads the profile object live. Mutating the exported GRAPPLE_PROFILE would reach into every other
+   consumer of the engine — the same shared-default hazard CAR_PROFILE spreads ROAD_PROFILE to avoid. */
+const SWING_PROFILE = { ...GRAPPLE_PROFILE };
 const swingPilotable = {
   pilot: {
-    model: 'grapple', profile: GRAPPLE_PROFILE,
-    controlHints: 'hold W to fire + hold the line · A/D steer the arc · Space reel in · release W to launch',
+    model: 'grapple', profile: SWING_PROFILE,
+    controlHints: 'hold W (or the mouse) to swing — the web aims itself · A/D steer · release to launch · Q for aimed webs',
     getWorldPos: (out) => out.set(swingState.x, swingState.y, swingState.z),
     getTransform: () => swingState,
     setTransform: (st) => {
@@ -596,12 +600,14 @@ const swingPilotable = {
    AND IT MUST OVERSHOOT ropeMax, not stop at it: "there is a building there but it is too far" is a
    DIFFERENT answer from "there is nothing there", and the dim crosshair is how the player is taught
    the difference. A ray that stopped at the limit could never report the first one. */
-/* 9.0 u from the EYE, and the arithmetic matters: the eye is NOT at GRAPPLE_PROFILE.chaseDist. The
+/* 10.0 u from the EYE, and the arithmetic matters: the eye is NOT at GRAPPLE_PROFILE.chaseDist. The
    rig's dolly floor is 4.0 u (camera-rig DIST_MIN) and the grapple declares no `chaseMin`, so the
-   measured chase distance is 4.0, not 1.9. 4.0 + ropeMax 2.2 = 6.2 just to reach the limit; 9.0 leaves
-   ~2.8 u of "there is a building there and it is too far" past it, which is the band the dim crosshair
-   is made of. Sizing this off the PROFILE's chaseDist would have left 0.8 u of readout. */
-const AIM_REACH = 9.0;
+   measured chase distance is 4.0, not 1.9. A-FLOW raised ropeMax to 3.2, so 4.0 + 3.2 = 7.2 just to
+   reach the limit; 10.0 leaves ~2.8 u of "there is a building there and it is too far" past it, which
+   is the band the dim crosshair is made of. This number tracks ropeMax — it was 9.0 when ropeMax was
+   2.2 and would have left only 1.8 u of readout at 3.2. Sizing it off the PROFILE's chaseDist would
+   have left 0.8 u. */
+const AIM_REACH = 10.0;
 const _aim = { x: 0, y: 0, z: 0 };           // ONE reused point — handed to the model by reference (no-hot-alloc, invariant #7)
 let aimHit = null;                            // === _aim on a hit, null on clear sky
 let fireHeld = false;                         // the mouse trigger; W still fires too (the model takes either)
@@ -690,7 +696,12 @@ function setMode(next) {
       const tx = Math.sin(a) * rr, tz = Math.cos(a) * rr;
       if (engine.collider.surfaceAt(tx, tz, 99, 0.22) === -Infinity) { sx = tx; sz = tz; break; }
     }
-    swingState.x = sx; swingState.z = sz; swingState.y = 5.0;
+    /* SPAWN INSIDE THE ANCHOR LAYER, not above it (A-FLOW). 5.0 put you over the skyline: surveying
+       the city's own geometry, swingable anchors live between y 1.6 and 4.6 (below 1.6 the arcs bottom
+       out in the street; above ~4.6 only the few tallest crowns are in reach). Dropped in at 5.0 the
+       first web was a short line to a crown and the launch off it cleared the whole district — one
+       swing and you were over the bay. 3.4 starts you in the canyon where the lines are. */
+    swingState.x = sx; swingState.z = sz; swingState.y = 3.4;
     swingState.yaw = rig.azimuth + Math.PI; swingState.speed = 1.4;
     swingState.vx = undefined; swingState.vz = undefined; swingState.anchor = null; swingState.rope = 0;
     pilotCtl.possess(swingPilotable);
@@ -707,7 +718,11 @@ function setMode(next) {
        drag path and the phone's look surface both feed rig.orbit, so all three input routes aim the
        same way and pointer lock is a comfort upgrade rather than the only way in. */
     pilotCtl.setFreeLook(true);
-    reticle.setVisible(true);
+    /* THE CROSSHAIR BELONGS TO 'point' MODE ONLY (A-FLOW). In 'auto' the game chooses the anchor, so a
+       mark that says "you will web THIS" would be a lie — and a mark that never brightens (aimInRange
+       is `undefined` in auto) reads as a broken HUD. Pointer lock still engages, because turning the
+       view is worth having whether or not you are aiming with it. */
+    reticle.setVisible(SWING_PROFILE.aimMode === 'point');
   }
   else if (mode === 'fish') {
     rig.setMode(CAM.PERSPECTIVE);
@@ -747,7 +762,8 @@ const HINTS = {
   boat:  'W/S throttle · A/D rudder (only steers with way on) · Shift full-ahead',
   fish:  'W/S swim · A/D turn · Space up · C dive · Shift burst — build speed and hit the surface to BREACH',
   bird:  'W flap · A/D bank · Space climb · C dive · Shift beat harder — ride the water down, then press C to PLUNGE IN',
-  swing: 'CLICK to capture the mouse, then AIM with it · HOLD the button to web what the crosshair marks (dim = out of range) · A/D steer · Space reel in · release to launch · Esc frees the mouse',
+  swing: 'HOLD W or the mouse button to SWING — the web aims itself, forward and up · A/D steer the arc · release to launch · Q = aimed webs (crosshair) · Esc frees the mouse',
+  swingPoint: 'CLICK to capture the mouse, then AIM with it · HOLD the button to web what the crosshair marks (dim = out of range) · A/D steer · Space reel in · release to launch · Q = back to auto-swing',
 };
 const MOBILE_HINTS = {
   fly:   'stick to move · push past the ring to boost · drag to look · tap a tower',
@@ -757,13 +773,16 @@ const MOBILE_HINTS = {
   boat:  'stick to steer · push past the ring for full ahead',
   bird:  'stick to fly · push past the ring to beat harder · tap dive at the water to plunge in',
   fish:  'stick to swim · push past the ring to burst · surface fast to breach',
-  swing: 'drag to aim the crosshair · hold the stick forward to web what it marks (dim = too far) · steer the arc · lift to reel in · let go to launch',
+  swing: 'hold the stick forward to SWING — the web aims itself · steer the arc · let go to launch',
+  swingPoint: 'drag to aim the crosshair · hold the stick forward to web what it marks (dim = too far) · steer the arc · lift to reel in · let go to launch',
 };
 function refreshHint() {
   touch.setLift?.(USES_LIFT.has(mode));   // a rocker sitting inert while you drive a car is worse than none
   const h = document.getElementById('hint');
   if (!h) return;
-  h.textContent = (MOBILE ? MOBILE_HINTS : HINTS)[mode] || HINTS.fly;
+  // the swinger has TWO control schemes behind one mode button, so the hint names the one you are in
+  const key = (mode === 'swing' && SWING_PROFILE.aimMode === 'point') ? 'swingPoint' : mode;
+  h.textContent = (MOBILE ? MOBILE_HINTS : HINTS)[key] || HINTS.fly;
 }
 
 document.getElementById('modeFly').addEventListener('click', () => setMode('fly'));
@@ -871,6 +890,18 @@ window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   // A-CROSSING: the PRESS (not the hold) of the dive key, while the gull is on the water, is the plunge.
   if (k === KEY.down && !heldKeys.has(k) && plunge()) { e.preventDefault(); return; }
+  /* A-FLOW: Q swaps the two ways of choosing an anchor. 'auto' (the default) is the swing — hold the
+     button and the game picks forward-and-above for a long arc. 'point' is the aimed web A-AIM built:
+     a crosshair, and you web exactly what it marks. Both are real verbs and the owner wanted the aimed
+     one kept for zipping to a chosen spot, so it gets a key rather than being dead code no build can
+     reach. The reticle follows the mode on the same press — one switch, one place. */
+  if (k === 'q' && !heldKeys.has(k) && mode === 'swing') {
+    SWING_PROFILE.aimMode = SWING_PROFILE.aimMode === 'point' ? 'auto' : 'point';
+    reticle.setVisible(SWING_PROFILE.aimMode === 'point');
+    if (SWING_PROFILE.aimMode !== 'point') reticle.setInRange(false);
+    refreshHint();
+    e.preventDefault(); return;
+  }
   heldKeys.add(k);
 });
 window.addEventListener('keyup', (e) => {
@@ -1042,7 +1073,7 @@ function frame(dt, t) {
     /* The crosshair reads the MODEL's verdict (state.aimInRange), never its own copy of the range rule
        — one implementation, read twice. A HUD that recomputed "in range" would eventually disagree
        with the mechanic, and the player would find out by firing at a bright mark and getting nothing. */
-    reticle.setInRange(!!swingState.aimInRange);
+    if (SWING_PROFILE.aimMode === 'point') reticle.setInRange(!!swingState.aimInRange);
     if (swingState.anchor && !_hadAnchor) {   // the attach frame — record both points while they are the same frame's
       __aimFire.ax = _aim.x; __aimFire.ay = _aim.y; __aimFire.az = _aim.z;
       __aimFire.hx = swingState.anchor.x; __aimFire.hy = swingState.anchor.y; __aimFire.hz = swingState.anchor.z;
@@ -1126,6 +1157,18 @@ window.__setMode = setMode; window.__mode = () => mode;
 window.__walker = walker; window.__pilotCtl = pilotCtl; window.__playerCar = playerCar;
 window.__realSky = { trueStars, solarSystem, constellations, get on() { return realSkyOn; }, get resolved() { return realSkyResolved; } };
 window.__swing = swingState;   // A-SWING probe handle (house convention — see docs/engine-invariants.md)
+/* A-FLOW: the profile and the aim-mode switch, so the probe can exercise BOTH verbs in one run. The
+   setter goes through the same three steps the Q key does, because a probe that flipped only the
+   profile field would leave the crosshair in whatever state the other mode left it — and then it would
+   be testing a HUD state no player can reach. */
+window.__swingProfile = SWING_PROFILE;
+window.__setAimMode = (m) => {
+  SWING_PROFILE.aimMode = m === 'point' ? 'point' : 'auto';
+  reticle.setVisible(mode === 'swing' && SWING_PROFILE.aimMode === 'point');
+  if (SWING_PROFILE.aimMode !== 'point') reticle.setInRange(false);
+  refreshHint();
+  return SWING_PROFILE.aimMode;
+};
 // A-AIM probes: the live aim point + whether it is reachable, and the attach-frame fidelity record.
 window.__aim = { pt: _aim, get hit() { return !!aimHit; }, get inRange() { return !!swingState.aimInRange; },
                  get locked() { return lockAim.locked; }, get firing() { return fireHeld; }, get reach() { return AIM_REACH; } };

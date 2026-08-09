@@ -810,32 +810,123 @@ export function carryMomentum(from, to, { speedScale = 1, y = null, pitch = null
    energy — this is what makes a swing accelerate instead of decaying to a dead hang), and `release`
    preserving momentum so letting go converts the arc into a launch.
 
+   ---- A-FLOW (2026-08-08): THE ASSIST *IS* THE MECHANIC, and that is the correction ----------------
+   A-AIM made the player pick the anchor with a crosshair. Measured on the auto path with nothing but
+   the button held, that build swung 0.6 times in 20 seconds, covered 1.16 u, and was STRANDED (never
+   moved 1 u) from 5 of 12 starts. It was a grappling hook — precise, and not fun.
+
+   The reference mechanic is the opposite of precise. In SM2 (2004) and the Insomniac games you HOLD A
+   BUTTON and the GAME picks the anchor, forward and above, chosen to give a long forward arc. Fristrom's
+   post-mortem is explicit that the fun came from the assists, not from the simulation. So five named
+   assists now carry the feel, and each one exists because a measured failure demanded it:
+
+     1. `findAnchor` SCORES FOR A LONG FORWARD ARC instead of taking the nearest hit. Nearest is exactly
+        backwards: the nearest anchor is the SHORTEST rope, which is the TIGHTEST arc. A pendulum on a
+        rope whose anchor sits horizontal distance h ahead of you carries you ~2h forward, so the search
+        maximises h — as far ahead as the rope reaches, biased to where you are already going.
+     2. `arcClear` REPLACES THE ropeMax ARITHMETIC. ropeMax was 2.2 because a 3.2 rope put the bottom of
+        every arc at pavement level. That was a GLOBAL constant doing a PER-ANCHOR job: whether an arc
+        grounds out depends on how high THAT anchor is. Rejecting candidates whose predicted arc bottom
+        (anchorY − rope) would clip the street lets the rope grow to 3.2 and the arcs grow with it.
+     3. `assist` — a forward tangential push that FADES OUT as you approach maxSpeed. This is the
+        "never dead-hang" rule: stall under an anchor and it walks you forward again, but it can never
+        do more than the cap, so top speed is still earned by a good release.
+     4. `autoRelease` + `launchUp`/`launchFwd` — hold the button and the line CUTS ITSELF at the top of
+        the forward arc, throwing you into free flight, and the next web is a new forward anchor. That
+        loop is what "hold the button and fly" actually is; without it, holding the button is a hang.
+     5. `zipAccel` — a WINCH along the line toward an anchor above you. This is the takeoff, and it is
+        the fix for a bug that had nothing to do with aiming: a grounded swinger could not leave the
+        street. Measured cause (not the one guessed) — `findAnchor` DOES find an anchor from the street
+        at 9 of 9 spots, but the floor clamp below set `state.anchor = null` on the same frame it was
+        made, and nothing pulled along the line anyway. Both halves are fixed: a line to something
+        OVERHEAD now survives ground contact, and the winch reels you up it.
+
    C++ anchor: the constraint solve is one Gram-Schmidt projection — remove the component of v along
    the rope, keep the tangential part. `v -= n * dot(v, n)`. */
 export const GRAPPLE_PROFILE = {
   gravity: 5.4,           // u/s² — heavier than the bird's trade; a swing should feel weighty
-  /* ropeMax is set by ARITHMETIC, not taste. Anchors in this city land around y=3.5 and the street
-     sits near 0.3, so a 3.2u rope put the bottom of every arc exactly at pavement level — you swung
-     once, grounded out, and the rope was cut (measured: attached on 3 of 18 samples). 2.2 leaves the
-     arc bottoming out around y=1.3, clear of the street, which is what lets a swing CONTINUE instead
-     of becoming a series of landings. A taller city profile can raise this. */
-  ropeMax: 2.2,           // u — longest web you can fire
+  /* ropeMax WAS 2.2 by arithmetic: anchors land near y=3.5 and the street near 0.3, so a 3.2 rope put
+     the bottom of every arc at pavement level. A-FLOW moved that job to where it belongs — `arcClear`
+     rejects the individual anchors whose arc would ground out, which is a per-anchor question a global
+     constant could only answer by assuming the WORST anchor. With the per-anchor guard in place the
+     rope can be long again, and rope length is the single biggest lever on travel-per-swing: a swing
+     carries you roughly 2× the horizontal distance to its anchor. */
+  ropeMax: 3.2,           // u — longest web you can fire
   ropeMin: 0.55,          // u — how far in you can reel before it reads as a collision
-  /* A-AIM (2026-08-08). 'point' = the PLAYER aims: the consumer resolves a world point under its own
-     crosshair (engine-core/aim.js resolveAimPoint) and hands it in as `axes.aimPoint`; this model only
-     asks "can I reach that from HERE". 'fan' = the original auto-aim cone below, kept — not deleted —
-     because it is the right answer for anything without a player at the controls (an NPC swinger, an
-     attract-mode reel, a touch-only build with no aim surface). Choosing the anchor is now the SKILL,
-     which is the whole point: an assist that picks the anchor for you also picks the line for you. */
-  aimMode: 'point',       // 'point' (player-aimed) | 'fan' (the legacy auto-aim cone)
-  aimCone: 0.62,          // rad — half-angle of the anchor search fan (the aim assist) — 'fan' mode only
-  aimRays: 7,             // how many rays in the fan; odd so one is dead ahead — 'fan' mode only
-  aimLift: 0.42,          // rad — the fan is biased UP by this: you swing from above, not from a wall
+  /* A-AIM (2026-08-08) / A-FLOW (2026-08-08). 'point' = the PLAYER aims: the consumer resolves a world
+     point under its own crosshair (aim.js resolveAimPoint) and hands it in as `axes.aimPoint`; this
+     model only asks "can I reach that from HERE". 'auto' = the game picks, forward and above, scored
+     for a long forward arc.
+     THE DEFAULT IS 'auto', and that is a REVERSAL of A-AIM's default, made on the owner's call and on
+     a measurement. Crosshair aiming is the grappling-hook feel (Just Cause, Sekiro); the reference
+     mechanic here is a HELD BUTTON with the game choosing. 'point' is NOT deleted — it is the right
+     answer for an aimed zip, for an NPC given a specific target, and for any consumer that wants
+     precision — it just is not what "make it feel like swinging" means. ('fan' is accepted as the
+     legacy alias for 'auto'; anything not 'point' takes the auto path.) */
+  aimMode: 'auto',        // 'auto' (the game picks; 'fan' = legacy alias) | 'point' (player-aimed)
+  aimCone: 1.35,          // rad — half-angle of the forward YAW sweep. Wide: this is an assist, not a test.
+  aimRays: 9,             // yaw samples across the cone; odd so one is dead ahead
+  /* The fan sweeps ELEVATION too, and that is the difference between finding a long arc and finding a
+     wall. A single upward bias (the old `aimLift` 0.42) only ever looked along one slope, so the far,
+     shallow anchors that make a wide arc were invisible to it — every hit came back short and steep.
+     WHY IT REACHES ALL THE WAY TO 1.25 rad (72°): a ray's slope IS sin(el) — the hit is on the ray, so
+     rise = d·sin(el) exactly, and rise/d cancels the distance out. That makes `zipSlopeMin` a filter on
+     the ELEVATION LIST, not on the world: with slopes stopping at 0.66 (sin 0.61), a single ray was the
+     only one that could ever produce a zip, and a body next to a climbable wall would report no line
+     at all. The steep entries are the climbing lines. */
+  aimEl: [0.10, 0.26, 0.44, 0.66, 0.95, 1.25],
+  aimLift: 0.42,          // rad — retained for consumers pinned to the pre-A-FLOW single-slope fan
+  minRise: 0.35,          // u — an anchor must be at least this far ABOVE you (never web the pavement)
+  minAlign: -0.15,        // cos — how far off your direction of travel an anchor may sit and still count
+  arcClear: 0.45,         // u — the predicted arc bottom must clear the ground by this (see ropeMax)
+  /* THE NEVER-DEAD-HANG ASSIST. A forward tangential push while roped, scaled by how far BELOW maxSpeed
+     you are, so it is a rescue at 1 u/s and nothing at all at the cap. Fixed thrust would make every
+     swing identical; this makes a stall recoverable without making a good release worthless. */
+  assist: 4.2,            // u/s² forward tangential help while roped, fading to 0 at maxSpeed
+  autoRelease: true,      // hold the button and the line cuts itself at the top of the forward arc
+  /* releasePitch, aimCone and the two launch constants were SWEPT against travel-per-swing on the real
+     city geometry (40 starts inside the tall core, 8 s each, button held and nothing else). They trade
+     along one axis: cut earlier and launch harder and each swing covers more ground, but it throws you
+     further out of the core, where there is nothing to web and the run just ends.
+     WITH `topOut` GUARANTEEING A RELEASE, a LATE releasePitch became strictly better rather than a
+     trade — it stops meaning "hang until the arc earns 57°" and starts meaning "take the steep launch
+     when the arc offers one, otherwise leave at the top". Measured: 0.62 → 2.1 webs per trial, 30 of
+     40 starts stranded, 30% of frames on the pavement; 1.0 → 2.6 webs, 18 stranded, 8% grounded, with
+     the same ground covered. These are LEVEL-FITTED, which is why they are named constants: a taller,
+     wider city wants them pushed back up. */
+  releasePitch: 1.0,      // rad — the launch angle a cut is timed to when the arc EARNS it (≈57°)
+  /* THE TWO BACKSTOPS THAT MAKE `releasePitch` SAFE TO RAISE. A pitch target alone is a release the arc
+     has to EARN, and a shallow arc never earns it: the velocity on a small-amplitude pendulum simply
+     never tilts 49° up, so the line never cut and "hold the button" became a five-second hang again —
+     the exact bug this arc exists to kill, wearing a new hat (measured: 69% of frames attached, 1.1
+     webs per 8 s trial, and the roped path GROWING with releasePitch because the body was swinging
+     back and forth rather than travelling). `topOut` releases at the far extreme of the arc, where vy
+     falls back through zero — every pendulum reaches that, so a release is guaranteed. `maxHang` is the
+     last word: no line outlives it, whatever the geometry does. */
+  topOut: true,           // release at the far top of the arc even if releasePitch was never reached
+  maxHang: 2.2,           // s — the longest any single web may last (the literal never-dead-hang rule)
+  launchUp: 0.7,          // u/s added UP on any release — the flick that turns an arc into a jump
+  launchFwd: 0.5,         // u/s added FORWARD on any release
+  refireDelay: 0.10,      // s — the shortest gap between two webs (a cut must read as a cut)
+  refireVy: 0.55,         // u/s — do not re-web while still climbing faster than this (let the launch fly)
+  zipAccel: 15.0,         // u/s² pull ALONG the line toward an anchor above you — the takeoff winch
+  /* THE WINCH IS GOVERNED ON CLIMB RATE, and the first version was governed on horizontal speed, which
+     did not work for a reason worth keeping: the winch's own forward pull raised horizontal speed, so
+     it throttled ITSELF off. Traced frame by frame — the line steepened correctly (slope 0.61 → 1.00)
+     while `vy` never once exceeded 0.15 and the body never left the pavement. A winch's governor has to
+     read the thing the winch is FOR. */
+  zipClimb: 3.2,          // u/s — the climb rate the winch drives toward, and fades out at
+  /* HOW STEEP A LINE HAS TO BE TO BE WORTH WINCHING, as a sine (rise ÷ rope). The winch can only lift
+     you if its vertical component beats gravity: zipAccel × slope > gravity, i.e. slope > 5.4/15 = 0.36.
+     0.45 keeps margin. Below it the winch does not lift, it DRAGS — measured, and it looked exactly
+     like the stranding it was meant to cure: attached, 4.3 u covered, 83% of frames still on the
+     pavement, peak height 0.64. A shallow line is not a way up; it is a leash. */
+  zipSlopeMin: 0.45,
   pump: 1.5,              // u/s of rope shortening while the lift axis is held (the energy input)
   airControl: 2.1,        // u/s² of lateral nudge while attached (steering the arc)
   freeControl: 3.4,       // u/s² of control while NOT attached (more, since you have nothing else)
   airDrag: 0.06,          // per-second velocity bleed; low, so momentum carries between swings
-  maxSpeed: 7.5,          // u/s hard cap so a long pump chain cannot go to orbit
+  maxSpeed: 9.0,          // u/s hard cap so a long pump chain cannot go to orbit
   climbRate: 1.15,        // u/s up a wall while clinging (Space up, C down)
   clingReach: 0.24,       // u — how close a facade has to be to stick to it
   skim: 0.06,             // clearance above ground/water/ROOFTOP, same idiom as the bird
@@ -858,26 +949,94 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
   const _e = new THREE.Euler();
   const P = (k) => (profile[k] !== undefined ? profile[k] : GRAPPLE_PROFILE[k]);
 
-  /* Fire a fan of rays and keep the nearest real hit. `segmentHit` returns the blocking fraction
-     t∈[0,1] (1 = clear), so an anchor exists iff some ray comes back < 1. The fan is biased upward:
-     an anchor BELOW you is a wall to smack into, not something to swing from. */
+  /* ---- THE AUTO-ANCHOR (A-FLOW) — the game picks, and it picks for a LONG FORWARD ARC ------------
+     Fire a fan of rays over yaw × elevation and keep the best SCORING hit. `segmentHit` returns the
+     blocking fraction t∈[0,1] (1 = clear), so an anchor exists iff some ray comes back < 1.
+
+     THE SCORE IS PREDICTED TRAVEL, not distance. Hang from an anchor whose horizontal offset ahead of
+     you is h and the arc carries you to roughly h on the far side — about 2h of ground per swing. So
+     the thing to maximise is h, weighted by how well the anchor lines up with where you are ALREADY
+     GOING (`align`); a web sideways spends the swing turning instead of travelling.
+     The previous version kept the NEAREST hit, which maximises exactly the wrong quantity: nearest =
+     shortest rope = tightest arc = the pendulum that swings in place. That one line is most of why the
+     old build bounced (measured 0.51 u of net ground per swing) instead of flying.
+
+     TWO REJECTIONS AND A FALLBACK TIER:
+       · `minRise` — an anchor at or below your feet is a wall to smack into or a pavement to web. On
+         the ground this is the difference between a line that can lift you and one that cannot.
+       · `minAlign` — behind you is not a swing, it is a stop.
+       · `arcClear` SORTS the survivors rather than rejecting them. An anchor whose arc bottom
+         (anchorY − rope) clears the street is a SWING; one whose does not is still a perfectly good
+         ZIP — a line you get winched UP rather than swung under. A zip is taken only when no swing
+         exists, and it is scored by HEIGHT, because the whole point of a zip is to buy the altitude
+         that makes the NEXT line a swing.
+         THAT TIER IS THE TAKEOFF. A first pass that simply rejected arc-clear failures still left a
+         grounded player stranded (measured 0/12 lift-offs): from the street, essentially every anchor
+         in this city fails arc-clear — a 1.2 u shopfront cannot be swung from by someone standing next
+         to it, and that is true, not a bug. What a stranded player needs is not a better swing; it is
+         a way UP. */
   function findAnchor(state, world) {
     if (!world || !world.segmentHit) return null;
-    const rays = P('aimRays'), cone = P('aimCone'), len = P('ropeMax');
-    let best = null;
-    for (let i = 0; i < rays; i++) {
-      const frac = rays === 1 ? 0 : (i / (rays - 1)) * 2 - 1;      // -1..1 across the fan
-      const yaw = state.yaw + frac * cone;
-      const el = P('aimLift') + Math.abs(frac) * 0.18;             // edges of the fan aim slightly higher
-      const dx = Math.sin(yaw) * Math.cos(el), dz = Math.cos(yaw) * Math.cos(el), dy = Math.sin(el);
-      const ex = state.x + dx * len, ey = state.y + dy * len, ez = state.z + dz * len;
-      const t = world.segmentHit(state.x, state.y, state.z, ex, ey, ez, 0.05);
-      if (t >= 1) continue;                                        // clear sky down this ray
-      const d = t * len;
-      if (d < P('ropeMin')) continue;                              // too close to swing from
-      if (!best || d < best.d) best = { d, x: state.x + dx * d, y: state.y + dy * d, z: state.z + dz * d };
+    const rays = P('aimRays'), len = P('ropeMax'), els = P('aimEl');
+    const ropeMin = P('ropeMin'), minRise = P('minRise'), minAlign = P('minAlign'), arcClear = P('arcClear');
+    /* Bias toward where you are GOING when you are moving, where you FACE when you are not. Momentum is
+       the better predictor mid-flight (yaw is derived FROM velocity anyway); yaw is all there is at a
+       standstill, which is the takeoff case. */
+    const sp = Math.hypot(state.vx || 0, state.vz || 0);
+    const moving = sp > 0.35;
+    const hx = moving ? state.vx / sp : Math.sin(state.yaw);
+    const hz = moving ? state.vz / sp : Math.cos(state.yaw);
+    const baseYaw = Math.atan2(hx, hz);
+    /* WITH NO MOMENTUM THERE IS NO "FORWARD", so the cone opens to the whole circle. This is not a
+       nicety — it is the fix for a permanent dead end. `state.yaw` only updates while the body is
+       actually moving, so a swinger who lands on a roof and stops keeps a FROZEN heading, and a fixed
+       forward cone then searches the same empty 120° for as long as the game runs. Traced: one good
+       swing, a landing at y 1.14, and then 14 seconds of vy 0, hs 0, no anchor, no escape — while
+       usable lines existed the whole time, just not in the direction the body happened to stop facing. */
+    const cone = moving ? P('aimCone') : Math.PI;
+    /* ANGULAR RESOLUTION IS THE THING TO HOLD CONSTANT, not the ray count. Opening the cone to the full
+       circle while keeping 9 rays spread them to 45° apart, so which 8 directions got sampled depended
+       on whatever heading the body happened to stop facing — and a stationary swinger in a canyon could
+       miss every climbable wall around it. Measured as a 2-of-4 flake on the street-takeoff check whose
+       only variable was the starting yaw. Scale the count with the cone and the search stops caring. */
+    const n = Math.max(rays, Math.round(rays * cone / P('aimCone')));
+    let best = null, zip = null;
+    for (let i = 0; i < n; i++) {
+      const frac = n === 1 ? 0 : (i / (n - 1)) * 2 - 1;            // -1..1 across the fan
+      const yaw = baseYaw + frac * cone;
+      const sy = Math.sin(yaw), cy = Math.cos(yaw);
+      for (let e = 0; e < els.length; e++) {
+        const el = els[e], ce = Math.cos(el);
+        const dx = sy * ce, dz = cy * ce, dy = Math.sin(el);
+        const t = world.segmentHit(state.x, state.y, state.z, state.x + dx * len, state.y + dy * len, state.z + dz * len, 0.05);
+        if (t >= 1) continue;                                      // clear sky down this ray
+        const d = t * len;
+        if (d < ropeMin) continue;                                 // too close to swing from
+        const ax = state.x + dx * d, ay = state.y + dy * d, az = state.z + dz * d;
+        const rise = ay - state.y;
+        if (rise < minRise) continue;                              // at or below your feet — not an anchor
+        const h = Math.hypot(ax - state.x, az - state.z);
+        if (h < 1e-4) continue;                                    // straight overhead: no arc to swing
+        const align = ((ax - state.x) * hx + (az - state.z) * hz) / h;
+        if (align < minAlign) continue;
+        const gy = world.heightAt ? world.heightAt(ax, az) : 0;
+        if (ay - d < gy + P('skim') + arcClear) {                  // arc bottoms out in the street → ZIP tier
+          /* SCORED BY SLOPE, NOT BY HEIGHT, and that distinction is the whole tier. Scoring by absolute
+             rise picks the FAR, SHALLOW line — the one that reaches highest by reaching furthest — and
+             a shallow line cannot lift you, so the winch just towed the body along the pavement. */
+          const slope = rise / d;
+          if (slope < P('zipSlopeMin')) continue;
+          const zs = slope + 0.2 * Math.max(0, align);             // steepest wins; forward breaks ties
+          if (!zip || zs > zip.score) zip = { d, x: ax, y: ay, z: az, score: zs, zip: true };
+          continue;
+        }
+        /* h is the travel; the align term keeps a wide fan from picking a sideways anchor just because
+           it is far. The 0.35 floor means a slightly-off anchor still beats no anchor at all. */
+        const score = h * (0.35 + 0.65 * Math.max(0, align));
+        if (!best || score > best.score) best = { d, x: ax, y: ay, z: az, score };
+      }
     }
-    return best;
+    return best || zip;
   }
 
   /* A-AIM: the PLAYER-aimed path. The consumer has already resolved a world point under its crosshair
@@ -900,6 +1059,20 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     return { d, x: aim.x, y: aim.y, z: aim.z };
   }
 
+  /* CUT THE LINE, and a cut is a LAUNCH (A-FLOW). Whatever velocity the arc built is kept — that part
+     was always true — plus a small up+forward flick, which is what turns "the rope ended" into "I threw
+     myself". `refire` is the gap before the next web can be taken: without it, a held button re-attaches
+     on the very next frame and the launch never happens, so the cut would be invisible. */
+  function cutLine(state, launch) {
+    state.anchor = null;
+    state.refire = P('refireDelay');
+    state.hang = 0; state.rose = false;      // per-web bookkeeping dies with the web that owns it
+    if (!launch) return;
+    const h = Math.hypot(state.vx, state.vz);
+    state.vy += P('launchUp');
+    if (h > 1e-4) { state.vx += (state.vx / h) * P('launchFwd'); state.vz += (state.vz / h) * P('launchFwd'); }
+  }
+
   function step(state, axes, dt, world) {
     /* Adopt the shared fields into a real vector ONCE. Coming from another body we inherit a scalar
        speed + yaw, so convert it — that is what makes walk→swing keep your momentum instead of
@@ -907,8 +1080,9 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     if (typeof state.vx !== 'number') {
       const s0 = state.speed || 0;
       state.vx = Math.sin(state.yaw) * s0; state.vz = Math.cos(state.yaw) * s0; state.vy = 0;
-      state.anchor = null; state.rope = 0;
+      state.anchor = null; state.rope = 0; state.refire = 0; state.hang = 0; state.rose = false;
     }
+    state.refire = Math.max(0, (state.refire || 0) - dt);
 
     const boost = clamp(axes.boost || 0, 0, 1);
     /* FIRE is `axes.fire` OR a held throttle. Two sources on purpose, and this is not indecision:
@@ -922,20 +1096,29 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
        uses — one implementation of "in range", read two ways. Computing it twice (once here, once in
        the HUD) is how the mark and the mechanic drift apart, and the drift is invisible until the day
        the player fires at a bright crosshair and nothing happens. */
-    const pointMode = P('aimMode') !== 'fan';
+    const pointMode = P('aimMode') === 'point';
     const reach = pointMode ? reachFromAim(state, axes.aimPoint) : null;
     state.aimInRange = pointMode ? !!reach : undefined;
 
-    // 1) ATTACH / RELEASE. Holding fire keeps the line; letting go cuts it, and whatever velocity
-    //    the arc has built is simply kept — the release IS the launch, no special case.
-    if (fire && !state.anchor) {
+    /* 1) ATTACH / RELEASE. Holding fire keeps the line; letting go cuts it, and whatever velocity the
+       arc has built is kept — the release IS the launch.
+       THE TWO GATES ON RE-ATTACHING both exist so that "hold the button" reads as a CHAIN OF SWINGS
+       rather than one continuous hang. `refire` is the beat after a cut; `refireVy` says do not take a
+       new line while the last launch is still climbing — let it fly, web again on the way down. That is
+       the rhythm of the reference games, and it is the difference between flying and being winched. */
+    const canFire = (state.refire || 0) <= 0 && (pointMode || state.vy <= P('refireVy'));
+    if (fire && !state.anchor && canFire) {
       const a = pointMode ? reach : findAnchor(state, world);
       if (a) {
-        state.anchor = { x: a.x, y: a.y, z: a.z };
+        /* `zip` is the TIER the search put this line in, carried on the anchor because it decides what
+           the line is FOR. A swing line is swung on; a zip line is climbed. Deciding that once, at
+           attach, is what stops the winch from yanking a working swing straight every time the arc
+           passes under its own anchor (where the line is, momentarily, perfectly steep). */
+        state.anchor = { x: a.x, y: a.y, z: a.z, zip: !!a.zip };
         state.rope = Math.max(P('ropeMin'), a.d);
       }
     } else if (!fire && state.anchor) {
-      state.anchor = null;
+      cutLine(state, true);
     }
 
     /* 2) WALL CLING (A-CLIMB). Before gravity, because clinging is the absence of falling. A short
@@ -970,11 +1153,48 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     }
     const ctl = (state.anchor ? P('airControl') * (1 + (P('boost').airControl - 1) * boost) : P('freeControl'));
     if (axes.steer) {
-      // lateral nudge, perpendicular to travel — steers the arc without adding raw speed
-      const sp = Math.hypot(state.vx, state.vz) || 1;
-      const px = state.vz / sp, pz = -state.vx / sp;
-      state.vx += px * -axes.steer * ctl * dt;
-      state.vz += pz * -axes.steer * ctl * dt;
+      /* Lateral nudge, perpendicular to travel — steers the arc without adding raw speed.
+         PERPENDICULAR TO *WHAT*, THOUGH: with vx = vz = 0 the old `state.vz / sp` was 0/1 = 0 on both
+         axes, so steering a stopped swinger did precisely nothing. Land on a roof, come to rest, and
+         the controls were dead. Fall back to the FACING frame when there is no travel to be
+         perpendicular to — then the nudge starts the motion and yaw follows it from the next frame. */
+      const sp = Math.hypot(state.vx, state.vz);
+      const dx = sp > 0.05 ? state.vx / sp : Math.sin(state.yaw);
+      const dz = sp > 0.05 ? state.vz / sp : Math.cos(state.yaw);
+      state.vx += dz * -axes.steer * ctl * dt;
+      state.vz += -dx * -axes.steer * ctl * dt;
+    }
+
+    if (state.anchor) {
+      /* 3a) THE NEVER-DEAD-HANG ASSIST (A-FLOW). Push forward along the arc, scaled by how far below
+         maxSpeed you are — full help at a standstill, none at the cap. The rope constraint below strips
+         whatever part of this points along the line, so it only ever adds TANGENTIAL speed, which is
+         the same thing pumping does and the same thing Fristrom's post-mortem describes as the reason
+         the 2004 game felt good: the simulation is real, the energy is given. At a true dead hang there
+         is no travel direction to push along, so fall back to facing — otherwise the one state the
+         assist exists to rescue is the one state it cannot act in. */
+      const hs = Math.hypot(state.vx, state.vz);
+      const ux = hs > 0.05 ? state.vx / hs : Math.sin(state.yaw);
+      const uz = hs > 0.05 ? state.vz / hs : Math.cos(state.yaw);
+      const fade = Math.max(0, 1 - state.speed / P('maxSpeed'));
+      const a = P('assist') * fade * dt;
+      state.vx += ux * a; state.vz += uz * a;
+
+      /* 3b) THE WINCH / WEB-ZIP. Reel yourself UP the line toward an anchor above you while you are
+         slow. This is the takeoff: from the street you web something high, the winch pulls you up it,
+         and the arc takes over the moment you have speed. It fades out above `zipBelow` so it never
+         competes with a swing that is already working — a permanent pull along the rope would flatten
+         every arc into a straight line to the anchor. */
+      if (state.anchor.zip) {
+        const rise = state.anchor.y - state.y;
+        const dx = state.anchor.x - state.x, dz = state.anchor.z - state.z;
+        const L = Math.hypot(dx, rise, dz) || 1e-6;
+        const fade = clamp(1 - state.vy / P('zipClimb'), 0, 1);
+        if (fade > 0) {
+          const k = P('zipAccel') * fade * dt;
+          state.vx += (dx / L) * k; state.vy += (rise / L) * k; state.vz += (dz / L) * k;
+        }
+      }
     }
 
     // 3) PUMP — the whole reason a swing accelerates instead of decaying. Reeling in on the downswing
@@ -999,6 +1219,35 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
         state.z = state.anchor.z + nz * state.rope;
         const radial = state.vx * nx + state.vy * ny + state.vz * nz;
         if (radial > 0) { state.vx -= nx * radial; state.vy -= ny * radial; state.vz -= nz * radial; }
+      }
+
+      /* 4b) AUTO-RELEASE (A-FLOW) — the line cuts ITSELF at the top of the forward arc, and this is
+         what makes a HELD BUTTON mean "keep swinging" instead of "keep hanging". Tested AFTER the
+         constraint, because the velocity that matters is the tangential one the rope just left us.
+         THREE CONDITIONS, and all three are needed:
+           · you have passed UNDER the anchor and are climbing the far side (`ahead > 0`) — otherwise
+             the swing-in, which also rises, would cut on the way to the bottom;
+           · the arc has turned your velocity up to `releasePitch` — that is the launch angle, and near
+             35° is where a ballistic arc covers the most ground;
+           · there is real speed to launch with; cutting a slow swing just drops you.
+         A player who lets go earlier still gets the same launch — this only supplies the release for a
+         player who is holding the button and expecting the game to fly them. */
+      /* A ZIP ENDS ON ARRIVAL. Without this the winch reels you all the way into the facade it webbed
+         and holds you there, which is a different way of being stuck. Cutting a rope-length short of
+         the anchor, with the launch flick, pops you up over the roof edge with the altitude the zip was
+         taken to buy — and the next search, run from up there, finds a real SWING. */
+      if (state.anchor && state.anchor.zip && state.y > state.anchor.y - P('minRise')) cutLine(state, true);
+
+      if (state.anchor && P('autoRelease') && fire) {
+        state.hang = (state.hang || 0) + dt;
+        const hs = Math.hypot(state.vx, state.vz);
+        const ahead = hs > 1e-4
+          ? ((state.x - state.anchor.x) * state.vx + (state.z - state.anchor.z) * state.vz) / hs : 0;
+        if (state.vy > 0.05) state.rose = true;             // this web has carried you upward at least once
+        const earned = hs > 0.4 && state.vy > 0 && ahead > 0 && Math.atan2(state.vy, hs) >= P('releasePitch');
+        // the far extreme of the arc: you rose, you are past the anchor, and vy has fallen back to zero
+        const topped = P('topOut') && state.rose && ahead > 0 && state.vy <= 0;
+        if (earned || topped || state.hang >= P('maxHang')) cutLine(state, true);
       }
     }
 
@@ -1029,7 +1278,22 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     if (state.y < floor) {
       state.y = floor;
       if (state.vy < 0) state.vy = 0;
-      state.anchor = null;
+      /* A LINE TO SOMETHING OVERHEAD SURVIVES A LANDING — and this one line is the measured cause of
+         "a grounded swinger is stranded" (A-FLOW). The guess was that the aim accepted the pavement;
+         the measurement said otherwise: the anchor search finds a real anchor from the street at 9 of 9
+         spots, attaches, and then THIS branch cut it on the very same frame, every frame, forever. A
+         rope to something above you is not a crash, it is the way out of one — keep it and let the
+         winch above reel you up.
+         IT HAS TO BE A LINE THAT CAN LIFT, not merely one that points upward — the same `zipSlopeMin`
+         the winch uses. A shallow line kept through a landing is a tow-rope, and the body slides along
+         the street on it (measured: 83% of frames grounded, peak height 0.64 u, which reads as exactly
+         the stranding it was supposed to cure). */
+      if (state.anchor) {
+        const r = state.anchor.y - state.y;
+        const L = Math.hypot(state.anchor.x - state.x, r, state.anchor.z - state.z) || 1e-6;
+        // reset the per-web bookkeeping with the web, or the NEXT one inherits a spent hang timer
+        if (r / L < P('zipSlopeMin')) { state.anchor = null; state.hang = 0; state.rose = false; }
+      }
       state.vx *= 0.86; state.vz *= 0.86;
       state.perched = roof > gy + 0.05;   // standing on a building, not the street — HUD/probe signal
     } else state.perched = false;

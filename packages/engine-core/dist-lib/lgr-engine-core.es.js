@@ -6195,17 +6195,40 @@ function ro(e, t, { speedScale: n = 1, y: r = null, pitch: i = null } = {}) {
 }
 var io = {
 	gravity: 5.4,
-	ropeMax: 2.2,
+	ropeMax: 3.2,
 	ropeMin: .55,
-	aimMode: "point",
-	aimCone: .62,
-	aimRays: 7,
+	aimMode: "auto",
+	aimCone: 1.35,
+	aimRays: 9,
+	aimEl: [
+		.1,
+		.26,
+		.44,
+		.66,
+		.95,
+		1.25
+	],
 	aimLift: .42,
+	minRise: .35,
+	minAlign: -.15,
+	arcClear: .45,
+	assist: 4.2,
+	autoRelease: !0,
+	releasePitch: 1,
+	topOut: !0,
+	maxHang: 2.2,
+	launchUp: .7,
+	launchFwd: .5,
+	refireDelay: .1,
+	refireVy: .55,
+	zipAccel: 15,
+	zipClimb: 3.2,
+	zipSlopeMin: .45,
 	pump: 1.5,
 	airControl: 2.1,
 	freeControl: 3.4,
 	airDrag: .06,
-	maxSpeed: 7.5,
+	maxSpeed: 9,
 	climbRate: 1.15,
 	clingReach: .24,
 	skim: .06,
@@ -6226,19 +6249,46 @@ function ao(t = io) {
 	let n = new e.Euler(), r = (e) => t[e] === void 0 ? io[e] : t[e];
 	function i(e, t) {
 		if (!t || !t.segmentHit) return null;
-		let n = r("aimRays"), i = r("aimCone"), a = r("ropeMax"), o = null;
-		for (let s = 0; s < n; s++) {
-			let c = n === 1 ? 0 : s / (n - 1) * 2 - 1, l = e.yaw + c * i, u = r("aimLift") + Math.abs(c) * .18, d = Math.sin(l) * Math.cos(u), f = Math.cos(l) * Math.cos(u), p = Math.sin(u), m = e.x + d * a, h = e.y + p * a, g = e.z + f * a, _ = t.segmentHit(e.x, e.y, e.z, m, h, g, .05);
-			if (_ >= 1) continue;
-			let v = _ * a;
-			v < r("ropeMin") || (!o || v < o.d) && (o = {
-				d: v,
-				x: e.x + d * v,
-				y: e.y + p * v,
-				z: e.z + f * v
-			});
+		let n = r("aimRays"), i = r("ropeMax"), a = r("aimEl"), o = r("ropeMin"), s = r("minRise"), c = r("minAlign"), l = r("arcClear"), u = Math.hypot(e.vx || 0, e.vz || 0), d = u > .35, f = d ? e.vx / u : Math.sin(e.yaw), p = d ? e.vz / u : Math.cos(e.yaw), m = Math.atan2(f, p), h = d ? r("aimCone") : Math.PI, g = Math.max(n, Math.round(n * h / r("aimCone"))), _ = null, v = null;
+		for (let n = 0; n < g; n++) {
+			let u = m + (g === 1 ? 0 : n / (g - 1) * 2 - 1) * h, d = Math.sin(u), y = Math.cos(u);
+			for (let n = 0; n < a.length; n++) {
+				let u = a[n], m = Math.cos(u), h = d * m, g = y * m, b = Math.sin(u), x = t.segmentHit(e.x, e.y, e.z, e.x + h * i, e.y + b * i, e.z + g * i, .05);
+				if (x >= 1) continue;
+				let S = x * i;
+				if (S < o) continue;
+				let C = e.x + h * S, w = e.y + b * S, T = e.z + g * S, E = w - e.y;
+				if (E < s) continue;
+				let D = Math.hypot(C - e.x, T - e.z);
+				if (D < 1e-4) continue;
+				let O = ((C - e.x) * f + (T - e.z) * p) / D;
+				if (O < c) continue;
+				let k = t.heightAt ? t.heightAt(C, T) : 0;
+				if (w - S < k + r("skim") + l) {
+					let e = E / S;
+					if (e < r("zipSlopeMin")) continue;
+					let t = e + .2 * Math.max(0, O);
+					(!v || t > v.score) && (v = {
+						d: S,
+						x: C,
+						y: w,
+						z: T,
+						score: t,
+						zip: !0
+					});
+					continue;
+				}
+				let A = D * (.35 + .65 * Math.max(0, O));
+				(!_ || A > _.score) && (_ = {
+					d: S,
+					x: C,
+					y: w,
+					z: T,
+					score: A
+				});
+			}
 		}
-		return o;
+		return _ || v;
 	}
 	function a(e, t) {
 		if (!t || typeof t.x != "number") return null;
@@ -6250,61 +6300,93 @@ function ao(t = io) {
 			z: t.z
 		};
 	}
-	function o(e, t, o, s) {
+	function o(e, t) {
+		if (e.anchor = null, e.refire = r("refireDelay"), e.hang = 0, e.rose = !1, !t) return;
+		let n = Math.hypot(e.vx, e.vz);
+		e.vy += r("launchUp"), n > 1e-4 && (e.vx += e.vx / n * r("launchFwd"), e.vz += e.vz / n * r("launchFwd"));
+	}
+	function s(e, t, s, c) {
 		if (typeof e.vx != "number") {
 			let t = e.speed || 0;
-			e.vx = Math.sin(e.yaw) * t, e.vz = Math.cos(e.yaw) * t, e.vy = 0, e.anchor = null, e.rope = 0;
+			e.vx = Math.sin(e.yaw) * t, e.vz = Math.cos(e.yaw) * t, e.vy = 0, e.anchor = null, e.rope = 0, e.refire = 0, e.hang = 0, e.rose = !1;
 		}
-		let c = X(t.boost || 0, 0, 1), l = t.fire === !0 || (t.throttle || 0) > 0, u = r("aimMode") !== "fan", d = u ? a(e, t.aimPoint) : null;
-		if (e.aimInRange = u ? !!d : void 0, l && !e.anchor) {
-			let t = u ? d : i(e, s);
+		e.refire = Math.max(0, (e.refire || 0) - s);
+		let l = X(t.boost || 0, 0, 1), u = t.fire === !0 || (t.throttle || 0) > 0, d = r("aimMode") === "point", f = d ? a(e, t.aimPoint) : null;
+		e.aimInRange = d ? !!f : void 0;
+		let p = (e.refire || 0) <= 0 && (d || e.vy <= r("refireVy"));
+		if (u && !e.anchor && p) {
+			let t = d ? f : i(e, c);
 			t && (e.anchor = {
 				x: t.x,
 				y: t.y,
-				z: t.z
+				z: t.z,
+				zip: !!t.zip
 			}, e.rope = Math.max(r("ropeMin"), t.d));
-		} else !l && e.anchor && (e.anchor = null);
-		let f = Math.sin(e.yaw), p = Math.cos(e.yaw), m = !1;
-		if (!e.anchor && s && s.segmentHit && (t.lift || 0) !== 0) {
+		} else !u && e.anchor && o(e, !0);
+		let m = Math.sin(e.yaw), h = Math.cos(e.yaw), g = !1;
+		if (!e.anchor && c && c.segmentHit && (t.lift || 0) !== 0) {
 			let t = r("clingReach");
-			m = s.segmentHit(e.x, e.y, e.z, e.x + f * t, e.y, e.z + p * t, .05) < 1;
+			g = c.segmentHit(e.x, e.y, e.z, e.x + m * t, e.y, e.z + h * t, .05) < 1;
 		}
-		e.clinging = m, m ? (e.vx *= .12, e.vz *= .12, e.vy = (t.lift || 0) * r("climbRate")) : e.vy -= r("gravity") * o;
-		let h = e.anchor ? r("airControl") * (1 + (r("boost").airControl - 1) * c) : r("freeControl");
+		e.clinging = g, g ? (e.vx *= .12, e.vz *= .12, e.vy = (t.lift || 0) * r("climbRate")) : e.vy -= r("gravity") * s;
+		let _ = e.anchor ? r("airControl") * (1 + (r("boost").airControl - 1) * l) : r("freeControl");
 		if (t.steer) {
-			let n = Math.hypot(e.vx, e.vz) || 1, r = e.vz / n, i = -e.vx / n;
-			e.vx += r * -t.steer * h * o, e.vz += i * -t.steer * h * o;
+			let n = Math.hypot(e.vx, e.vz), r = n > .05 ? e.vx / n : Math.sin(e.yaw), i = n > .05 ? e.vz / n : Math.cos(e.yaw);
+			e.vx += i * -t.steer * _ * s, e.vz += -r * -t.steer * _ * s;
 		}
-		if (e.anchor && t.lift) {
-			let n = r("pump") * (1 + (r("boost").pump - 1) * c);
-			e.rope = X(e.rope - t.lift * n * o, r("ropeMin"), r("ropeMax"));
-		}
-		if (e.x += e.vx * o, e.y += e.vy * o, e.z += e.vz * o, e.anchor) {
-			let t = e.x - e.anchor.x, n = e.y - e.anchor.y, r = e.z - e.anchor.z, i = Math.hypot(t, n, r) || 1e-6;
-			if (i > e.rope) {
-				let a = t / i, o = n / i, s = r / i;
-				e.x = e.anchor.x + a * e.rope, e.y = e.anchor.y + o * e.rope, e.z = e.anchor.z + s * e.rope;
-				let c = e.vx * a + e.vy * o + e.vz * s;
-				c > 0 && (e.vx -= a * c, e.vy -= o * c, e.vz -= s * c);
+		if (e.anchor) {
+			let t = Math.hypot(e.vx, e.vz), n = t > .05 ? e.vx / t : Math.sin(e.yaw), i = t > .05 ? e.vz / t : Math.cos(e.yaw), a = Math.max(0, 1 - e.speed / r("maxSpeed")), o = r("assist") * a * s;
+			if (e.vx += n * o, e.vz += i * o, e.anchor.zip) {
+				let t = e.anchor.y - e.y, n = e.anchor.x - e.x, i = e.anchor.z - e.z, a = Math.hypot(n, t, i) || 1e-6, o = X(1 - e.vy / r("zipClimb"), 0, 1);
+				if (o > 0) {
+					let c = r("zipAccel") * o * s;
+					e.vx += n / a * c, e.vy += t / a * c, e.vz += i / a * c;
+				}
 			}
 		}
-		let g = Math.max(0, 1 - r("airDrag") * o);
-		e.vx *= g, e.vy *= g, e.vz *= g;
-		let _ = Math.hypot(e.vx, e.vy, e.vz);
-		if (_ > r("maxSpeed")) {
-			let t = r("maxSpeed") / _;
+		if (e.anchor && t.lift) {
+			let n = r("pump") * (1 + (r("boost").pump - 1) * l);
+			e.rope = X(e.rope - t.lift * n * s, r("ropeMin"), r("ropeMax"));
+		}
+		if (e.x += e.vx * s, e.y += e.vy * s, e.z += e.vz * s, e.anchor) {
+			let t = e.x - e.anchor.x, n = e.y - e.anchor.y, i = e.z - e.anchor.z, a = Math.hypot(t, n, i) || 1e-6;
+			if (a > e.rope) {
+				let r = t / a, o = n / a, s = i / a;
+				e.x = e.anchor.x + r * e.rope, e.y = e.anchor.y + o * e.rope, e.z = e.anchor.z + s * e.rope;
+				let c = e.vx * r + e.vy * o + e.vz * s;
+				c > 0 && (e.vx -= r * c, e.vy -= o * c, e.vz -= s * c);
+			}
+			if (e.anchor && e.anchor.zip && e.y > e.anchor.y - r("minRise") && o(e, !0), e.anchor && r("autoRelease") && u) {
+				e.hang = (e.hang || 0) + s;
+				let t = Math.hypot(e.vx, e.vz), n = t > 1e-4 ? ((e.x - e.anchor.x) * e.vx + (e.z - e.anchor.z) * e.vz) / t : 0;
+				e.vy > .05 && (e.rose = !0);
+				let i = t > .4 && e.vy > 0 && n > 0 && Math.atan2(e.vy, t) >= r("releasePitch"), a = r("topOut") && e.rose && n > 0 && e.vy <= 0;
+				(i || a || e.hang >= r("maxHang")) && o(e, !0);
+			}
+		}
+		let v = Math.max(0, 1 - r("airDrag") * s);
+		e.vx *= v, e.vy *= v, e.vz *= v;
+		let y = Math.hypot(e.vx, e.vy, e.vz);
+		if (y > r("maxSpeed")) {
+			let t = r("maxSpeed") / y;
 			e.vx *= t, e.vy *= t, e.vz *= t;
 		}
-		let v = s && s.heightAt ? s.heightAt(e.x, e.z) : 0, y = s && s.waterHeightAt ? s.waterHeightAt(e.x, e.z) : Ra, b = !e.anchor && s && s.surfaceAt ? s.surfaceAt(e.x, e.z, e.y + .12) : -Infinity, x = Math.max(v, y > -999 ? y : v);
-		b > x && (x = b), x += r("skim"), e.y < x ? (e.y = x, e.vy < 0 && (e.vy = 0), e.anchor = null, e.vx *= .86, e.vz *= .86, e.perched = b > v + .05) : e.perched = !1;
-		let S = Math.hypot(e.vx, e.vz);
-		S > .05 && (e.yaw = Math.atan2(e.vx, e.vz)), e.speed = Math.hypot(e.vx, e.vy, e.vz);
-		let C = X(Math.atan2(e.vy, Math.max(S, .05)), -.9, .9);
-		e.pitch = Y(typeof e.pitch == "number" ? e.pitch : 0, C, 1 / .18, o);
-		let w = X(-(t.steer || 0) * .7 + (e.anchor ? .25 : 0), -.9, .9);
-		return e.bank = Y(typeof e.bank == "number" ? e.bank : 0, w, 2.2, o), e.airborne = !e.anchor && !m && e.y > x + .02, n.set(e.pitch, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
+		let b = c && c.heightAt ? c.heightAt(e.x, e.z) : 0, x = c && c.waterHeightAt ? c.waterHeightAt(e.x, e.z) : Ra, S = !e.anchor && c && c.surfaceAt ? c.surfaceAt(e.x, e.z, e.y + .12) : -Infinity, C = Math.max(b, x > -999 ? x : b);
+		if (S > C && (C = S), C += r("skim"), e.y < C) {
+			if (e.y = C, e.vy < 0 && (e.vy = 0), e.anchor) {
+				let t = e.anchor.y - e.y;
+				t / (Math.hypot(e.anchor.x - e.x, t, e.anchor.z - e.z) || 1e-6) < r("zipSlopeMin") && (e.anchor = null, e.hang = 0, e.rose = !1);
+			}
+			e.vx *= .86, e.vz *= .86, e.perched = S > b + .05;
+		} else e.perched = !1;
+		let w = Math.hypot(e.vx, e.vz);
+		w > .05 && (e.yaw = Math.atan2(e.vx, e.vz)), e.speed = Math.hypot(e.vx, e.vy, e.vz);
+		let T = X(Math.atan2(e.vy, Math.max(w, .05)), -.9, .9);
+		e.pitch = Y(typeof e.pitch == "number" ? e.pitch : 0, T, 1 / .18, s);
+		let E = X(-(t.steer || 0) * .7 + (e.anchor ? .25 : 0), -.9, .9);
+		return e.bank = Y(typeof e.bank == "number" ? e.bank : 0, E, 2.2, s), e.airborne = !e.anchor && !g && e.y > C + .02, n.set(e.pitch, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
 	}
-	return { step: o };
+	return { step: s };
 }
 var oo = {
 	ground: Va,
