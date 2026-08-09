@@ -62,6 +62,40 @@ export function resolveAimPoint(camera, world, out, { maxDist = 8, radius = 0.05
 }
 
 /* ---------------------------------------------------------------------------------------------
+   applyLook(orbit, dx, dy, opts) — THE ONE PLACE THE MOUSE→ORBIT SIGN CONVENTION LIVES.
+   ------------------------------------------------------------------------------------------
+   WHY THIS FUNCTION EXISTS AT ALL, rather than a `-dy` at each call site. The owner's report was
+   "the looking around is inverted — when you use the mouse up and point the crosshair at a building,
+   it should correspond to moving the mouse up", and the bug was three bare sign flips (pointer lock,
+   pointer drag, touch look) that all had to agree and had no name between them. A convention nobody
+   named is a convention nobody can audit, so it is a NAMED OPTION now: `invertY`, default false =
+   NOT inverted = mouse up looks up. A consumer that wants flight-sim pull-back-to-climb passes true.
+
+   THE SIGN ITSELF IS NOT ARBITRARY, and it is worth deriving because it reads backwards. An orbit rig
+   puts the eye at target + d·(azimuth, elevation) and looks AT the target, so forward.y = −d·sin(el):
+   RAISING elevation lifts the eye and tilts the view DOWN. Aiming UP therefore means LOWERING
+   elevation. DOM `movementY` is positive when the mouse moves DOWN. So "mouse up ⇒ aim up" is
+   dEl = +dy (mouse up ⇒ dy<0 ⇒ elevation falls ⇒ forward tilts up) — the identity, not the negation
+   that was there. (GRAPPLE_PROFILE.chaseElevMin = −1.05 exists for exactly this reason: it lets the
+   eye swing UNDER the body so the forward vector can point up at the anchors worth taking.)
+
+   dAz KEEPS ITS EXISTING SIGN (−dx: mouse right turns the view right). The owner reported the Y axis
+   only, and this repo's rule is to change what was asked and leave what was not — but `invertX` is
+   here beside it so the pair is symmetrical and neither has to be rediscovered.
+
+   TAKES THE RIG'S `orbit` AS A CALLBACK and returns nothing, because it runs on every mousemove:
+   returning a {dAz,dEl} pair would allocate on the hottest input path in the app (no-hot-alloc
+   invariant #7). For the same reason a caller should HOIST the options object rather than writing an
+   inline literal at the call site.
+
+   C++ anchor: a free function taking a callable — `template<class F> void applyLook(F&& orbit, …)`.
+   --------------------------------------------------------------------------------------------- */
+export function applyLook(orbit, dx, dy, { speed = 1, invertY = false, invertX = false } = {}) {
+  if (!orbit) return;
+  orbit((invertX ? dx : -dx) * speed, (invertY ? -dy : dy) * speed);
+}
+
+/* ---------------------------------------------------------------------------------------------
    createAimReticle({ container, size, color }) → { setVisible, setInRange, element, dispose }
    ------------------------------------------------------------------------------------------
    A crosshair pinned to screen CENTRE. Two states and no text:
@@ -134,6 +168,12 @@ export function createAimReticle({ container = document.body, size = 26, color =
    WHY FIRE IS `mousedown` AND NOT `click`: the whole feel of the swing is that RELEASE is the launch.
    A click is a press+release collapsed into one event, which cannot express "hold the line". So we
    report the press edge and the release edge separately and let the consumer hold state.
+
+   `onLook` REPORTS RAW `movementX/Y` PIXELS and deliberately applies no sign of its own — the look
+   convention is `applyLook` above, because pointer lock is only ONE of the three ways a player turns
+   this view (drag and touch are the others) and a sign that lived in only one of them is exactly the
+   bug the owner reported. Feed these deltas to `applyLook(rig.orbit, dx, dy, LOOK)` and the three
+   routes cannot drift apart.
 
    TWO THINGS THIS GUARDS, both of them the latched-state failure class this repo keeps hitting:
      • Losing the lock (Esc, tab switch, the page navigating) fires onFire(false) BEFORE onLockChange,

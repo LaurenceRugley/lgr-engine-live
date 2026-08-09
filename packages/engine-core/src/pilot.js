@@ -358,6 +358,20 @@ export const ROAD_PROFILE = {
      only allows 0.905 u. So a boosted car PHYSICALLY cannot make a 90° turn — you have to lift off
      before the junction. Nothing enforces that; it falls out of the curvature law already here. */
   boost: { speed: 1.55, accel: 1.3 },
+  /* ---- A-SOLID (2026-08-09): THE ROAD CAR HAD NO COLLIDER AT ALL, and it is the SAME omission the
+     ATV note above records — the identical bug, in the identical shape, one profile down. pilot.js
+     gates the whole push-out on `p.profile && p.profile.collide`, ROAD_PROFILE never declared one, so
+     `collideOn` was false for every road car ever piloted and the hook was dead code for it.
+     FOUND BY DRIVING IT, not by reading: the owner's report was about the SWING, but he said "I
+     shouldn't be MOVING through buildings" generally, so the car and the walker were driven at real
+     facades too. The walker stops dead (8/8 facades, 0/1440 frames inside — it has its own collider).
+     The car, placed 1.2 u from a facade and given throttle, drove 10.8-12.5 u THROUGH the building and
+     out the far side on 6 of 6 headings, 222/1800 frames inside the geometry at the probe's full 0.4 u.
+     WHY 0.18 AND NOT THE ATV'S 0.4: this profile's own turnRadiusMin note already sizes the car it is
+     for — "a 0.18-radius car" in "the 0.905 u the street corridor allows". A 0.4 sphere is wider than
+     half the corridor, so an ATV-sized collider would grind both kerbs down every street in the city.
+     yOff mirrors `rideHeight` so the sphere sits at the body's centre rather than under the axles. */
+  collide: { r: 0.18, yOff: 0.15, PUSH_MAX: 8.0, SLIDE_FRICTION: 2.2, SKIN: 0.02 },
 };
 export function createRoadModel(profile = ROAD_PROFILE) {
   const _e = new THREE.Euler();
@@ -946,6 +960,19 @@ export const GRAPPLE_PROFILE = {
      facade plane and is nudged clear by this much, which is what stops the next frame's ray starting
      inside the box it is testing against. */
   wallStop: 0.02,
+  /* ---- A-SOLID (2026-08-09) — IS A FACADE SOLID WHILE THE ROPE IS UP? ----------------------------
+     THIS REVERSES A-WALL'S MEASURED TRADE, ON THE OWNER'S CALL. A-WALL gated the sweep on `!anchor`
+     and priced the gate honestly: gated, net ground per swing 2.02 u; ungated, 1.53 u — a 24% worse
+     swing to fix a fall-through "that only ever happened in FREE flight". The premise was wrong, and
+     the bench that replaced it says so: driven straight at a facade WHILE ROPED from 8 headings, the
+     gated build put the body inside the geometry on 6 of 8 and spent 7.7% of all roped frames
+     enclosed. Swinging through a facade was never a free-flight-only bug; nothing had driven the
+     roped case. The owner's ruling: "I shouldn't be swinging through buildings" — travel distance is
+     not worth paying for with solidity, so the ability is now a NAMED OPTION rather than a hard gate.
+     A consumer that wants the old pass-through (an NPC on rails, a cutscene) sets it false and says so.
+     The trade it was supposed to cost did not materialise once the sweep was made 3D-honest — the
+     numbers are at 4c, and travel went UP, not down. */
+  wallWhileRoped: true,
   /* THE CURE HALF OF A-WALL (the sweep above is the PREVENTION half). A swept stop cannot help a body
      that is ALREADY inside — its own origin is enclosed, so every test comes back blocked and the
      clamp pins it where it stands. That state still happens, rarely and by a route the sweep is
@@ -1101,43 +1128,52 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
   }
 
   /* ---- A-WALL (2026-08-09): A FACADE IS SOLID TO A SWINGER TOO ---------------------------------
-     `px,pz` is where the body was at the top of the frame, which is a position we KNOW was clear —
-     that is what makes this a sweep rather than a depenetration, and it is why a FREE body cannot
-     cross into the geometry the anchor search has to see past. One `segmentHit` in the common case.
-     It is not a containment guarantee, and the measurement says so plainly: this runs only while free
-     (see 4c), so frames spent enclosed fall 5.99% → 3.14% on the 40-start bench rather than to zero.
-     `unstick` below is what closes the remaining gap; between them, runs ENDING enclosed go 2/40 → 0/40.
+     `px,py,pz` is where the body was at the top of the frame, which is a position we KNOW was clear —
+     that is what makes this a sweep rather than a depenetration, and it is why a body cannot cross
+     into the geometry the anchor search has to see past. One `segmentHit` in the common case.
 
      AXIS-SEPARATED, because a graze has to SLIDE. Stopping dead on any contact would kill the arc
      every time it brushed a facade — the swing runs down a 0.55 u canyon, so brushing is the normal
-     case, not the exception. Testing the x move and the z move independently against the same clear
+     case, not the exception. Testing each single-axis move independently against the same clear
      origin recovers the wall NORMAL that `segmentHit` does not return: whichever axis is blocked is
      the one pointing into the wall, so zeroing that component alone leaves the tangential half of the
      velocity intact and you slide along the building instead of sticking to it. (The city is a set of
      AABBs, which is what makes per-axis a real normal here and not an approximation.)
 
+     ---- A-SOLID (2026-08-09): WHY THE SWEEP IS NOW 3D, and it is a PRECONDITION of running it while
+     roped rather than a tidy-up. The old version tested a HORIZONTAL segment at the body's NEW y from
+     its OLD xz — which is only sound while the body cannot cross a roof plane. A roped body can (the
+     rooftop catch in step 6 is gated on `!anchor`), so an arc that dips past a roof edge put the
+     sweep's own ORIGIN inside the tower: `segmentHit` returns 0 for an enclosed origin (collide.js:254),
+     every axis reads blocked, and the body is pinned in mid-air at the roofline with vx=vz=0. A swept
+     test is only as honest as its origin, so the origin now carries the y it was actually clear at,
+     and the y move is swept like the other two — which is also what makes a roof solid to a swing.
+
      C++ anchor: this is the classic move-and-slide of a character controller — `v -= n * dot(v, n)`
      again, the same projection the rope constraint does, except the axis test IS the normal. */
-  function wallSweep(state, px, pz, world) {
+  function wallSweep(state, px, py, pz, world) {
     const back = P('wallStop');
     if (!(back > 0) || !world || !world.segmentHit) return;
-    const dx = state.x - px, dz = state.z - pz;
-    if (dx === 0 && dz === 0) return;
-    const y = state.y;
+    const dx = state.x - px, dy = state.y - py, dz = state.z - pz;
+    if (dx === 0 && dy === 0 && dz === 0) return;
     // radius 0 on purpose: an INFLATED box reports t=0 for an origin inside the skin, so a body
     // resting against a facade would read as blocked in every direction and freeze — a new stranding.
-    if (world.segmentHit(px, y, pz, state.x, y, state.z, 0) >= 1) return;
-    const tx = dx !== 0 ? world.segmentHit(px, y, pz, px + dx, y, pz, 0) : 1;
-    const tz = dz !== 0 ? world.segmentHit(px, y, pz, px, y, pz + dz, 0) : 1;
-    if (tx < 1 || tz < 1) {
+    if (world.segmentHit(px, py, pz, state.x, state.y, state.z, 0) >= 1) return;
+    const tx = dx !== 0 ? world.segmentHit(px, py, pz, px + dx, py, pz, 0) : 1;
+    const ty = dy !== 0 ? world.segmentHit(px, py, pz, px, py + dy, pz, 0) : 1;
+    const tz = dz !== 0 ? world.segmentHit(px, py, pz, px, py, pz + dz, 0) : 1;
+    if (tx < 1 || ty < 1 || tz < 1) {
       if (tx < 1) { state.x = px + dx * tx - Math.sign(dx) * back; state.vx = 0; }
+      if (ty < 1) { state.y = py + dy * ty - Math.sign(dy) * back; state.vy = 0; }
       if (tz < 1) { state.z = pz + dz * tz - Math.sign(dz) * back; state.vz = 0; }
       return;
     }
-    /* NEITHER AXIS ALONE IS BLOCKED BUT THE DIAGONAL IS — you clipped an outside corner. Keep the
-       longer component and drop the other: a corner should deflect a swing, not stop it. */
-    if (Math.abs(dx) >= Math.abs(dz)) { state.z = pz; state.vz = 0; }
-    else { state.x = px; state.vx = 0; }
+    /* NO SINGLE AXIS IS BLOCKED BUT THE DIAGONAL IS — you clipped an outside corner. Drop the
+       SMALLEST component and keep the rest: a corner should deflect a swing, not stop it. */
+    const ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+    if (ax <= ay && ax <= az) { state.x = px; state.vx = 0; }
+    else if (az <= ay) { state.z = pz; state.vz = 0; }
+    else { state.y = py; state.vy = 0; }
   }
 
   /* "AM I INSIDE A SOLID" IN ONE QUERY, and it assumes nothing about the world. `segmentHit` clips at
@@ -1320,7 +1356,9 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     //    place the arc actually comes from.
     // A-WALL: remember the last KNOWN-CLEAR position before moving — the sweep below needs an origin
     // it can trust, and after the rope constraint has fired there is no other way back to one.
-    const wx = state.x, wz = state.z;
+    // A-SOLID: the y goes with it. See wallSweep's note — an origin carrying the WRONG y is how the
+    // sweep pinned a roped body at a roofline it had legitimately dropped past.
+    const clearX = state.x, clearY = state.y, clearZ = state.z;
     state.x += state.vx * dt; state.y += state.vy * dt; state.z += state.vz * dt;
     if (state.anchor) {
       const ax = state.x - state.anchor.x, ay = state.y - state.anchor.y, az = state.z - state.anchor.z;
@@ -1367,14 +1405,29 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     /* 4c) A-WALL — LAST, after the rope constraint, because the constraint is itself a teleport: it
        snaps the body onto the sphere around the anchor, and the final word each frame has to be "not
        inside the city" or the anchor search goes blind.
-       FACADES CATCH YOU ONLY WHEN YOU ARE FREE — the SAME gate, for the same reason, that A-ROOF puts
-       on the rooftop catch below (`!state.anchor`), and it is a measured choice, not symmetry for its
-       own sake. While roped the rope owns your position; making a swing collide as well costs the arc
-       its energy twice (the constraint already strips the radial half), and the bench says so: gated,
-       net ground per swing 2.02 → 2.05 u and peak speed 6.85 → 6.81 u/s (parity); ungated, 1.53 u and
-       5.92 u/s — a 24% worse swing to fix a fall-through that only ever happened in FREE flight.
-       Runs that ended inside the geometry: 2/40 before, 0/40 either way. */
-    if (!state.anchor) wallSweep(state, wx, wz, world);
+
+       ---- A-SOLID (2026-08-09): THE ROPE NO LONGER BUYS YOU PASSAGE THROUGH A WALL ----------------
+       A-WALL ran this only while FREE, on a measured trade (see `wallWhileRoped`). The owner rejected
+       the trade after driving it: a facade you can swing through is not a building. Ungating it does
+       cost the arc, exactly as A-WALL predicted and for the reason it named — the rope constraint has
+       already stripped the radial half of the velocity, and the wall now strips the normal half of
+       what is left. It costs MORE than A-WALL measured, because of a geometric fact about this
+       mechanic that neither build had looked at: `findAnchor` webs a point ON A FACADE, and the
+       bottom of a pendulum hung from a point on a vertical wall is FLUSH WITH THAT WALL. So the arc
+       grinds the building it is attached to at the one moment it is fastest.
+
+       AND THE COST DID NOT ARRIVE — measured, 8 headings x 480 frames, button held, same bench either
+       way. Roped frames spent INSIDE the city 170 → 0 (7.74% → 0.00%); driven deliberately at a facade
+       while roped, runs that got inside 6/8 → 0/8. Net ground per swing went UP, 1.31 → 1.93 u, and
+       mean displacement 6.04 → 6.52 u. The reason is the thing A-WALL's own note had already proved
+       about the free case and did not carry across: from INSIDE a solid every anchor ray comes back
+       d≈0 and the search is blind, so the arcs that "travelled further" through walls were partly runs
+       thrashing inside geometry with no line at all (attached 57.2% → 40.5%, path 28.3 → 19.1 u — less
+       swinging back and forth in place, more ground). What DID cost is peak speed, 8.17 → 6.97 u/s
+       (-15%): the wall now strips the normal half of what the rope constraint left. That is the honest
+       price, it is paid in top speed rather than in distance, and if it ever needs buying back the
+       lever is the anchor SCORE (prefer lines whose arc has air under them), never soft walls. */
+    if (!state.anchor || P('wallWhileRoped')) wallSweep(state, clearX, clearY, clearZ, world);
     // …and the cure runs UNGATED: a body that is already enclosed has to get out whether or not it is
     // holding a line, because enclosed is the one state from which nothing else in this model can act.
     unstick(state, world, dt);

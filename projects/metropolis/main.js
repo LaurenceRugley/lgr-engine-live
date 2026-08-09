@@ -53,7 +53,7 @@ import {
   createTextureForge, forgeCityMaterials, CITY_LOOKS,
   createCelestial, createTrueStars, createSolarSystem, createConstellations,
   createDiveController, createTouchControls, createPedestrians,
-  resolveAimPoint, createAimReticle, createPointerLockAim,
+  resolveAimPoint, createAimReticle, createPointerLockAim, applyLook,
 } from '@lgr/engine-core';
 import { createOffice } from '@lgr/office';   // A-DIVE: the proven office interior (city/main.js's own dive target)
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';   // A-PEDS: the consumer pays for the model, not every lib user
@@ -564,7 +564,7 @@ const SWING_PROFILE = { ...GRAPPLE_PROFILE };
 const swingPilotable = {
   pilot: {
     model: 'grapple', profile: SWING_PROFILE,
-    controlHints: 'hold W (or the mouse) to swing — the web aims itself · A/D steer · release to launch · Q for aimed webs',
+    controlHints: 'hold SPACE (or the mouse) to shoot the web · A/D steer · W/S reel in/out · release to launch · Q for aimed webs',
     getWorldPos: (out) => out.set(swingState.x, swingState.y, swingState.z),
     getTransform: () => swingState,
     setTransform: (st) => {
@@ -610,13 +610,13 @@ const swingPilotable = {
 const AIM_REACH = 10.0;
 const _aim = { x: 0, y: 0, z: 0 };           // ONE reused point — handed to the model by reference (no-hot-alloc, invariant #7)
 let aimHit = null;                            // === _aim on a hit, null on clear sky
-let fireHeld = false;                         // the mouse trigger; W still fires too (the model takes either)
+let fireHeld = false;                         // the MOUSE trigger only — the key trigger is Space (A-FIRE), read straight off heldKeys
 const reticle = createAimReticle({ container: document.body });
 const lockAim = createPointerLockAim({
   element: renderer.domElement,
-  // Raw movement deltas turn the ORBIT — the same call the drag path makes, so locked and unlocked
-  // aiming are the same motion with and without a button held.
-  onLook: (dx, dy) => rig.orbit(-dx * ORBIT_SPEED, -dy * ORBIT_SPEED),
+  // Raw movement deltas turn the ORBIT through the engine's ONE look convention — the same call the
+  // swing drag and touch paths make, so all three aim identically (see AIM_LOOK below).
+  onLook: (dx, dy) => applyLook(rig.orbit, dx, dy, AIM_LOOK),
   onFire: (down) => { fireHeld = down; },
   /* Losing the lock (Esc, tab switch) must drop the line. Without this the trigger latches held, and
      a swinger that can never let go is the same bug class as a cling that never releases. */
@@ -762,8 +762,8 @@ const HINTS = {
   boat:  'W/S throttle · A/D rudder (only steers with way on) · Shift full-ahead',
   fish:  'W/S swim · A/D turn · Space up · C dive · Shift burst — build speed and hit the surface to BREACH',
   bird:  'W flap · A/D bank · Space climb · C dive · Shift beat harder — ride the water down, then press C to PLUNGE IN',
-  swing: 'HOLD W or the mouse button to SWING — the web aims itself, forward and up · A/D steer the arc · release to launch · Q = aimed webs (crosshair) · Esc frees the mouse',
-  swingPoint: 'CLICK to capture the mouse, then AIM with it · HOLD the button to web what the crosshair marks (dim = out of range) · A/D steer · Space reel in · release to launch · Q = back to auto-swing',
+  swing: 'HOLD SPACE (or the mouse button) to SHOOT THE WEB and swing — it aims itself, forward and up · A/D steer the arc · W/S reel in/out · let go to launch · Q = aimed webs (crosshair) · Esc frees the mouse',
+  swingPoint: 'CLICK to capture the mouse, then AIM with it · HOLD SPACE (or the button) to web what the crosshair marks (dim = out of range) · A/D steer · W/S reel in/out · let go to launch · Q = back to auto-swing',
 };
 const MOBILE_HINTS = {
   fly:   'stick to move · push past the ring to boost · drag to look · tap a tower',
@@ -773,7 +773,7 @@ const MOBILE_HINTS = {
   boat:  'stick to steer · push past the ring for full ahead',
   bird:  'stick to fly · push past the ring to beat harder · tap dive at the water to plunge in',
   fish:  'stick to swim · push past the ring to burst · surface fast to breach',
-  swing: 'hold the stick forward to SWING — the web aims itself · steer the arc · let go to launch',
+  swing: 'hold the stick forward to SHOOT THE WEB and swing — it aims itself · steer the arc · rocker reels in/out · let go to launch',
   swingPoint: 'drag to aim the crosshair · hold the stick forward to web what it marks (dim = too far) · steer the arc · lift to reel in · let go to launch',
 };
 function refreshHint() {
@@ -902,6 +902,11 @@ window.addEventListener('keydown', (e) => {
     refreshHint();
     e.preventDefault(); return;
   }
+  /* A-FIRE: Space is the web trigger in swing mode, so it must stop being the BROWSER's space —
+     it scrolls the page and, worse, re-activates whichever dock button still has focus from the
+     click that entered this mode (a keydown default that turns into a synthetic click). Scoped to
+     swing so heli/bird/fish keep the untouched behaviour they were verified with. */
+  if (k === KEY.fire && mode === 'swing' && diveCtl.mode === 'a') e.preventDefault();
   heldKeys.add(k);
 });
 window.addEventListener('keyup', (e) => {
@@ -910,6 +915,19 @@ window.addEventListener('keyup', (e) => {
 });
 let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, downT = 0;
 const ORBIT_SPEED = 0.006;
+/* A-LOOK (2026-08-09) — THE AIMED-BODY LOOK CONVENTION, hoisted so it never allocates on a mousemove
+   (no-hot-alloc invariant #7) and so the three swing input routes read from ONE object.
+   Owner: "the looking around is inverted — when you use the mouse up and point the crosshair at a
+   building, it should correspond to moving the mouse up." It did the opposite; the derivation of why
+   the un-inverted sign is `+dy` is in aim.js's applyLook header.
+
+   WHY ONLY THE SWING ROUTES GET IT, and this is a real fork that is being declared rather than hidden
+   (Rule 6). Fly mode's drag is a TURNTABLE: you are grabbing the city and rolling it, and drag-down
+   lowering the eye is the convention every inspection camera in this repo already uses. Swing mode is
+   an AIMED body: the crosshair is the thing you are steering and it must follow the hand. Two camera
+   ROLES, two conventions, one named option saying which is which — rather than one sign silently
+   meaning different things in different modes. */
+const AIM_LOOK = { speed: ORBIT_SPEED, invertY: false };   // false = mouse up looks UP
 renderer.domElement.addEventListener('pointerdown', (e) => {
   dragging = true; lastX = downX = e.clientX; lastY = downY = e.clientY; downT = performance.now();
   /* A-AIM: the FIRST click in swing mode captures the mouse; every click after that fires the web.
@@ -958,7 +976,10 @@ window.addEventListener('pointermove', (e) => {
     lastX = e.clientX; lastY = e.clientY;
     return;
   }
-  rig.orbit(-(e.clientX - lastX) * ORBIT_SPEED, -(e.clientY - lastY) * ORBIT_SPEED);
+  // A-LOOK: the swinger AIMS with this drag (it is the fallback whenever pointer lock is not held), so
+  // it takes the aimed convention; every other mode keeps the turntable one. See AIM_LOOK.
+  if (mode === 'swing') applyLook(rig.orbit, e.clientX - lastX, e.clientY - lastY, AIM_LOOK);
+  else rig.orbit(-(e.clientX - lastX) * ORBIT_SPEED, -(e.clientY - lastY) * ORBIT_SPEED);
   lastX = e.clientX; lastY = e.clientY;
 });
 renderer.domElement.addEventListener('wheel', (e) => { rig.zoomBy(Math.exp(e.deltaY * 0.0015)); e.preventDefault(); }, { passive: false });
@@ -970,6 +991,8 @@ const touch = createTouchControls({
   onLook: (dx, dy) => {
     if (diveCtl.mode !== 'a') { office.look.addDrag(dx, dy); return; }
     if (mode === 'walk') { walker.addLook(dx, dy); return; }
+    // A-LOOK: the phone has no pointer lock, so this IS the swinger's aim on mobile — same convention.
+    if (mode === 'swing') { applyLook(rig.orbit, dx, dy, AIM_LOOK); return; }
     rig.orbit(-dx * ORBIT_SPEED, -dy * ORBIT_SPEED);
   },
   onTap: (x, y) => pickTowerAt(x, y),   // owner feedback: tap-a-tower must work on the phone (the overlay swallows canvas taps)
@@ -994,12 +1017,39 @@ refreshHint();   // boot: fly mode's own line + the correct rocker state (must r
    tab on Windows and Linux. "Hold descend, press throttle" would have shut the page on a recruiter's
    machine mid-demo. (macOS is Cmd+W, so this would never have reproduced on Laurence's own laptop —
    the worst kind of bug.) C is the crouch/descend convention and binds to nothing in any browser. */
-const KEY = { up: ' ', down: 'c' };
+/* A-FIRE (2026-08-09) — SHOOTING THE WEB IS ITS OWN BUTTON NOW.
+   Owner: "we should have the space bar maybe or some other button as you shoot the web, and then you
+   can swing." Fire was the THROTTLE (a held W) plus the mouse, which is why it never read as a verb:
+   the same key that fires is the key that means "go" on six other bodies, so nothing announced that a
+   web was a thing you SHOOT.
+
+   SPACE, and the collision it forces is worth stating rather than dodging. Space is already KEY.up —
+   climb, for heli/bird/fish — so one key now carries two verbs across bodies. That is allowed under
+   the same rule the hint bar exists for (each body announces its own controls) but only if no single
+   body needs both, so the SWING's vertical axis moves off Space entirely:
+     · SPACE  = fire / hold the web            (this key, `fire`)
+     · W / S  = reel in / pay out, and climb / descend while clinging  (the swing's lift axis)
+     · C      = kept as a synonym for S, so the global "down" still descends a wall
+   W and S were FREE to take precisely because fire left the throttle — a grapple has no forward gear,
+   so the throttle axis was only ever a fire button wearing a movement key's clothes. Keeping the pair
+   under the same hand means reeling in mid-arc does not need a thumb.
+
+   The alternative considered and rejected was a collision-free key (F). It costs nothing technically
+   and everything in discoverability: Space is where a player's thumb already is, and the owner named
+   it. A binding you have to be told about twice is the bug this arc is fixing. */
+const KEY = { up: ' ', down: 'c', fire: ' ' };
 /* A-LIFT: the vertical axis from EITHER input. It was keyboard-only, which meant heli/bird/fish had
    no vertical dimension at all on a phone — measured Δy = 0.000 for all three under the only control
    a phone had. The rocker (engine-core/touch-controls) supplies the same [-1,1]. */
 const liftFromKeys = () => {
   const k = (heldKeys.has(KEY.up) ? 1 : 0) - (heldKeys.has(KEY.down) ? 1 : 0);
+  return k !== 0 ? k : (touch.axes.lift || 0);
+};
+/* A-FIRE: the SWING's own vertical axis, off Space because Space is now its trigger (see KEY above).
+   Same [-1,1] contract as liftFromKeys and the same touch-rocker fallback, so the phone keeps the
+   pump and the wall-climb exactly as it had them — only the desktop keys moved. */
+const swingLiftFromKeys = () => {
+  const k = (heldKeys.has('w') ? 1 : 0) - ((heldKeys.has('s') || heldKeys.has(KEY.down)) ? 1 : 0);
   return k !== 0 ? k : (touch.axes.lift || 0);
 };
 
@@ -1059,16 +1109,20 @@ function frame(dt, t) {
        dispatch had no branch for it, so every frame fell through to the free-fly `else` and the
        swinger sat frozen at its spawn — mode switched, camera followed, physics never ran. The
        ability being in core and the mode button existing proves nothing; the STEP has to be wired.
-       throttle is clamped >=0: W fires and HOLDS the line, and there is no such thing as a reverse
-       grapple. lift is the pump (reel in), which is why 'swing' joins USES_LIFT.
+       A-FIRE (2026-08-09): the THROTTLE IS NOW TOUCH-ONLY here, and that one clamp is the whole
+       rebinding. The model fires on `axes.fire` OR a held throttle (pilot.js's two-source rule, kept
+       so no existing consumer loses its trigger); feeding it the STICK's y and not the keyboard's
+       leaves the phone firing exactly as it did — hold the stick forward — while freeing W and S on
+       the desktop to become the lift axis. Nothing in the engine had to change to rebind a key, which
+       is the point of the model taking either source.
 
        A-AIM (2026-08-08): resolve the crosshair BEFORE stepping, so the model attaches to what the
        player is looking at THIS frame rather than last frame's view. `aimHit` is either `_aim` (the one
        reused point) or null; null is not an error, it is "you are aiming at sky". */
     aimHit = resolveAimPoint(rig.camera, pilotWorld, _aim, { maxDist: AIM_REACH, radius: 0.05 });
     pilotCtl.step(dt, {
-      throttle: Math.max(0, axes.y), steer: axes.x, lift: liftFromKeys(), boost: axes.boost,
-      aimPoint: aimHit, fire: fireHeld,
+      throttle: Math.max(0, touch.axes.y), steer: axes.x, lift: swingLiftFromKeys(), boost: axes.boost,
+      aimPoint: aimHit, fire: fireHeld || heldKeys.has(KEY.fire),
     });
     /* The crosshair reads the MODEL's verdict (state.aimInRange), never its own copy of the range rule
        — one implementation, read twice. A HUD that recomputed "in range" would eventually disagree
