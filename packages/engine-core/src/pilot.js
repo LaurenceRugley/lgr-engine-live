@@ -814,7 +814,12 @@ export function carryMomentum(from, to, { speedScale = 1, y = null, pitch = null
    the rope, keep the tangential part. `v -= n * dot(v, n)`. */
 export const GRAPPLE_PROFILE = {
   gravity: 5.4,           // u/s² — heavier than the bird's trade; a swing should feel weighty
-  ropeMax: 3.2,           // u — longest web you can fire
+  /* ropeMax is set by ARITHMETIC, not taste. Anchors in this city land around y=3.5 and the street
+     sits near 0.3, so a 3.2u rope put the bottom of every arc exactly at pavement level — you swung
+     once, grounded out, and the rope was cut (measured: attached on 3 of 18 samples). 2.2 leaves the
+     arc bottoming out around y=1.3, clear of the street, which is what lets a swing CONTINUE instead
+     of becoming a series of landings. A taller city profile can raise this. */
+  ropeMax: 2.2,           // u — longest web you can fire
   ropeMin: 0.55,          // u — how far in you can reel before it reads as a collision
   aimCone: 0.62,          // rad — half-angle of the anchor search fan (the aim assist)
   aimRays: 7,             // how many rays in the fan; odd so one is dead ahead
@@ -892,9 +897,17 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     const fx = Math.sin(state.yaw), fz = Math.cos(state.yaw);
     let clinging = false;
     if (!state.anchor && world && world.segmentHit) {
-      const reach = P('clingReach');
-      const t = world.segmentHit(state.x, state.y, state.z, state.x + fx * reach, state.y, state.z + fz * reach, 0.05);
-      clinging = t < 1;
+      /* CLING IS OPT-IN, and that is a correction, not a preference. Sticking automatically on wall
+         contact shipped a swinger that could not swing: it spawns in a canyon, touched a facade on
+         the first fall, and froze there at speed 0 — measured on the deployed build. Most of this
+         city is within arm's reach of a wall, so "near a wall" cannot be the trigger. Holding the
+         lift axis is the ask; let go and you fall past the facade like anything else. */
+      const wants = (axes.lift || 0) !== 0;
+      if (wants) {
+        const reach = P('clingReach');
+        const t = world.segmentHit(state.x, state.y, state.z, state.x + fx * reach, state.y, state.z + fz * reach, 0.05);
+        clinging = t < 1;
+      }
     }
     state.clinging = clinging;
 
@@ -956,7 +969,11 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
        which made "land on that tower" impossible and is why perching needed a collider query rather
        than a new model. yMax is the feet plus a small step tolerance, so you land ON a roof you are
        descending onto but never snap UP onto one you are swinging past. */
-    const roof = world && world.surfaceAt ? world.surfaceAt(state.x, state.z, state.y + 0.12) : -Infinity;
+    /* ROOFS CATCH YOU ONLY WHEN YOU ARE FREE. While roped you are HANGING, and a hang that clips
+       every rooftop it passes over is not a swing — measured, the arc died on 18 of 20 samples at
+       y 4.35-5.12, landing on the towers it was swinging above rather than grounding out. Gating on
+       !anchor is the whole fix: swing over the skyline, release, and the same query lands you on it. */
+    const roof = (!state.anchor && world && world.surfaceAt) ? world.surfaceAt(state.x, state.z, state.y + 0.12) : -Infinity;
     let floor = Math.max(gy, wy > NO_WATER ? wy : gy);
     if (roof > floor) floor = roof;
     floor += P('skim');

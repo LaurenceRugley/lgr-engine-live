@@ -2886,7 +2886,7 @@ function Nr(e, t, { speedScale: n = 1, y: r = null, pitch: i = null } = {}) {
 }
 var Pr = {
 	gravity: 5.4,
-	ropeMax: 3.2,
+	ropeMax: 2.2,
 	ropeMin: .55,
 	aimCone: .62,
 	aimRays: 7,
@@ -2944,7 +2944,7 @@ function Fr(t = Pr) {
 			}, e.rope = Math.max(r("ropeMin"), t.d));
 		} else !c && e.anchor && (e.anchor = null);
 		let l = Math.sin(e.yaw), u = Math.cos(e.yaw), d = !1;
-		if (!e.anchor && o && o.segmentHit) {
+		if (!e.anchor && o && o.segmentHit && (t.lift || 0) !== 0) {
 			let t = r("clingReach");
 			d = o.segmentHit(e.x, e.y, e.z, e.x + l * t, e.y, e.z + u * t, .05) < 1;
 		}
@@ -2974,7 +2974,7 @@ function Fr(t = Pr) {
 			let t = r("maxSpeed") / m;
 			e.vx *= t, e.vy *= t, e.vz *= t;
 		}
-		let h = o && o.heightAt ? o.heightAt(e.x, e.z) : 0, g = o && o.waterHeightAt ? o.waterHeightAt(e.x, e.z) : mr, _ = o && o.surfaceAt ? o.surfaceAt(e.x, e.z, e.y + .12) : -Infinity, v = Math.max(h, g > -999 ? g : h);
+		let h = o && o.heightAt ? o.heightAt(e.x, e.z) : 0, g = o && o.waterHeightAt ? o.waterHeightAt(e.x, e.z) : mr, _ = !e.anchor && o && o.surfaceAt ? o.surfaceAt(e.x, e.z, e.y + .12) : -Infinity, v = Math.max(h, g > -999 ? g : h);
 		_ > v && (v = _), v += r("skim"), e.y < v ? (e.y = v, e.vy < 0 && (e.vy = 0), e.anchor = null, e.vx *= .86, e.vz *= .86, e.perched = _ > h + .05) : e.perched = !1;
 		let y = Math.hypot(e.vx, e.vz);
 		y > .05 && (e.yaw = Math.atan2(e.vx, e.vz)), e.speed = Math.hypot(e.vx, e.vy, e.vz);

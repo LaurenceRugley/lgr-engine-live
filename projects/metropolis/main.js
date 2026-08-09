@@ -632,7 +632,18 @@ function setMode(next) {
     /* Start ABOVE the rooftops. Dropping the swinger at street level means the first anchor search
        looks along a canyon floor and finds a wall to smack into; from up here the upward-biased fan
        has towers to catch. citygen's downtown gradient puts the tall stock near the origin. */
-    swingState.x = 1.6; swingState.z = 1.6; swingState.y = 4.2;
+    /* Spawn over a STREET with real air beneath you. A-ROOF made this matter: the old fixed spawn
+       sat above a rooftop, so you fell half a second, LANDED, and the rope was cut before an arc
+       could build (measured: attached on 1 of 16 samples, arc 0.28u). surfaceAt returning -Infinity
+       IS the test for "no building under this point" — ask it rather than hand-picking coordinates
+       that a different city seed would invalidate. */
+    let sx = 1.6, sz = 1.6;
+    for (let i = 0; i < 64; i++) {
+      const a = i * 2.399963, rr = 0.5 + (i / 64) * 2.4;          // golden-angle spiral out from the core
+      const tx = Math.sin(a) * rr, tz = Math.cos(a) * rr;
+      if (engine.collider.surfaceAt(tx, tz, 99, 0.22) === -Infinity) { sx = tx; sz = tz; break; }
+    }
+    swingState.x = sx; swingState.z = sz; swingState.y = 5.0;
     swingState.yaw = rig.azimuth + Math.PI; swingState.speed = 1.4;
     swingState.vx = undefined; swingState.vz = undefined; swingState.anchor = null; swingState.rope = 0;
     pilotCtl.possess(swingPilotable);
