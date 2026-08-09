@@ -87,25 +87,28 @@ function M({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = new
 	function xe(t, n) {
 		P = Number.isFinite(t) ? t : v, F = Number.isFinite(n) ? n : y, W.distance = e.MathUtils.clamp(W.distance, P, F);
 	}
-	function Se(e, t = !1) {
+	function Se(t, n) {
+		M = Number.isFinite(t) ? t : g, N = Number.isFinite(n) ? n : _, W.elevation = e.MathUtils.clamp(W.elevation, M, N);
+	}
+	function Ce(e, t = !1) {
 		W.azimuth = j(e, G.azimuth), t && (G.azimuth = W.azimuth);
 	}
-	function Ce(t, n = !1) {
+	function we(t, n = !1) {
 		W.elevation = e.MathUtils.clamp(t, M, N), n && (G.elevation = W.elevation);
 	}
-	function we(t, { frame: n, snap: r = !1 } = {}) {
+	function Te(t, { frame: n, snap: r = !1 } = {}) {
 		re = t, r && (re(K), W.target.copy(K), G.target.copy(K)), n != null && (H === m.PERSPECTIVE ? W.distance = e.MathUtils.clamp(n, P, F) : W.zoom = e.MathUtils.clamp(n, I, L));
 	}
-	function Te() {
+	function Ee() {
 		re = null;
 	}
-	function Ee(e) {
+	function De(e) {
 		q = e && e.segmentQuery || null, ae = e && e.getGroundY || null, oe = e && e.radius != null ? e.radius : .25, ie = !!(e && e.enabled), ie && (se = G.distance, ce = G.target.y);
 	}
-	function De(e, t, n = 0) {
+	function Oe(e, t, n = 0) {
 		le.copy(e), ue.copy(t), W.roll = n, J = !0;
 	}
-	function Oe() {
+	function Y() {
 		if (J = !1, W.roll = 0, G.roll = 0, !re) return;
 		re(K);
 		let t = de(), n = t.position.x - K.x, r = t.position.y - K.y, i = t.position.z - K.z, a = Math.hypot(n, r, i);
@@ -146,13 +149,14 @@ function M({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = new
 		setZoom: ye,
 		setDistance: be,
 		setDistanceClamp: xe,
-		setFollow: we,
-		clearFollow: Te,
-		setSpringArm: Ee,
-		setEye: De,
-		clearEye: Oe,
-		setAzimuth: Se,
-		setElevation: Ce,
+		setElevationClamp: Se,
+		setFollow: Te,
+		clearFollow: Ee,
+		setSpringArm: De,
+		setEye: Oe,
+		clearEye: Y,
+		setAzimuth: Ce,
+		setElevation: we,
 		get styleT() {
 			return H === m.PERSPECTIVE ? e.MathUtils.clamp((G.distance - ee) / (te - ee), 0, 1) : e.MathUtils.clamp((G.zoom - R) / (z - R), 0, 1);
 		},

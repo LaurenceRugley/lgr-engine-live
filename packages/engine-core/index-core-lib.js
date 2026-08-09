@@ -28,6 +28,7 @@ export { VIDEO_TYPES, createRecorder, pickVideoType, recorderExt } from './src/c
 export { createViewerUI } from './src/viewer-ui.js';
 export { createHints } from './src/hints.js';
 export { createTouchControls } from './src/touch-controls.js';   // 2026-08-06: the floating thumbstick + look-drag — touch input was built 5x in projects and never in core
+export { resolveAimPoint, createAimReticle, createPointerLockAim } from './src/aim.js';   // 2026-08-08 A-AIM: what is under the crosshair, the crosshair itself, and pointer-lock
 // createPedestrians is OMITTED here (CORE_OMISSIONS.city): it imports citygen + ships a city-content
 // asset — a no-city renderer consumer must not pay for it. index.js/index-lib.js carry it.
 export { createAppShell, readAppFlags } from './src/app-shell.js';

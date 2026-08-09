@@ -53,6 +53,7 @@ import {
   createTextureForge, forgeCityMaterials, CITY_LOOKS,
   createCelestial, createTrueStars, createSolarSystem, createConstellations,
   createDiveController, createTouchControls, createPedestrians,
+  resolveAimPoint, createAimReticle, createPointerLockAim,
 } from '@lgr/engine-core';
 import { createOffice } from '@lgr/office';   // A-DIVE: the proven office interior (city/main.js's own dive target)
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';   // A-PEDS: the consumer pays for the model, not every lib user
@@ -580,6 +581,47 @@ const swingPilotable = {
     setBodyVisible: (v) => { swingBody.visible = v; if (!v) rope.visible = false; },
   },
 };
+
+/* ---------- A-AIM (2026-08-08) — YOU choose the anchor -------------------------------------------
+   Everything here is COMPOSITION of three engine-core abilities (aim.js): a crosshair, pointer lock,
+   and "what world point is under the crosshair". The rule the brief fixed and this wiring honours:
+   THE MODEL DOES NOT OWN THE CAMERA. This file raycasts from the camera because this file is the one
+   that knows there IS a camera; the model receives a world POINT and rules on whether it can reach it.
+
+   WHY THE RAY STARTS AT THE EYE AND NOT AT THE BODY. The crosshair is a screen-space mark, so the only
+   ray it can honestly stand for is the camera's own. Cast from the body instead and the two disagree
+   by the parallax of a 1.9 u chase — you would aim at a window and web the wall beside it. The cost is
+   that the first ~1.9 u of AIM_REACH is spent getting from the eye to the body, which is exactly why
+   AIM_REACH is ropeMax plus the chase, not ropeMax.
+   AND IT MUST OVERSHOOT ropeMax, not stop at it: "there is a building there but it is too far" is a
+   DIFFERENT answer from "there is nothing there", and the dim crosshair is how the player is taught
+   the difference. A ray that stopped at the limit could never report the first one. */
+/* 9.0 u from the EYE, and the arithmetic matters: the eye is NOT at GRAPPLE_PROFILE.chaseDist. The
+   rig's dolly floor is 4.0 u (camera-rig DIST_MIN) and the grapple declares no `chaseMin`, so the
+   measured chase distance is 4.0, not 1.9. 4.0 + ropeMax 2.2 = 6.2 just to reach the limit; 9.0 leaves
+   ~2.8 u of "there is a building there and it is too far" past it, which is the band the dim crosshair
+   is made of. Sizing this off the PROFILE's chaseDist would have left 0.8 u of readout. */
+const AIM_REACH = 9.0;
+const _aim = { x: 0, y: 0, z: 0 };           // ONE reused point — handed to the model by reference (no-hot-alloc, invariant #7)
+let aimHit = null;                            // === _aim on a hit, null on clear sky
+let fireHeld = false;                         // the mouse trigger; W still fires too (the model takes either)
+const reticle = createAimReticle({ container: document.body });
+const lockAim = createPointerLockAim({
+  element: renderer.domElement,
+  // Raw movement deltas turn the ORBIT — the same call the drag path makes, so locked and unlocked
+  // aiming are the same motion with and without a button held.
+  onLook: (dx, dy) => rig.orbit(-dx * ORBIT_SPEED, -dy * ORBIT_SPEED),
+  onFire: (down) => { fireHeld = down; },
+  /* Losing the lock (Esc, tab switch) must drop the line. Without this the trigger latches held, and
+     a swinger that can never let go is the same bug class as a cling that never releases. */
+  onLockChange: (locked) => { if (!locked) fireHeld = false; },
+});
+/* Verification probe (house convention — see docs/engine-invariants.md's __wash/__celestial pattern).
+   Records the aim point and the anchor from the SAME frame the line attached, so the "did it web what
+   I aimed at" delta can be MEASURED rather than eyeballed across a frame of motion. */
+const __aimFire = { ax: 0, ay: 0, az: 0, hx: 0, hy: 0, hz: 0, delta: -1, n: 0 };
+let _hadAnchor = false;
+
 window.__heli = heliCraft;
 
 /* ---------- mode switching (fly / walk / drive) — one shared camera-rig, three input routes ---------- */
@@ -587,6 +629,11 @@ let mode = 'fly';
 function setMode(next) {
   if (next === mode) return;
   if (mode === 'drive' || mode === 'heli' || mode === 'boat' || mode === 'bird' || mode === 'fish' || mode === 'swing') pilotCtl.release();   // both are piloted — hand the camera back before switching
+  /* A-AIM: leaving the swing gives the mouse back. Every ownership the swinger took (pointer lock, the
+     held trigger, the crosshair) is released HERE, on the one path out — the repo's recurring bug is a
+     mode that latches something an exit path forgot. pilotCtl.release() above clears free-look and the
+     elevation clamp for the same reason, inside the engine. */
+  if (mode === 'swing') { lockAim.exit(); fireHeld = false; reticle.setVisible(false); reticle.setInRange(false); }
   mode = next;
   document.getElementById('modeFly').setAttribute('aria-pressed', String(mode === 'fly'));
   document.getElementById('modeWalk').setAttribute('aria-pressed', String(mode === 'walk'));
@@ -654,6 +701,13 @@ function setMode(next) {
        canyon BETWEEN towers by definition — it is closer to the car than to the gull, so it wants
        the car's arm, which pulls the eye in when a wall gets behind it. */
     rig.setSpringArm({ segmentQuery: pilotWorld.segmentHit, radius: 0.3, enabled: true });
+    /* A-AIM. AFTER possess(), never before — possess() zeroes free-look on purpose (a stale camera
+       owner surviving a body swap is the exact latch this repo keeps re-finding), so setting it first
+       would be silently undone. Free-look is on for the WHOLE swing, not just under pointer lock: the
+       drag path and the phone's look surface both feed rig.orbit, so all three input routes aim the
+       same way and pointer lock is a comfort upgrade rather than the only way in. */
+    pilotCtl.setFreeLook(true);
+    reticle.setVisible(true);
   }
   else if (mode === 'fish') {
     rig.setMode(CAM.PERSPECTIVE);
@@ -693,7 +747,7 @@ const HINTS = {
   boat:  'W/S throttle · A/D rudder (only steers with way on) · Shift full-ahead',
   fish:  'W/S swim · A/D turn · Space up · C dive · Shift burst — build speed and hit the surface to BREACH',
   bird:  'W flap · A/D bank · Space climb · C dive · Shift beat harder — ride the water down, then press C to PLUNGE IN',
-  swing: 'HOLD W to fire a line and keep it · A/D steer the arc · Space reel in to pump · RELEASE W at the bottom to launch',
+  swing: 'CLICK to capture the mouse, then AIM with it · HOLD the button to web what the crosshair marks (dim = out of range) · A/D steer · Space reel in · release to launch · Esc frees the mouse',
 };
 const MOBILE_HINTS = {
   fly:   'stick to move · push past the ring to boost · drag to look · tap a tower',
@@ -703,7 +757,7 @@ const MOBILE_HINTS = {
   boat:  'stick to steer · push past the ring for full ahead',
   bird:  'stick to fly · push past the ring to beat harder · tap dive at the water to plunge in',
   fish:  'stick to swim · push past the ring to burst · surface fast to breach',
-  swing: 'hold the stick forward to fire and keep the line · steer the arc · lift to reel in · let go to launch',
+  swing: 'drag to aim the crosshair · hold the stick forward to web what it marks (dim = too far) · steer the arc · lift to reel in · let go to launch',
 };
 function refreshHint() {
   touch.setLift?.(USES_LIFT.has(mode));   // a rocker sitting inert while you drive a car is worse than none
@@ -825,7 +879,22 @@ window.addEventListener('keyup', (e) => {
 });
 let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, downT = 0;
 const ORBIT_SPEED = 0.006;
-renderer.domElement.addEventListener('pointerdown', (e) => { dragging = true; lastX = downX = e.clientX; lastY = downY = e.clientY; downT = performance.now(); });
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  dragging = true; lastX = downX = e.clientX; lastY = downY = e.clientY; downT = performance.now();
+  /* A-AIM: the FIRST click in swing mode captures the mouse; every click after that fires the web.
+     Pointer lock can only be requested from inside a user gesture, so it has to live on this press
+     edge. The capturing click deliberately does NOT also fire — the lock is not active yet when its
+     own mousedown is dispatched, so aim.js's trigger ignores it, and you never web a wall by accident
+     on the click that was really just "let me in".
+
+     ON THE CANVAS is the right listener, and the reason is a coincidence worth writing down: the
+     touch overlay (`.lgr-touch-look`, position:fixed inset:0) WOULD swallow this — but
+     createTouchControls calls setVisible(coarse), so on a desktop pointer it is display:none and the
+     canvas is the hit target (verified: elementFromPoint(centre) === CANVAS, display:none, and the
+     canvas listener fires). On a coarse pointer the overlay does cover it and this never runs, which
+     is exactly right: there is no pointer to lock on a touchscreen. */
+  if (mode === 'swing' && diveCtl.mode === 'a' && !lockAim.locked) lockAim.request();
+});
 /* The tower pick, callable from BOTH input paths: desktop click-vs-drag AND the touch overlay's
    onTap (the overlay swallows canvas events, so without this mobile could never dive). */
 function pickTowerAt(clientX, clientY) {
@@ -842,6 +911,11 @@ window.addEventListener('pointerup', (e) => {
   pickTowerAt(e.clientX, e.clientY);
 });
 window.addEventListener('pointermove', (e) => {
+  /* A-AIM: under pointer lock the cursor does not move, so clientX/clientY are frozen and the deltas
+     below would all be zero anyway — but bail explicitly rather than relying on that, because aim.js
+     is already feeding rig.orbit from movementX/Y and two look sources on one camera is how a
+     double-speed turn ships. */
+  if (lockAim.locked) return;
   if (!dragging) return;
   if (diveCtl.mode !== 'a') {                      // inside (or descending): drag turns the seated head
     office.look.addDrag(e.clientX - lastX, e.clientY - lastY);
@@ -955,8 +1029,27 @@ function frame(dt, t) {
        swinger sat frozen at its spawn — mode switched, camera followed, physics never ran. The
        ability being in core and the mode button existing proves nothing; the STEP has to be wired.
        throttle is clamped >=0: W fires and HOLDS the line, and there is no such thing as a reverse
-       grapple. lift is the pump (reel in), which is why 'swing' joins USES_LIFT. */
-    pilotCtl.step(dt, { throttle: Math.max(0, axes.y), steer: axes.x, lift: liftFromKeys(), boost: axes.boost });
+       grapple. lift is the pump (reel in), which is why 'swing' joins USES_LIFT.
+
+       A-AIM (2026-08-08): resolve the crosshair BEFORE stepping, so the model attaches to what the
+       player is looking at THIS frame rather than last frame's view. `aimHit` is either `_aim` (the one
+       reused point) or null; null is not an error, it is "you are aiming at sky". */
+    aimHit = resolveAimPoint(rig.camera, pilotWorld, _aim, { maxDist: AIM_REACH, radius: 0.05 });
+    pilotCtl.step(dt, {
+      throttle: Math.max(0, axes.y), steer: axes.x, lift: liftFromKeys(), boost: axes.boost,
+      aimPoint: aimHit, fire: fireHeld,
+    });
+    /* The crosshair reads the MODEL's verdict (state.aimInRange), never its own copy of the range rule
+       — one implementation, read twice. A HUD that recomputed "in range" would eventually disagree
+       with the mechanic, and the player would find out by firing at a bright mark and getting nothing. */
+    reticle.setInRange(!!swingState.aimInRange);
+    if (swingState.anchor && !_hadAnchor) {   // the attach frame — record both points while they are the same frame's
+      __aimFire.ax = _aim.x; __aimFire.ay = _aim.y; __aimFire.az = _aim.z;
+      __aimFire.hx = swingState.anchor.x; __aimFire.hy = swingState.anchor.y; __aimFire.hz = swingState.anchor.z;
+      __aimFire.delta = Math.hypot(_aim.x - swingState.anchor.x, _aim.y - swingState.anchor.y, _aim.z - swingState.anchor.z);
+      __aimFire.n++;
+    }
+    _hadAnchor = !!swingState.anchor;
   } else if (mode === 'bird') {
     // throttle is clamped ≥0: a wing has no reverse. Space climbs, C dives (see the KEY map above).
     pilotCtl.step(dt, { throttle: Math.max(0, axes.y), steer: axes.x, lift: liftFromKeys(), boost: axes.boost });
@@ -1033,6 +1126,11 @@ window.__setMode = setMode; window.__mode = () => mode;
 window.__walker = walker; window.__pilotCtl = pilotCtl; window.__playerCar = playerCar;
 window.__realSky = { trueStars, solarSystem, constellations, get on() { return realSkyOn; }, get resolved() { return realSkyResolved; } };
 window.__swing = swingState;   // A-SWING probe handle (house convention — see docs/engine-invariants.md)
+// A-AIM probes: the live aim point + whether it is reachable, and the attach-frame fidelity record.
+window.__aim = { pt: _aim, get hit() { return !!aimHit; }, get inRange() { return !!swingState.aimInRange; },
+                 get locked() { return lockAim.locked; }, get firing() { return fireHeld; }, get reach() { return AIM_REACH; } };
+window.__aimFire = __aimFire;
+window.__reticle = reticle;
 window.__frame = frame;   // debug/verification probe (matches house convention — see docs/engine-invariants.md)
 window.__cityReady = true;
 

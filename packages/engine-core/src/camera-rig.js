@@ -436,6 +436,23 @@ export function createCameraRig({
     goal.distance = THREE.MathUtils.clamp(goal.distance, distMin, distMax);
   }
 
+  /* setElevationClamp(min, max) — A-AIM (2026-08-08). The PITCH twin of setDistanceClamp, and it
+     exists for the same reason: EL_MIN (+0.03 rad) was authored for the FREE inspection camera, where
+     dropping the eye below the target would put it inside the street. A piloted body that has to AIM
+     needs the opposite: this rig looks AT its target, so the camera's forward vector points up only
+     when the eye is BELOW the body — with the free-camera floor in place there is no orbit angle from
+     which a player can aim at anything above them. Rather than lower EL_MIN globally (which would let
+     the fly-mode camera sink under the city — a byte-identical question, not a one-liner), the clamp
+     becomes settable and the pilot controller owns it exactly as it owns the dolly clamp and the
+     spring arm: applied on possess from the profile, restored on release. No arguments = defaults.
+     Clamps the GOAL only, never `curr` — the same lesson setDistanceClamp's comment records: writing
+     `curr` here turns a clamp change into a camera jump. */
+  function setElevationClamp(min, max) {
+    elMin = Number.isFinite(min) ? min : EL_MIN;
+    elMax = Number.isFinite(max) ? max : EL_MAX;
+    goal.elevation = THREE.MathUtils.clamp(goal.elevation, elMin, elMax);
+  }
+
   /* ----- L76 CHASE-CAM seam: drive the orbit angles directly (the pilot's reactive chase) -----
      The L32 Hoard cam followed a target POSITION but kept whatever azimuth the user had orbited
      to. A piloted vehicle wants the camera to swing BEHIND its heading so "forward" reads as "away
@@ -532,7 +549,7 @@ export function createCameraRig({
     get zoom() { return curr.zoom; },
     get target() { return curr.target; },          // live Vector3 (read-only by convention — callers copy out, never mutate)
     get following() { return !!followFn; },        // L63: is the inspection lens locked onto something?
-    setTarget, setZoom, setDistance, setDistanceClamp, setFollow, clearFollow, setSpringArm,   // L108: the chase spring-arm (pilot arms on possess, disarms on release)
+    setTarget, setZoom, setDistance, setDistanceClamp, setElevationClamp, setFollow, clearFollow, setSpringArm,   // L108: the chase spring-arm (pilot arms on possess, disarms on release)
     setEye, clearEye,                                          // L-cockpit: first-person eye override (pilot sets each cockpit frame, clears on exit)
     setAzimuth, setElevation,        // L76: the chase-cam angle seam (the pilot swings the cam behind the craft's heading)
     /* styleT — the rig's current zoom as a normalized 0..1 (0 = nearest, 1 =

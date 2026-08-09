@@ -34,6 +34,7 @@ export { createCapture } from './src/capture.js';
 export { createViewerUI } from './src/viewer-ui.js';
 export { createHints } from './src/hints.js';
 export { createTouchControls } from './src/touch-controls.js';   // 2026-08-06: the floating thumbstick + look-drag — touch input was built 5x in projects and never in core
+export { resolveAimPoint, createAimReticle, createPointerLockAim } from './src/aim.js';   // 2026-08-08 A-AIM: what is under the crosshair, the crosshair itself, and pointer-lock
 export { createPedestrians } from './src/pedestrians.js';   // A-PEDS 2026-08-06: skinned humans strolling block perimeters (bible §6 item 4) — composes createCharacterRig + the promoted survivor.glb
 export { createAppShell, readAppFlags } from './src/app-shell.js';
 export { THEME, applyThemeToRoot } from './src/diagram-theme.js';

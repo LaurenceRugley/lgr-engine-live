@@ -821,8 +821,15 @@ export const GRAPPLE_PROFILE = {
      of becoming a series of landings. A taller city profile can raise this. */
   ropeMax: 2.2,           // u — longest web you can fire
   ropeMin: 0.55,          // u — how far in you can reel before it reads as a collision
-  aimCone: 0.62,          // rad — half-angle of the anchor search fan (the aim assist)
-  aimRays: 7,             // how many rays in the fan; odd so one is dead ahead
+  /* A-AIM (2026-08-08). 'point' = the PLAYER aims: the consumer resolves a world point under its own
+     crosshair (engine-core/aim.js resolveAimPoint) and hands it in as `axes.aimPoint`; this model only
+     asks "can I reach that from HERE". 'fan' = the original auto-aim cone below, kept — not deleted —
+     because it is the right answer for anything without a player at the controls (an NPC swinger, an
+     attract-mode reel, a touch-only build with no aim surface). Choosing the anchor is now the SKILL,
+     which is the whole point: an assist that picks the anchor for you also picks the line for you. */
+  aimMode: 'point',       // 'point' (player-aimed) | 'fan' (the legacy auto-aim cone)
+  aimCone: 0.62,          // rad — half-angle of the anchor search fan (the aim assist) — 'fan' mode only
+  aimRays: 7,             // how many rays in the fan; odd so one is dead ahead — 'fan' mode only
   aimLift: 0.42,          // rad — the fan is biased UP by this: you swing from above, not from a wall
   pump: 1.5,              // u/s of rope shortening while the lift axis is held (the energy input)
   airControl: 2.1,        // u/s² of lateral nudge while attached (steering the arc)
@@ -833,6 +840,15 @@ export const GRAPPLE_PROFILE = {
   clingReach: 0.24,       // u — how close a facade has to be to stick to it
   skim: 0.06,             // clearance above ground/water/ROOFTOP, same idiom as the bird
   chaseDist: 1.9, chaseElev: 0.35,
+  /* A-AIM: let the chase camera drop BELOW the body. The rig's free-orbit elevation floor is +0.03 rad
+     (camera-rig EL_MIN — authored so the inspection camera never sinks under the city), and an orbit
+     camera looks AT its target, so a floor at "just above level" means the view can only ever point
+     DOWNWARD. On a grapple that is fatal: the anchors worth taking are ABOVE you, and with the default
+     clamp there is no camera angle from which the crosshair can reach one. -1.05 rad (-60°) lets the
+     eye swing under you so the forward vector tilts up. Same shape as A-FISH's chaseMin: a clamp
+     authored for the free camera is the wrong clamp for a piloted body, so the profile states its own
+     and the controller restores the default on release. */
+  chaseElevMin: -1.05,
   eye: { x: 0, y: 0.06, z: 0.04 },
   /* A-SPRINT for a swinger is a harder pull: reel faster and steer harder. Not a speed multiplier —
      top speed stays the reward for a well-timed release, exactly like the bird's dive. */
@@ -864,6 +880,26 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     return best;
   }
 
+  /* A-AIM: the PLAYER-aimed path. The consumer has already resolved a world point under its crosshair
+     (it owns the camera; we do not — see aim.js's header). All this does is ask the one question the
+     model is entitled to an opinion on: CAN I REACH THAT FROM WHERE I AM.
+
+     RANGE IS MEASURED FROM THE PLAYER, NOT THE CAMERA, and that is the whole reason this validation
+     lives here rather than in the consumer's raycast. A chase camera sits ~1.9 u behind the body, so a
+     point 2.0 u from the eye can be 0.4 u from the body (reachable) or 3.9 u (a whiff) depending only
+     on which way the eye is facing. Validate at the eye and `ropeMax` stops meaning anything.
+
+     OUT OF RANGE RETURNS NULL — a WHIFF, deliberately, not a shortened rope to the nearest point along
+     the ray. You either got the anchor you aimed at or you got nothing; anything in between would be
+     the game quietly correcting your aim, which is exactly the assist A-AIM exists to remove. */
+  function reachFromAim(state, aim) {
+    if (!aim || typeof aim.x !== 'number') return null;
+    const dx = aim.x - state.x, dy = aim.y - state.y, dz = aim.z - state.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d < P('ropeMin') || d > P('ropeMax')) return null;
+    return { d, x: aim.x, y: aim.y, z: aim.z };
+  }
+
   function step(state, axes, dt, world) {
     /* Adopt the shared fields into a real vector ONCE. Coming from another body we inherit a scalar
        speed + yaw, so convert it — that is what makes walk→swing keep your momentum instead of
@@ -875,12 +911,25 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     }
 
     const boost = clamp(axes.boost || 0, 0, 1);
-    const fire = (axes.throttle || 0) > 0;
+    /* FIRE is `axes.fire` OR a held throttle. Two sources on purpose, and this is not indecision:
+       A-AIM binds fire to the MOUSE BUTTON under pointer lock, which a phone does not have and an
+       existing consumer never sent. Keeping the throttle edge means the touch stick and the W key
+       still fire exactly as they did before this arc — the new input is added, nothing is taken. */
+    const fire = axes.fire === true || (axes.throttle || 0) > 0;
 
-    // 1) ATTACH / RELEASE. Holding throttle keeps the line; letting go cuts it, and whatever velocity
+    /* Resolve the reachable anchor EVERY frame, whether or not the trigger is down, and publish the
+       verdict on state. That is what lets the consumer's crosshair dim on the same rule the attach
+       uses — one implementation of "in range", read two ways. Computing it twice (once here, once in
+       the HUD) is how the mark and the mechanic drift apart, and the drift is invisible until the day
+       the player fires at a bright crosshair and nothing happens. */
+    const pointMode = P('aimMode') !== 'fan';
+    const reach = pointMode ? reachFromAim(state, axes.aimPoint) : null;
+    state.aimInRange = pointMode ? !!reach : undefined;
+
+    // 1) ATTACH / RELEASE. Holding fire keeps the line; letting go cuts it, and whatever velocity
     //    the arc has built is simply kept — the release IS the launch, no special case.
     if (fire && !state.anchor) {
-      const a = findAnchor(state, world);
+      const a = pointMode ? reach : findAnchor(state, world);
       if (a) {
         state.anchor = { x: a.x, y: a.y, z: a.z };
         state.rope = Math.max(P('ropeMin'), a.d);
@@ -1008,7 +1057,7 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
 const MODEL_FACTORIES = { ground: createGroundModel, spacecraft: createSpacecraftModel, road: createRoadModel, boat: createBoatModel, bird: createBirdModel, fish: createFishModel, grapple: createGrappleModel };
 
 const ENTER_TIME = 0.55;                 // seconds the ENTERING camera-move runs (input ignored) — "the move is the onboarding"
-const ZERO_AXES = { throttle: 0, steer: 0, lift: 0, boost: 0 };
+const ZERO_AXES = { throttle: 0, steer: 0, lift: 0, boost: 0, aimPoint: null, fire: false };
 
 /* ── THE PILOT CONTROLLER (the CONTEXT / state machine) ───────────────────────
    createPilotController({ rig, world }) — engine-core singleton. The project wires input → axes,
@@ -1022,7 +1071,17 @@ export function createPilotController({ rig, world } = {}) {
   let enterT = 0;            // ENTERING countdown
   let fpBlend = 0;           // 0 = chase view · 1 = cockpit POV (today only integer values; named for future tween)
   // H — eased axis closure: steer/lift damp toward the raw input each frame; throttle bypass (has accel/drag).
-  let _ax = { throttle: 0, steer: 0, lift: 0, boost: 0 };
+  // A-AIM adds two PASS-THROUGH fields: `aimPoint` (a resolved world point the consumer owns) and
+  // `fire` (a trigger edge). Neither is eased — a damped aim point would smear the anchor across the
+  // geometry you were looking at half a second ago, and a damped trigger is just input lag.
+  let _ax = { throttle: 0, steer: 0, lift: 0, boost: 0, aimPoint: null, fire: false };
+  /* A-AIM FREE-LOOK. When a consumer takes over the aim, it also takes over the chase AZIMUTH: the
+     reactive chase below snaps the camera behind the craft's heading every frame, which would fight
+     a player turning the view to aim (and on a grapple the heading changes continuously, since it is
+     derived from the arc's velocity — so the camera would be dragged off the aim by the physics).
+     Default OFF ⇒ every existing craft chases exactly as before. Reset on possess AND release: this
+     repo's most-repeated bug is an ownership flag that an exit path clears and no entry path guards. */
+  let freeLook = false;
   // expo(x, a): gentle S-curve on the steer axis — soft near centre, full authority at the edge.
   // a=0: linear (identity). a=1: cubic. a≈0.5: mild curve. Formula: x*(a·x²+(1-a)).
   const expo = (x, a) => x * (a * x * x + (1 - a));
@@ -1044,6 +1103,8 @@ export function createPilotController({ rig, world } = {}) {
     const make = MODEL_FACTORIES[p.model] || MODEL_FACTORIES.ground;
     model = make(p.profile);
     _ax.throttle = 0; _ax.steer = 0; _ax.lift = 0;          // H — zero envelope on each new possession (no carry-over)
+    _ax.aimPoint = null; _ax.fire = false;                   // A-AIM: a stale aim/trigger must never survive a body swap
+    freeLook = false;                                        // …nor may a stale camera-ownership flag
     p.suspendAutonomy();                                     // stop the entity's idle/park loop while piloted
     // TAKING CAMERA OWNERSHIP MEANS CLEARING WHAT OWNED IT BEFORE. If the project was driving a
     // first-person eye (a walker feeding rig.setEye every frame), fpActive is still true — and
@@ -1061,6 +1122,13 @@ export function createPilotController({ rig, world } = {}) {
        setFollow, since setFollow clamps `frame` on the spot. Only profiles that declare `chaseMin`
        touch it, so every existing craft frames exactly as before. */
     if (rig.setDistanceClamp && p.profile.chaseMin !== undefined) rig.setDistanceClamp(p.profile.chaseMin);
+    /* A-AIM: the ELEVATION twin of that clamp. A profile that needs to aim upward declares its own
+       floor (GRAPPLE_PROFILE.chaseElevMin) because the rig's free-orbit floor keeps the eye above the
+       target, and an orbit camera above its target can only look DOWN. Profiles that declare neither
+       never touch the clamp → every existing craft frames byte-identically. */
+    if (rig.setElevationClamp && (p.profile.chaseElevMin !== undefined || p.profile.chaseElevMax !== undefined)) {
+      rig.setElevationClamp(p.profile.chaseElevMin, p.profile.chaseElevMax);
+    }
     rig.setFollow((out) => p.getWorldPos(out), { frame: p.profile.chaseDist });
     rig.setElevation(p.profile.chaseElev);
     rig.setAzimuth(p.getTransform().yaw + Math.PI, true);   // +π = behind the nose, looking along the heading
@@ -1094,6 +1162,8 @@ export function createPilotController({ rig, world } = {}) {
     /* A-FISH: hand the dolly clamp back. Entry paths that take ownership must have an exit path that
        returns it — this repo has a logged failure class of exactly the opposite (latched modes). */
     if (rig.setDistanceClamp) rig.setDistanceClamp();
+    if (rig.setElevationClamp) rig.setElevationClamp();   // A-AIM: hand the pitch clamp back too (same contract)
+    freeLook = false;                                 // A-AIM: the consumer's camera ownership ends with the possession
     fpBlend = 0; pilotLook.recenter();               // L-cockpit: exit fp mode, smooth recenter of head-turn
     if (rig.clearEye) rig.clearEye();               // let camera-rig's orbit block resume
     craft = null; model = null; phase = 'free'; enterT = 0;
@@ -1133,6 +1203,10 @@ export function createPilotController({ rig, world } = {}) {
        reads as twitchy; boost is a gearbox, and a gearbox that fades in over 0.15 s feels broken. It
        passes through raw (already analog from the stick, 0/1 from a key). */
     _ax.boost = ax.boost || 0;
+    // A-AIM pass-through. `aimPoint` is the consumer's own reused {x,y,z} — we hold the REFERENCE, we
+    // never copy it into a fresh object (no-hot-alloc invariant #7); the model only reads it this frame.
+    _ax.aimPoint = ax.aimPoint || null;
+    _ax.fire = ax.fire === true;
 
     // L108 (part C) — the ONE collision hook: integrate, then push the craft-sphere out of buildings BEFORE the
     // transform is written (the move-and-slide resolve slot). Strategy-agnostic → every craft with a `collide`
@@ -1184,7 +1258,9 @@ export function createPilotController({ rig, world } = {}) {
       // H — camera lead: sweep azimuth slightly ahead of the turn so the scene opens up as you steer.
       // camLead (rad) × eased steer (signed) — subtle offset; the rig's own K-damp provides the sweep lag.
       const camLead = (p.profile && p.profile.camLead) || 0;
-      rig.setAzimuth(s.yaw + Math.PI - camLead * _ax.steer);   // reactive chase: rig K-damps curr→goal = lag/swing
+      // A-AIM: with free-look ON the consumer owns the azimuth (it is driving rig.orbit from the
+      // player's mouse), so the reactive chase stands down rather than fighting it every frame.
+      if (!freeLook) rig.setAzimuth(s.yaw + Math.PI - camLead * _ax.steer);   // reactive chase: rig K-damps curr→goal = lag/swing
     }
   }
 
@@ -1217,11 +1293,18 @@ export function createPilotController({ rig, world } = {}) {
      right-drag / touch look-zone path that bypasses the piloting early-return). */
   function addLookDrag(dx, dy) { pilotLook.addDrag(dx, dy); }
 
+  /* setFreeLook(on) — A-AIM. Hand the chase AZIMUTH to the consumer (it is aiming with it) or take it
+     back. Deliberately a runtime toggle rather than a profile flag: a consumer turns it on only while
+     an aim surface is actually engaged (pointer lock captured, an aim mode entered) and off the moment
+     it is not, so the automatic chase remains the resting state of every body. */
+  function setFreeLook(on) { freeLook = !!on; }
+
   return {
-    possess, release, step, setView, addLookDrag,
+    possess, release, step, setView, addLookDrag, setFreeLook,
     // Gyro seam: expose the look controller so createGyroLook can call look.setTarget directly.
     get look() { return pilotLook; },
     get fpBlend() { return fpBlend; },
+    get freeLook() { return freeLook; },
     get active() { return !!craft; },
     get piloting() { return phase === 'piloting'; },
     get state() { return phase; },
