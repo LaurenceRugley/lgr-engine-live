@@ -38,6 +38,7 @@
     "narrative-probe": "node tools/narrative-probe.mjs",
     "2d-layer-probe": "node tools/2d-layer-probe.mjs",
     "swing-probe": "node tools/swing-composition-probe.mjs",
+    "character-probe": "node tools/character-probe.mjs",
     "test": "node --test packages/engine-core/src/*.test.mjs packages/engine-core/src/math/*.test.mjs packages/engine-core/src/hero/*.test.mjs tools/*.test.mjs projects/hoard2/src/*/*.test.mjs",
     "asset-factory": "node asset-factory/process.mjs",
     "asset-factory:riso": "node asset-factory/process-riso.mjs",

@@ -150,7 +150,14 @@ export function createFirstPersonWalker(opts = {}) {
        Analog-tolerant: a thumbstick pushed past its rim sends a float, so anything over half counts. */
     const sp = (input.sprint || (input.boost || 0) > 0.5) ? sprintSpeed : moveSpeed;
     const desVx = (fx * ny + sx * nx) * sp, desVz = (fz * ny + sz * nx) * sp;
-    const k = 1 - Math.exp(-accel * dt);
+    /* ARC A-CHAR (2026-08-09) — `input.control` scales the ACCELERATION for this frame only, and it
+       defaults to 1 so every existing call site (office, city, hoard, hoard2, metropolis — none of
+       which pass it) integrates byte-identically to before. It exists for AIR CONTROL: a jumping body
+       still wants full walk speed as its target, it just must not reach it instantly, or you steer in
+       mid-air like a hovercraft. Scaling accel keeps the momentum and softens the turn; scaling the
+       SPEED would have braked you in flight, which is the opposite of a jump. */
+    const ctl = input.control != null ? input.control : 1;
+    const k = 1 - Math.exp(-accel * ctl * dt);
     vx += (desVx - vx) * k; vz += (desVz - vz) * k;
     x += vx * dt; z += vz * dt;
     resolveCollision(dt);
@@ -178,6 +185,10 @@ export function createFirstPersonWalker(opts = {}) {
     setResolveSpatial(fn) { spatialResolve = fn || null; },
     recenterPitch() { pitch = 0; },
     get x() { return x; }, get z() { return z; },
+    // A-CHAR: the horizontal VELOCITY, read-only. A character controller that hands this body to a
+    // grapple mid-stride needs the momentum it was carrying; before this it was internal and the
+    // hand-off would have started every web from a dead stop.
+    get vx() { return vx; }, get vz() { return vz; },
     get yaw() { return yaw; }, get pitch() { return pitch; },
     get moving() { return moving; },
   };

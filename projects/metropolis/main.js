@@ -46,8 +46,8 @@ import {
   createCityLife, buildGraph,
   createWaterLife,
   createWeatherRig,
-  createFirstPersonWalker,
-  createPilotController, createGroundModel, createRoadModel, ATV_PROFILE, ROAD_PROFILE, CRAFT_PROFILE, BOAT_PROFILE, BIRD_PROFILE,
+  createFirstPersonWalker, createCharacterController,
+  createPilotController, createGroundModel, createRoadModel, createGrappleModel, ATV_PROFILE, ROAD_PROFILE, CRAFT_PROFILE, BOAT_PROFILE, BIRD_PROFILE,
   FISH_PROFILE, GRAPPLE_PROFILE,
   carryMomentum,
   createTextureForge, forgeCityMaterials, CITY_LOOKS,
@@ -381,36 +381,82 @@ const EYE = 0.28;                    // 1.70 m at 6.08 m/unit — just above the
    0.30 radius happened to exceed 0.1.) 0.02 clears the new body with margin; the city's far plane is
    100, so the depth ratio stays well inside precision comfort. */
 rig.camera.near = 0.02; rig.camera.updateProjectionMatrix();
-let walkGroundY = LAYOUT.PLINTH_TOP;   // A-ROOF: the ground accepted last frame (see groundY below)
-const walker = createFirstPersonWalker({
-  // eyeHeight (NOT eyeY): with a groundY hook, eyeY is an ABSOLUTE height and PLINTH_TOP got added
-  // TWICE (0.3 + (0.3 + 1.6) = 2.2 measured). eyeHeight is the above-ground knob the hook expects.
-  eyeHeight: EYE,
-  moveSpeed: 0.55,                   // 2.0 eye-heights/s — hoard2's proven walk feel, scale-transferred (3.4 m/s)
-  sprintSpeed: 0.95,                 // was never passed at all: the default 5.0 vs moveSpeed 4.2 made shift a +19% no-op
-  accel: 14,                         // accel is a RATE (1/s) in the walker's exp() integrator — scale-invariant, so match hoard2 exactly
-  radius: 0.09,                      // body 0.18 wide in a 0.79 face-to-face street: 23% of the corridor (was 81% — you shouldered both walls)
+
+/* ---------- A-CHAR (2026-08-09) — THE UNIFIED CHARACTER, and `walk` mode IS it now ----------------
+   The owner's ask, verbatim in intent: "control a character, be able to walk around the environment,
+   collision detection so I stay above the ground, I can't walk through buildings, but I can jump, I
+   can sprint, I can walk, and I can have a crosshair with a mouse and look up or down or wherever,
+   and then click to spin a web to that anchor point and swing from there." Plus two rulings he gave
+   directly: ONE character with the swing as an ABILITY (you land and keep walking — no mode button
+   mid-play), and BOTH cameras on a key, third-person by default.
+
+   THE ABILITY IS ENGINE-CORE'S (`createCharacterController`); everything below is WIRING — a world
+   bag of queries, a placeholder body to look at, a rope to see, and the key map. No physics in this
+   file, per the project's engine-first rule.
+
+   THE WORLD BAG IS THE POINT OF THIS BLOCK. The character's walk floor, its fall test, its landing
+   snap, its collision probe height and the GRAPPLE'S OWN floor all read these four functions — so
+   there is exactly ONE answer to "where is the ground", and the body cannot pop when a web cuts and
+   the other integrator takes over. Note `heightAt` is the WALKABLE base (the plinth on land, the
+   beach terrace at the shore), NOT `pilotWorld.heightAt`'s seabed: a fish swims to the seabed, a
+   person walking into the sea should meet the sand, and the two are 2 u apart. */
+const charWorld = {
+  heightAt: (x, z) => (city.isLand(x, z) ? LAYOUT.PLINTH_TOP : 0.12),
+  surfaceAt: (x, z, yMax, r) => engine.collider.surfaceAt(x, z, yMax, r),
+  segmentHit: (ox, oy, oz, ex, ey, ez, r) => engine.collider.segmentHit(ox, oy, oz, ex, ey, ez, r),
+  resolveSphere: (st, dt, cfg) => engine.collider.resolveSphere(st, dt, cfg),
+};
+/* The character's OWN copy of the grapple profile — never the shared export (the same shared-default
+   hazard CAR_PROFILE spreads ROAD_PROFILE to avoid). `point` because this body has a crosshair and the
+   owner asked to click a chosen anchor; the auto fan still exists, it just is not what this verb is. */
+const CHAR_SWING_PROFILE = { ...GRAPPLE_PROFILE, aimMode: 'point' };
+const character = createCharacterController({
+  world: charWorld,
+  grapple: createGrappleModel(CHAR_SWING_PROFILE),
+  grappleProfile: CHAR_SWING_PROFILE,
+  /* Every locomotion number below is the walker's own A-FEEL value, carried over unchanged — this
+     body walks exactly as the old one did; what is new is that it can leave the ground. */
+  eyeHeight: EYE, radius: 0.09, footR: 0.12, collideYOff: 0.14,
+  moveSpeed: 0.55, sprintSpeed: 0.95, accel: 14,
   arenaRadius: city.extent + 0.8,
-  /* A-SHORE: the ground is no longer one height — the walker STEPS DOWN from the grass (PLINTH_TOP)
-     onto the sand terrace (0.12) using the city's own isLand() coast polygon; the tighter arena
-     (was extent+6!) stops the old walk-on-open-water-at-plinth-height behavior at the beach rim. */
-  /* A-ROOF: the walker can now stand on BUILDINGS, not just the street. groundY(x,z) has no height
-     argument by design, so on its own it cannot tell "standing on this roof" from "standing in the
-     street beside this tower" — ask for the highest solid and you teleport onto the skyline the
-     moment you touch a wall. `walkGroundY` is the missing third coordinate: the ground we accepted
-     last frame, used as the CEILING of the query, so a roof is reachable only if it is within a
-     step of where you already are. Arrive by swinging, land on the roof, and you can walk it.
-     KNOWN v1 LIMIT, stated rather than hidden: walking off a roof edge steps you DOWN to the street
-     rather than dropping you — the walker has no fall model, and giving it one is its own arc. */
-  groundY: (x, z) => {
-    const base = city.isLand(x, z) ? LAYOUT.PLINTH_TOP : 0.12;
-    const roof = engine.collider.surfaceAt ? engine.collider.surfaceAt(x, z, walkGroundY + 0.35, 0.12) : -Infinity;
-    return roof > base ? roof : base;
-  },
-  // the collider radius must AGREE with the body radius above (they were 0.30 vs 0.32 before)
-  resolveSpatial: (state, dt) => engine.collider.resolveSphere(state, dt, { r: 0.09, yOff: 0.14, PUSH_MAX: 6, SLIDE_FRICTION: 0.85, SKIN: 0.02 }),
+  /* JUMP, sized against the body rather than against taste: 1.2 u/s under gravity 5.4 tops out 0.133 u
+     ≈ 0.48 eye-heights ≈ 0.81 m at this city's 6 m/unit — a human hop that clears a kerb and cannot
+     reach a roof. Gravity MATCHES the grapple's own 5.4 exactly so the swing hand-off is weightless. */
+  jumpSpeed: 1.2, gravity: 5.4,
+  /* THIRD PERSON IS THE DEFAULT (the arc reads best from outside the body) and carries its own tuning;
+     first person has its own block inside the module. 0.9 u back ≈ 3.2 body-heights — close enough to
+     stay in a 0.55 u street canyon, far enough to see the rope. */
+  third: { dist: 0.9, height: 0.34, side: 0.14, springR: 0.06, minDist: 0.12 },
 });
-walker.setPosition(0, -(city.extent * 0.55));
+character.setPosition(0, null, -(city.extent * 0.55));
+
+/* The body you are looking at in third person, and the web you are hanging from. A placeholder capsule
+   is a KNOWN, accepted stand-in — the arc is the controller, not the art. */
+const charBody = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.06, 0.16, 4, 10),
+  new THREE.MeshStandardMaterial({ color: '#2b3242', roughness: 0.7, flatShading: true }),
+);
+charBody.castShadow = true; charBody.visible = false;
+scene.add(charBody);
+const charRopeGeo = new THREE.BufferGeometry();
+charRopeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+const charRope = new THREE.Line(charRopeGeo, new THREE.LineBasicMaterial({ color: '#f2f4f8' }));
+charRope.frustumCulled = false; charRope.visible = false;
+scene.add(charRope);
+/* AIM_REACH for this body: ropeMax 3.2 + the 0.9 u the eye sits behind the shoulder = 4.1 just to
+   reach the limit, plus ~1.9 u of "there is a building there and it is too far" — the band the dim
+   crosshair is made of (aim.js's own note on why the ray must overshoot rather than stop at the limit). */
+const CHAR_AIM_REACH = 6.0;
+const _charAim = { x: 0, y: 0, z: 0 };
+let charAimHit = null;
+const _camPos = { x: 0, y: 0, z: 0 }, _camDir = { x: 0, y: 0, z: 0 };
+
+/* THE OLD `createFirstPersonWalker` INSTANCE IS GONE FROM THIS FILE, and its deletion is the arc.
+   It documented its own fatal gap right here — "walking off a roof edge steps you DOWN to the street
+   rather than dropping you — the walker has no fall model, and giving it one is its own arc." The
+   character controller above IS that arc: it still USES the walker (for the horizontal half and the
+   proven collision resolve, composed inside engine-core), it just owns the vertical axis the walker
+   never had. Nothing was thrown away; the ownership moved. */
 
 /* ---------- drivable car — genuinely new composition (pilot.js has no city-street-graph model; see header) ---------- */
 const graph = buildGraph();
@@ -616,7 +662,10 @@ const lockAim = createPointerLockAim({
   element: renderer.domElement,
   // Raw movement deltas turn the ORBIT through the engine's ONE look convention — the same call the
   // swing drag and touch paths make, so all three aim identically (see AIM_LOOK below).
-  onLook: (dx, dy) => applyLook(rig.orbit, dx, dy, AIM_LOOK),
+  /* A-CHAR: pointer lock now serves TWO aimed bodies. The character owns its own look (rig.orbit is
+     inert while `setEye` drives the camera), the swinger orbits the rig — so the raw deltas are routed
+     by who is holding the body, and neither can double-drive the other. */
+  onLook: (dx, dy) => { if (mode === 'walk') character.addLook(dx, dy); else applyLook(rig.orbit, dx, dy, AIM_LOOK); },
   onFire: (down) => { fireHeld = down; },
   /* Losing the lock (Esc, tab switch) must drop the line. Without this the trigger latches held, and
      a swinger that can never let go is the same bug class as a cling that never releases. */
@@ -639,7 +688,16 @@ function setMode(next) {
      held trigger, the crosshair) is released HERE, on the one path out — the repo's recurring bug is a
      mode that latches something an exit path forgot. pilotCtl.release() above clears free-look and the
      elevation clamp for the same reason, inside the engine. */
+  /* A-CHAR: the character took exactly the same three things the swinger does (pointer lock, the held
+     trigger, the crosshair) plus a body mesh and a rope, so it gives all five back on the SAME one
+     exit path. The repo's recurring bug is a mode that latches something an exit path forgot. */
   if (mode === 'swing') { lockAim.exit(); fireHeld = false; reticle.setVisible(false); reticle.setInRange(false); }
+  if (mode === 'walk') {
+    lockAim.exit(); fireHeld = false;
+    reticle.setVisible(false); reticle.setInRange(false);
+    charBody.visible = false; charRope.visible = false;
+    rig.clearEye();                                  // the character drove the eye directly every frame
+  }
   mode = next;
   document.getElementById('modeFly').setAttribute('aria-pressed', String(mode === 'fly'));
   document.getElementById('modeWalk').setAttribute('aria-pressed', String(mode === 'walk'));
@@ -649,13 +707,21 @@ function setMode(next) {
   document.getElementById('modeBird')?.setAttribute('aria-pressed', String(mode === 'bird'));
   document.getElementById('modeFish')?.setAttribute('aria-pressed', String(mode === 'fish'));
   document.getElementById('modeSwing')?.setAttribute('aria-pressed', String(mode === 'swing'));
-  /* MOUSE-LOOK HANDOFF (A-FEEL blocker fix): the walker owns its own yaw/pitch while walking, and
+  /* MOUSE-LOOK HANDOFF (A-FEEL blocker fix): the CHARACTER owns its own yaw/pitch while walking, and
      rig.orbit() is INERT in that state (camera-rig update() early-branches on fpActive and never
      reads the orbit goal) — so before this, metropolis's walk mode had NO look control at all: the
-     walker's yaw sat at its 0 default and W walked along +z forever. Seed the walker's yaw from the
+     walker's yaw sat at its 0 default and W walked along +z forever. Seed the look yaw from the
      camera's current azimuth on entry (a continuous handoff, not a snap) exactly as city/main.js:696
-     does, and route pointer drags to walker.addLook while in walk mode. */
-  if (mode === 'walk') { rig.setMode(CAM.PERSPECTIVE); walker.setYaw(rig.azimuth + Math.PI); walker.recenterPitch(); }
+     does, and route pointer drags to character.addLook while in walk mode.
+     A-CHAR: entering the character also arms its CROSSHAIR. The mark is the aiming affordance for the
+     web, and this body's aim mode is 'point' — the crosshair is not decoration here, it is how you
+     say "that anchor". */
+  if (mode === 'walk') {
+    rig.setMode(CAM.PERSPECTIVE);
+    character.setYaw(rig.azimuth + Math.PI); character.recenterPitch();
+    reticle.setVisible(true);
+    charBody.visible = character.view === 'third';
+  }
   else if (mode === 'drive') { rig.setMode(CAM.PERSPECTIVE); pilotCtl.possess(carPilotable); rig.setSpringArm({ segmentQuery: pilotWorld.segmentHit, radius: 0.3, enabled: true }); }
   else if (mode === 'heli') {
     /* No spring arm: an airborne chase must NOT pull in on the geometry below it (the arm exists to
@@ -753,10 +819,10 @@ function setMode(next) {
    hints (tokenised {up}/{down}/{boost}) would let the engine own the whole string again. */
 // the bodies that actually drive the lift axis — the rocker shows for these and hides otherwise.
 // Declared HERE, above refreshHint(), because the boot call to refreshHint() reads it.
-const USES_LIFT = new Set(['heli', 'bird', 'fish', 'swing']);   // swing: the lift rocker REELS THE ROPE IN — the pump
+const USES_LIFT = new Set(['heli', 'bird', 'fish', 'swing', 'walk']);   // swing: the rocker REELS THE ROPE IN — the pump. walk: the rocker's UP is JUMP (a phone has no space bar)
 const HINTS = {
   fly:   'WASD pan · Shift boost · drag look · scroll zoom · click a tower to step inside',
-  walk:  'WASD walk · Shift sprint · drag look',
+  walk:  'WASD walk · Shift SPRINT · SPACE JUMP · click to capture the mouse, then AIM — CLICK-AND-HOLD to shoot a web at the crosshair and swing · W/S reel · A/D steer the arc · let go to launch · V = 1st/3rd person · Esc frees the mouse',
   drive: 'W/S throttle · A/D steer · Shift boost (you cannot corner at full boost)',
   heli:  'W/S thrust · A/D steer · Space climb · C descend · Shift boost',
   boat:  'W/S throttle · A/D rudder (only steers with way on) · Shift full-ahead',
@@ -767,7 +833,7 @@ const HINTS = {
 };
 const MOBILE_HINTS = {
   fly:   'stick to move · push past the ring to boost · drag to look · tap a tower',
-  walk:  'stick to walk · push past the ring to sprint · drag to look',
+  walk:  'stick to walk · push past the ring to sprint · rocker UP = JUMP · drag to look   (the web needs a mouse button — desktop only for now)',
   drive: 'stick to drive · push past the ring to boost',
   heli:  'stick to fly · push past the ring to boost',
   boat:  'stick to steer · push past the ring for full ahead',
@@ -906,7 +972,16 @@ window.addEventListener('keydown', (e) => {
      it scrolls the page and, worse, re-activates whichever dock button still has focus from the
      click that entered this mode (a keydown default that turns into a synthetic click). Scoped to
      swing so heli/bird/fish keep the untouched behaviour they were verified with. */
-  if (k === KEY.fire && mode === 'swing' && diveCtl.mode === 'a') e.preventDefault();
+  if (k === KEY.fire && (mode === 'swing' || mode === 'walk') && diveCtl.mode === 'a') e.preventDefault();
+  /* A-CHAR: V TOGGLES THE CAMERA — third-person over-the-shoulder (the default, because the swing arc
+     reads best from outside the body) ↔ first person. The owner asked for BOTH, on a key, each tuned
+     for itself. Edge-triggered off `heldKeys` so holding V does not strobe the view. */
+  if (k === 'v' && !heldKeys.has(k) && mode === 'walk' && diveCtl.mode === 'a') {
+    character.toggleView();
+    charBody.visible = character.view === 'third';
+    refreshHint();
+    e.preventDefault(); heldKeys.add(k); return;
+  }
   heldKeys.add(k);
 });
 window.addEventListener('keyup', (e) => {
@@ -942,7 +1017,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
      canvas is the hit target (verified: elementFromPoint(centre) === CANVAS, display:none, and the
      canvas listener fires). On a coarse pointer the overlay does cover it and this never runs, which
      is exactly right: there is no pointer to lock on a touchscreen. */
-  if (mode === 'swing' && diveCtl.mode === 'a' && !lockAim.locked) lockAim.request();
+  if ((mode === 'swing' || mode === 'walk') && diveCtl.mode === 'a' && !lockAim.locked) lockAim.request();
 });
 /* The tower pick, callable from BOTH input paths: desktop click-vs-drag AND the touch overlay's
    onTap (the overlay swallows canvas events, so without this mobile could never dive). */
@@ -972,7 +1047,7 @@ window.addEventListener('pointermove', (e) => {
     return;
   }
   if (mode === 'walk') {                           // walking: the WALKER owns look (rig.orbit is inert under fpActive)
-    walker.addLook(e.clientX - lastX, e.clientY - lastY);
+    character.addLook(e.clientX - lastX, e.clientY - lastY);
     lastX = e.clientX; lastY = e.clientY;
     return;
   }
@@ -990,7 +1065,7 @@ renderer.domElement.addEventListener('wheel', (e) => { rig.zoomBy(Math.exp(e.del
 const touch = createTouchControls({
   onLook: (dx, dy) => {
     if (diveCtl.mode !== 'a') { office.look.addDrag(dx, dy); return; }
-    if (mode === 'walk') { walker.addLook(dx, dy); return; }
+    if (mode === 'walk') { character.addLook(dx, dy); return; }
     // A-LOOK: the phone has no pointer lock, so this IS the swinger's aim on mobile — same convention.
     if (mode === 'swing') { applyLook(rig.orbit, dx, dy, AIM_LOOK); return; }
     rig.orbit(-dx * ORBIT_SPEED, -dy * ORBIT_SPEED);
@@ -1092,11 +1167,41 @@ function frame(dt, t) {
        drag/arrow input feeds in via the handlers + renderTo's addKeys). The city SIM keeps
        running below: it is alive behind the office glass. */
   } else if (mode === 'walk') {
-    walker.update(dt, axes);
-    /* Feed the accepted ground forward: eye minus eye-height IS the surface we are standing on, so
-       next frame's roof query gets a truthful ceiling instead of an assumption. */
-    walkGroundY = walker.eyePosition().y - EYE;
-    rig.setEye(walker.eyePosition(), walker.eyeDirection());
+    /* A-CHAR: ONE character, ONE update, and every verb the owner asked for is an axis on it.
+       THE CROSSHAIR IS RESOLVED FIRST, before the step, so a web attaches to what the player is
+       looking at THIS frame rather than last frame's view — and it is cast from `rig.camera`, whose
+       matrix was set by LAST frame's `rig.setEye` from this same character, so the ray the mark
+       stands for is the ray the eye is actually looking down (aim.js's own rule). */
+    charAimHit = resolveAimPoint(rig.camera, charWorld, _charAim, { maxDist: CHAR_AIM_REACH, radius: 0.05 });
+    character.update(dt, {
+      x: axes.x, y: axes.y, sprint: axes.sprint, boost: axes.boost,
+      /* JUMP is Space here and the rocker's UP on a phone. Held or tapped makes no difference — the
+         controller edge-triggers internally, so leaning on the key does not pogo you. */
+      jump: heldKeys.has(KEY.up) || (touch.axes.lift || 0) > 0.5,
+      /* FIRE IS THE MOUSE, exactly as the owner said it ("click to spin a web to that anchor point").
+         Space is jump on this body, so the web does NOT also live there — one key, one verb, per the
+         same rule the hint bar exists for. */
+      fire: fireHeld,
+      steer: axes.x,                       // while roped, A/D steer the arc instead of strafing
+      /* W/S REEL the rope in and out while a line is up. They are the walk axis when you are on your
+         feet and the pump axis when you are hanging — which is unambiguous because the two states are
+         mutually exclusive by construction (the grapple only owns the body while `anchor` is set). */
+      lift: (heldKeys.has('w') ? 1 : 0) - (heldKeys.has('s') ? 1 : 0),
+      aimPoint: charAimHit,
+    });
+    // the mark reads the MODEL's verdict, never a second copy of the range rule (see aim.js)
+    reticle.setInRange(!!character.state.aimInRange);
+    charBody.position.set(character.x, character.y + EYE * 0.5, character.z);
+    charBody.quaternion.copy(character.state.quat);
+    charBody.visible = character.view === 'third';    // in first person you are inside your own head
+    if (character.state.anchor) {
+      const a = charRopeGeo.attributes.position;
+      a.setXYZ(0, character.x, character.y + EYE * 0.6, character.z);
+      a.setXYZ(1, character.state.anchor.x, character.state.anchor.y, character.state.anchor.z);
+      a.needsUpdate = true;
+      charRope.visible = true;
+    } else charRope.visible = false;
+    rig.setEye(character.cameraPose(_camPos, _camDir), _camDir);
   } else if (mode === 'drive') {
     pilotCtl.step(dt, { throttle: axes.y, steer: axes.x, lift: 0, boost: axes.boost });
   } else if (mode === 'boat') {
@@ -1208,7 +1313,7 @@ setTimeout(ready, 400);   // our own content is synchronous (createCity generate
 
 window.__engine = engine; window.__city = city; window.__cityLife = cityLife; window.__waterLife = waterLife;
 window.__setMode = setMode; window.__mode = () => mode;
-window.__walker = walker; window.__pilotCtl = pilotCtl; window.__playerCar = playerCar;
+window.__character = character; window.__char = character.state; window.__pilotCtl = pilotCtl; window.__playerCar = playerCar;
 window.__realSky = { trueStars, solarSystem, constellations, get on() { return realSkyOn; }, get resolved() { return realSkyResolved; } };
 window.__swing = swingState;   // A-SWING probe handle (house convention — see docs/engine-invariants.md)
 /* A-FLOW: the profile and the aim-mode switch, so the probe can exercise BOTH verbs in one run. The
@@ -1224,6 +1329,10 @@ window.__setAimMode = (m) => {
   return SWING_PROFILE.aimMode;
 };
 // A-AIM probes: the live aim point + whether it is reachable, and the attach-frame fidelity record.
+/* A-CHAR probe handles: the character's OWN live aim point + reach verdict (the legacy swinger's are
+   `__aim` below — two aimed bodies, two records, so a probe can never read one while driving the other). */
+window.__charAim = { pt: _charAim, get hit() { return !!charAimHit; }, get inRange() { return !!character.state.aimInRange; },
+                     get reach() { return CHAR_AIM_REACH; } };
 window.__aim = { pt: _aim, get hit() { return !!aimHit; }, get inRange() { return !!swingState.aimInRange; },
                  get locked() { return lockAim.locked; }, get firing() { return fireHeld; }, get reach() { return AIM_REACH; } };
 window.__aimFire = __aimFire;

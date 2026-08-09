@@ -350,6 +350,8 @@ export { createBallistics } from './src/createBallistics.js';
 // with circle/AABB/arena collision. The Hoard's forest dive lands you WALKING (a NEW module, not a seated
 // mode — full unbounded yaw + move coupled to yaw ≠ createSeatedLook's clamped head-turn).
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
+// A-CHAR (2026-08-09): ONE character — walk/sprint/JUMP/fall/land + collision + a crosshair + the web as an ABILITY, with third-person and first-person cameras. Composes the walker (horizontal) + createGrappleModel (the rope); the vertical axis the walker never had lives here.
+export { createCharacterController } from './src/character.js';
 
 // Lesson M6 — GPU particle system: ping-pong FBO sim (pos/vel state textures) + scissor-ring spawn +
 // parameterized emitters (burst/muzzle/dust), additive point render. Generalizes the water-flow-gpu GPGPU

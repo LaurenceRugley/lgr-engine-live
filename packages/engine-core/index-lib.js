@@ -114,6 +114,8 @@ export { createForest, placeForest } from './src/createForest.js';
 export { createFlowField } from './src/createFlowField.js';
 export { createBallistics } from './src/createBallistics.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
+// A-CHAR (2026-08-09): ONE character — walk/sprint/JUMP/fall/land + collision + a crosshair + the web as an ABILITY, with third-person and first-person cameras. Composes the walker (horizontal) + createGrappleModel (the rope); the vertical axis the walker never had lives here.
+export { createCharacterController } from './src/character.js';
 export { createParticles } from './src/createParticles.js';
 export { createDecals } from './src/createDecals.js';
 export { createCharacterRig } from './src/createCharacterRig.js';

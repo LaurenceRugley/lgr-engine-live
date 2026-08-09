@@ -1219,6 +1219,48 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     if (h > 1e-4) { state.vx += (state.vx / h) * P('launchFwd'); state.vz += (state.vz / h) * P('launchFwd'); }
   }
 
+  /* ---- ATTACH, LIFTED OUT OF `step` (A-CHAR, 2026-08-09) --------------------------------------
+     It was section 1 of step() verbatim and it still is — the lift is a MOVE, not a rewrite, so the
+     swing behaves identically (step() calls this on the same frame with the same arguments it used to
+     compute inline). What changed is that it is now REACHABLE ON ITS OWN, and that is the whole seam
+     the unified character controller hangs off: a walking character must be able to throw a web
+     WITHOUT surrendering the frame's movement to a swing integrator that has no walk in it. `attach`
+     is a pure query-and-assign — it hangs a rope or it does nothing, and it never integrates — so
+     "hold fire while nothing is in range" costs a walker exactly zero movement.
+
+     THE TWO GATES ON RE-ATTACHING both exist so that "hold the button" reads as a CHAIN OF SWINGS
+     rather than one continuous hang. `refire` is the beat after a cut; `refireVy` says do not take a
+     new line while the last launch is still climbing — let it fly, web again on the way down. That is
+     the rhythm of the reference games, and it is the difference between flying and being winched.
+     Returns the anchor it took, or null — so a caller can react to the attach edge without polling. */
+  function attach(state, axes, world) {
+    if (state.anchor) return null;
+    const pointMode = P('aimMode') === 'point';
+    if ((state.refire || 0) > 0) return null;
+    if (!pointMode && !((state.vy || 0) <= P('refireVy'))) return null;
+    const a = pointMode ? reachFromAim(state, axes && axes.aimPoint) : findAnchor(state, world);
+    if (!a) return null;
+    /* A-CHAR (2026-08-09) — A PLAYER-AIMED LINE GETS THE SAME ZIP TIER THE AUTO SEARCH ALREADY GRANTS.
+       Measured on the character's first driven swing: web a high anchor from the street and you HANG —
+       peak y 0.385, 0.40 u displaced over 160 frames. That is the correct pendulum and the wrong verb.
+       The reason is a gap, not a physics error: `zip` is what arms the winch (`zipAccel`), and only
+       `findAnchor` was setting it, so every aimed web was a pure pendulum. From the street a pendulum
+       hung above you cannot start — there is no height to trade for speed — which is the exact
+       stranding A-FLOW's zip tier was built to cure for the auto verb and never carried to this one.
+       THE RULE IS THE SAME RULE, not a second one: `zipSlopeMin` (rise ÷ rope) is the slope at which
+       the winch's vertical component beats gravity, so a line steeper than it can LIFT you and a
+       shallower one would only drag you along the pavement. Deciding it once, at attach, is also why
+       it lives here rather than in the per-frame winch. */
+    if (pointMode && a.d > 1e-6 && (a.y - state.y) / a.d >= P('zipSlopeMin')) a.zip = true;
+    /* `zip` is the TIER the search put this line in, carried on the anchor because it decides what
+       the line is FOR. A swing line is swung on; a zip line is climbed. Deciding that once, at
+       attach, is what stops the winch from yanking a working swing straight every time the arc
+       passes under its own anchor (where the line is, momentarily, perfectly steep). */
+    state.anchor = { x: a.x, y: a.y, z: a.z, zip: !!a.zip };
+    state.rope = Math.max(P('ropeMin'), a.d);
+    return state.anchor;
+  }
+
   function step(state, axes, dt, world) {
     /* Adopt the shared fields into a real vector ONCE. Coming from another body we inherit a scalar
        speed + yaw, so convert it — that is what makes walk→swing keep your momentum instead of
@@ -1247,25 +1289,9 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     state.aimInRange = pointMode ? !!reach : undefined;
 
     /* 1) ATTACH / RELEASE. Holding fire keeps the line; letting go cuts it, and whatever velocity the
-       arc has built is kept — the release IS the launch.
-       THE TWO GATES ON RE-ATTACHING both exist so that "hold the button" reads as a CHAIN OF SWINGS
-       rather than one continuous hang. `refire` is the beat after a cut; `refireVy` says do not take a
-       new line while the last launch is still climbing — let it fly, web again on the way down. That is
-       the rhythm of the reference games, and it is the difference between flying and being winched. */
-    const canFire = (state.refire || 0) <= 0 && (pointMode || state.vy <= P('refireVy'));
-    if (fire && !state.anchor && canFire) {
-      const a = pointMode ? reach : findAnchor(state, world);
-      if (a) {
-        /* `zip` is the TIER the search put this line in, carried on the anchor because it decides what
-           the line is FOR. A swing line is swung on; a zip line is climbed. Deciding that once, at
-           attach, is what stops the winch from yanking a working swing straight every time the arc
-           passes under its own anchor (where the line is, momentarily, perfectly steep). */
-        state.anchor = { x: a.x, y: a.y, z: a.z, zip: !!a.zip };
-        state.rope = Math.max(P('ropeMin'), a.d);
-      }
-    } else if (!fire && state.anchor) {
-      cutLine(state, true);
-    }
+       arc has built is kept — the release IS the launch. */
+    if (fire && !state.anchor) attach(state, axes, world);
+    else if (!fire && state.anchor) cutLine(state, true);
 
     /* 2) WALL CLING (A-CLIMB). Before gravity, because clinging is the absence of falling. A short
        ray along the facing direction asks "is there a facade within arm's reach"; if so you stick,
@@ -1494,7 +1520,9 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     state.quat.setFromEuler(_e);
     return state;
   }
-  return { step };
+  /* `attach` and `reach` are exposed for a consumer that owns the body itself (the unified character
+     controller) — the pilot-controller path only ever needs `step`, and calls both internally. */
+  return { step, attach, reach: reachFromAim };
 }
 
 /* the model registry the controller dispatches on (a PilotProfile names its model by key). Adding a
