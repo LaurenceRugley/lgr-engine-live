@@ -128,11 +128,40 @@ export function createCharacterController(opts = {}) {
     side: 0.14,       // u to the RIGHT — the over-the-shoulder offset that keeps the body off the mark
     springR: 0.06,    // spring-arm probe radius; the eye pulls in when a facade gets behind you
     minDist: 0.12,    // …but never all the way into the body
+    /* A-LAB: THE SPEED DOLLY. `dist` is the chase at rest; `distMax` is the chase at `distAtSpeed`
+       and beyond, eased at `distRate`. Insomniac raise the follow distance WITH the FOV as speed
+       climbs (the pair reads as a dolly-zoom, and a teardown of the shipped game notes both rising
+       together). It also solves a framing problem measured here by LOOKING at a capture: a chase
+       tuned to survive metropolis's 0.55 u street canyons is 0.9 u, and at 0.9 u — pulled to 0.42 u
+       by the spring arm — the body FILLS the frame mid-swing. You cannot time a release you cannot
+       see, which is this controller's own stated reason for defaulting to third person.
+       DEFAULTS TO NO DOLLY (`distMax` null ⇒ `dist` at every speed), so an existing consumer is
+       unchanged; a project with room opts in by naming one number. */
+    distMax: null,
+    distAtSpeed: 6,
+    distRate: 2.4,
   }, opts.third || {});
+  let chaseNow = third.dist;
   const first = Object.assign({
     bob: 0.03,        // u of head bob at full stride — sells footfall in FP and is meaningless in TP
     bobRate: 9,
   }, opts.first || {});
+  /* ---- A-LAB (2026-08-09): FIELD OF VIEW AS THE SPEED CUE. -------------------------------------
+     A swing's speed is almost invisible in a chase camera at a fixed FOV: the body barely moves in
+     frame, so 3 u/s and 7 u/s look the same. Insomniac widen the FOV with speed for exactly this
+     ("Concrete Jungle Gym", GDC 2019 — debug values around 53° at rest to 71° at pace), and an
+     independent teardown of the shipped game notes the FOV and the follow distance rise together,
+     producing a dolly-zoom that reads as acceleration.
+     THIS IS OPT-IN BY CALL SITE, and that is what makes it regression-free: the curve and its easing
+     live here, but nothing applies them unless a project calls `cameraFov(dt)` and writes the result
+     to its camera. A consumer that never calls it renders byte-identically to before this existed. */
+  const fov = Object.assign({
+    base: 60,         // ° at rest
+    max: 78,          // ° at `atSpeed` and beyond
+    atSpeed: 7,       // u/s where the widening saturates
+    rate: 3.2,        // easing rate — fast enough to feel like acceleration, slow enough not to pump
+  }, opts.fov || {});
+  let fovNow = fov.base;
   let view = opts.view === 'first' ? 'first' : 'third';   // THIRD is the default (the owner's ruling)
 
   /* ---- THE SHARED BODY STATE. This exact object is what `createGrappleModel.step` mutates, which is
@@ -315,6 +344,7 @@ export function createCharacterController(opts = {}) {
     state.grounded = grounded;
     state.airborne = !grounded && !swinging;
     state.swinging = swinging;
+    tickChase(dt);              // the camera's own eases, ticked exactly once per frame (see tickChase)
     return state;
   }
 
@@ -329,6 +359,17 @@ export function createCharacterController(opts = {}) {
      canyon spends its life with a facade behind it, so the arm asks `segmentHit` how far back the eye
      may sit and pulls in when the answer is "not that far". Same query the pilot chase already uses. */
   const _pos = { x: 0, y: 0, z: 0 }, _dir = { x: 0, y: 0, z: 0 };
+  /* The DESIRED arm length before the spring sweep clips it. Eased on the same horizontal-speed
+     reading the FOV cue uses, so the two cues move together instead of fighting. `cameraPose` has no
+     dt (a consumer may call it more than once a frame for a reflection or a probe), so the ease is
+     ticked from `update` — the one place that is guaranteed to run exactly once per frame. */
+  function tickChase(dt) {
+    if (third.distMax == null) { chaseNow = third.dist; return; }
+    const hs = Math.hypot(state.vx, state.vz);
+    const k = clamp(hs / Math.max(1e-3, third.distAtSpeed), 0, 1);
+    const goal = third.dist + (third.distMax - third.dist) * k;
+    chaseNow += (goal - chaseNow) * (1 - Math.exp(-third.distRate * (dt > 0 ? dt : 0)));
+  }
   function lookDir(out) {
     const cp = Math.cos(lookPitch);
     out.x = Math.sin(lookYaw) * cp; out.y = Math.sin(lookPitch); out.z = Math.cos(lookYaw) * cp;
@@ -364,7 +405,7 @@ export function createCharacterController(opts = {}) {
       if (t < 1) side *= Math.max(0, t);
     }
     const px = hx + rx * side, py = hy, pz = hz + rz * side;
-    let dist = third.dist;
+    let dist = chaseNow;
     if (world.segmentHit) {
       const t = world.segmentHit(px, py, pz, px - outDir.x * dist, py - outDir.y * dist, pz - outDir.z * dist, third.springR);
       if (t < 1) dist *= Math.max(0, t);
@@ -379,8 +420,20 @@ export function createCharacterController(opts = {}) {
     return outPos;
   }
 
+  /* A-LAB: the eased FOV for the CURRENT speed. Read HORIZONTAL speed, not the 3D magnitude — a
+     straight drop is not the thing this cue is for, and a body that widens the frame every time it
+     falls reads as panic rather than pace. Returns degrees; the caller writes it to its own camera
+     (and must call updateProjectionMatrix itself, because that is the caller's camera to invalidate). */
+  function cameraFov(dt) {
+    const hs = Math.hypot(state.vx, state.vz);
+    const k = clamp(hs / Math.max(1e-3, fov.atSpeed), 0, 1);
+    const goal = fov.base + (fov.max - fov.base) * k;
+    fovNow += (goal - fovNow) * (1 - Math.exp(-fov.rate * (dt > 0 ? dt : 0)));
+    return fovNow;
+  }
+
   return {
-    update, addLook, cameraPose, lookDir,
+    update, addLook, cameraPose, lookDir, cameraFov,
     setPosition(x, y, z) {
       state.x = x; state.z = z;
       walker.setPosition(x, z);

@@ -13,7 +13,7 @@
     "check:shaders": "node tools/check-shader-backticks.mjs",
     "prebuild": "npm run check:shaders",
     "prebuild:lib": "npm run check:shaders",
-    "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard && npm run build -w projects/hoard2 && npm run build -w projects/metropolis && npm run build -w projects/showcase-lab && npm run build -w projects/lessons && npm run build -w projects/tracer && npm run build -w projects/atlas",
+    "build": "npm run build -w projects/city && npm run build -w projects/office && npm run build -w projects/hoard && npm run build -w projects/hoard2 && npm run build -w projects/metropolis && npm run build -w projects/showcase-lab && npm run build -w projects/lessons && npm run build -w projects/tracer && npm run build -w projects/atlas && npm run build -w projects/swing-lab",
     "build:atlas": "npm run build -w projects/atlas",
     "build:city": "npm run build -w projects/city",
     "build:office": "npm run build -w projects/office",
@@ -59,7 +59,11 @@
     "vendor-drift-guard": "node tools/vendor-drift-guard.mjs",
     "vendor-drift-guard:live-sky": "node tools/vendor-drift-guard.mjs --project ~/dev/lgr-live-sky",
     "vendor-drift-guard:image-studio": "node tools/vendor-drift-guard.mjs --project ~/dev/lgr-image-studio",
-    "vendor-drift-guard:all": "node tools/vendor-drift-guard-all.mjs"
+    "vendor-drift-guard:all": "node tools/vendor-drift-guard-all.mjs",
+    "verify": "bash tools/verify-local.sh",
+    "verify:fast": "bash tools/verify-local.sh --fast",
+    "build:swing-lab": "npm run build -w projects/swing-lab",
+    "swing-lab-probe": "node tools/swing-lab-probe.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.49.0",

@@ -981,11 +981,96 @@ export const GRAPPLE_PROFILE = {
      2 of 40 runs ENDED enclosed before this arc, i.e. 5% of runs died exactly the way the owner's
      street start died. 0 u/s disables the squeeze-out. */
   unstick: 4.0,           // u/s a body found INSIDE a solid is squeezed toward the nearest open air
+  /* 2. THE PIVOT CHEAT — the simulation hangs from a point pushed OUT from the facade, while the
+     visible web still lands on the building. Insomniac ship exactly this and say why: a pendulum hung
+     from a point ON a wall settles UNDER that point, i.e. flush against the wall, so the arc grinds
+     the building at the one moment it is fastest. That is not a theory here — it is the measured cause
+     of the ledger's OPEN #6 ("peak speed down 15% since walls became solid… an arc hung off a vertical
+     face grinds that face at its fastest moment"), and the ledger even names the lever it could not
+     find: "score anchors for arcs with air beneath". This is the cheaper answer to the same problem —
+     move the PIVOT, not the anchor, so the arc swings down the street instead of down the wall.
+     Applied to SWING lines only. A ZIP is a line you climb, and offsetting a climb from its wall would
+     leave you winching to a point in mid-air. 0 disables it (the pre-A-LAB behaviour, exactly).
+
+     ---- AND IT SHIPS OFF (0), BECAUSE THE BENCH REFUSED IT. THIS IS THE HONEST RESULT, NOT THE ONE
+     I EXPECTED. ----------------------------------------------------------------------------------
+     Two independent 12-start benches in projects/swing-lab (`node tools/swing-lab-bench.mjs`), same
+     starts, same seconds, button held: at 0.55 the swing STRANDED on 5 of 12 runs, spent 49.9% of
+     frames on the pavement (control: 7.3%), covered 0.59 u per swing (control: 3.32 u) and 5.40 u of
+     net ground (control: 12.23 u). The web count roughly doubled while each web went nowhere — the
+     churn signature. That is a WORSE mechanic on every axis the lab measures, and the theory behind
+     it is a good theory from a shipped AAA game.
+     The reading I trust: Insomniac's version is one assist inside a stack that also includes a
+     scored volume-based anchor search, a line-shortening lookahead and a swing floor derived from
+     real collision. Ours picks its anchor by raycast fan and hangs a shorter rope; displacing that
+     pivot spends amplitude the arc does not have to spare. It is kept, named, measured and OFF —
+     which is strictly more useful than deleting it, because the next person to have this idea will
+     find the number instead of re-running the experiment. Set it non-zero only with a bench to hand.
+     (It also stays the right lever to REVISIT if the anchor search ever gets Insomniac's scoring —
+     see the ledger's OPEN list.) */
+  pivotOut: 0,            // u the SIM pivot is pushed away from the facade — OFF, refuted by bench
+  /* 3. VELOCITY BLEND ON ATTACH — the anti-whiplash, and it is where a chain's momentum leaks. The
+     rope constraint deletes the radial component of your velocity the first frame it goes taut
+     (`v -= n·(v·n)`, correct physics for an inextensible rope). At an ATTACH that projection is a
+     transient, not physics: you threw a web while flying away from the anchor, and the game answers
+     by silently subtracting most of your speed. Insomniac blend the incoming velocity ROTATIONALLY
+     toward the arc tangent over the solver's iterations instead. Same idea, one step: keep the
+     tangential DIRECTION, restore the SPEED. 0 = pure strip (old behaviour), 1 = speed fully
+     preserved. It can never exceed the speed you arrived with, so it is not a boost.
+     VERDICT: NEUTRAL on the 12-start bench (within variance). It costs nothing measurable and is the
+     right answer for the case it is FOR — attaching while already fast and moving away from the
+     anchor — which a held-button auto-chain from a standing start barely produces. Unproven, kept. */
+  attachBlend: 0.8,
+  /* 4. THE SWING FLOOR — shorten the line rather than let the arc plough the street. `arcClear`
+     already rejects anchors whose arc would bottom out, but it decides ONCE, at attach, from where
+     you were standing; an arc that gains speed, or one taken over a rooftop that then runs out, can
+     still descend into the ground. Both reference games shorten the line for exactly this: Fristrom's
+     own write-up keeps a `desiredLength` the current length chases "so the avatar never scrapes the
+     street", and Insomniac derive a "swing floor" from collision and scale the descent against it.
+     Reeling in is also the physically honest response — it is the same work `pump` does, which is why
+     it costs no energy to justify. u/s of shortening; 0 disables.
+     VERDICT: NEUTRAL-to-slightly-positive on net ground (13.25 u vs 12.34 u without it, inside
+     variance) and it shortens the mean swing, which is the trade it exists to make: a reeled-in arc
+     covers less ground than one that would have ploughed the street, and a ploughed arc covers none.
+     Kept as a correctness guard rather than on a performance claim. u/s of shortening; 0 disables. */
+  floorAssist: 2.6,
   pump: 1.5,              // u/s of rope shortening while the lift axis is held (the energy input)
   airControl: 2.1,        // u/s² of lateral nudge while attached (steering the arc)
   freeControl: 3.4,       // u/s² of control while NOT attached (more, since you have nothing else)
   airDrag: 0.06,          // per-second velocity bleed; low, so momentum carries between swings
-  maxSpeed: 9.0,          // u/s hard cap so a long pump chain cannot go to orbit
+  /* ---- A-LAB (2026-08-09): FOUR ASSISTS FROM THE SHIPPED GAMES, each sourced, each a named knob —
+     AND THE HEADLINE RESULT IS THAT THREE OF THEM MEASURE NEUTRAL AND THE FOURTH IS REFUTED. That is
+     stated first because it is the finding, and because a reader skimming for "what made the swing
+     good" should not mistake these for the answer.
+
+     THE BENCH (12 street starts × 10 s, button held, identical starts per variant, trigger verified
+     per run — `node tools/swing-lab-bench.mjs`), net ground covered:
+        control, all four off ......... 13.09 u   3.36 u/swing   5.6% grounded   0/12 stranded
+        + horizontal cap .............. 12.34 u   3.68 u/swing   5.8%            0/12
+        + horiz cap + swing floor ..... 13.25 u   2.82 u/swing   8.3%            0/12
+        + all three ................... 12.73 u   3.21 u/swing   5.2%            0/12
+        + all three + pivot 0.55 ....... 9.51 u   0.58 u/swing   9.5%            0/12   (21.4 webs/run — churn)
+     A ±7% spread on 12 samples is inside this bench's own run-to-run variance, so the honest reading
+     is: the three below neither help nor hurt at this level's proportions, and `pivotOut` genuinely
+     hurts. What DID move the mechanic was the LEVEL (see projects/swing-lab and the ledger's A-LAB
+     table) and, embarrassingly, fixing the harness — three earlier benches had been measuring a
+     dropped pointer lock rather than a swing.
+     They are kept ON (except `pivotOut`) because each is sourced, none costs measured ground, and the
+     swing floor is a correctness guard as much as a feel one. Each carries its measured verdict below
+     so nobody has to take the ledger's word for it. ----
+
+     1. THE CAP IS HORIZONTAL, NOT 3D. `maxSpeed` used to clamp hypot(vx,vy,vz), which throttles the
+     DOWNSWING — the fastest, most earned part of an arc — for no reason but bookkeeping. Insomniac
+     cap horizontal speed only and explicitly let 3D speed exceed it on the way down ("Concrete Jungle
+     Gym", GDC 2019, Doug Sheahan: terminal velocity ~30 m/s on a 10-second rolling average, 3D speed
+     unbounded by it). `maxVertSpeed` is the separate guard that keeps a pump chain out of orbit.
+     VERDICT: INERT IN EVERY LEVEL MEASURED SO FAR, and that is why the bench reads it as neutral —
+     peak speed in the lab is 6.28 u/s and in metropolis was 8.17 (pre-A-SOLID) / 6.97 (post), all
+     BELOW the 9.0 cap, so neither the old rule nor the new one has ever actually fired. Kept because
+     it is the correct semantics for the day a level is tall enough to reach it; labelled rather than
+     claimed, because an untriggered code path is not a tested one. */
+  maxSpeed: 9.0,          // u/s cap on the HORIZONTAL velocity (was the 3D magnitude — see above)
+  maxVertSpeed: 14.0,     // u/s cap on |vy| — the dive is allowed to be faster than the cruise
   climbRate: 1.15,        // u/s up a wall while clinging (Space up, C down)
   clingReach: 0.24,       // u — how close a facade has to be to stick to it
   skim: 0.06,             // clearance above ground/water/ROOFTOP, same idiom as the bird
@@ -1256,10 +1341,66 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
        the line is FOR. A swing line is swung on; a zip line is climbed. Deciding that once, at
        attach, is what stops the winch from yanking a working swing straight every time the arc
        passes under its own anchor (where the line is, momentarily, perfectly steep). */
-    state.anchor = { x: a.x, y: a.y, z: a.z, zip: !!a.zip };
-    state.rope = Math.max(P('ropeMin'), a.d);
+    /* ---- A-LAB: THE PIVOT the simulation actually hangs from, which is NOT the point the web is
+       drawn to. See `pivotOut`. The offset direction is the HORIZONTAL vector from the anchor back to
+       the body — no surface normal needed, and it is the right answer anyway: it pushes the pivot to
+       YOUR side of the wall, which is the side the arc has to have air on. A zip keeps its real point
+       (you climb a wall by pulling toward the wall). ---- */
+    let px = a.x, py = a.y, pz = a.z;
+    const out = P('pivotOut');
+    if (out > 0 && !a.zip) {
+      /* THE OFFSET IS THE COMPONENT PERPENDICULAR TO TRAVEL, and that qualifier is a MEASURED
+         correction rather than a refinement. The first version pushed the pivot along the WHOLE
+         horizontal from anchor back to body, and the bench went the wrong way hard: 28 webs in 12 s
+         (one every 0.43 s) covering 0.47 u each, net displacement 5.50 u against a 13.25 u baseline
+         — churn, not swinging. The cause is geometric. From a standing street start the anchor is
+         AHEAD of you, so "anchor → body" points BACKWARD along your travel, and offsetting along it
+         drags the pivot toward you — which is precisely the initial horizontal offset, i.e. the
+         pendulum's AMPLITUDE. The arc collapsed, hit its top in a few frames, `topOut` cut it, and
+         the loop repeated.
+         Split that vector against the direction of travel and only the PERPENDICULAR part is the
+         "off the wall" the cheat is asking for. Swinging down a street parallel to a facade, travel
+         is along the wall and the whole offset survives — the case Insomniac describe. Webbing
+         something dead ahead, the perpendicular part is ~0 and the arc keeps every unit of its
+         amplitude. One dot product buys both. */
+      const ox = state.x - a.x, oz = state.z - a.z;
+      const sp0 = Math.hypot(state.vx || 0, state.vz || 0);
+      const tx = sp0 > 0.35 ? state.vx / sp0 : Math.sin(state.yaw);
+      const tz = sp0 > 0.35 ? state.vz / sp0 : Math.cos(state.yaw);
+      const along = ox * tx + oz * tz;
+      const nx = ox - tx * along, nz = oz - tz * along;      // the perpendicular residue
+      const nl = Math.hypot(nx, nz);
+      if (nl > 1e-3) { px = a.x + (nx / nl) * out; pz = a.z + (nz / nl) * out; }
+    }
+    state.anchor = { x: a.x, y: a.y, z: a.z, px, py, pz, zip: !!a.zip };
+    // the rope is measured to the PIVOT, or the line would be slack (or pre-taut) on its first frame
+    state.rope = Math.max(P('ropeMin'), Math.hypot(state.x - px, state.y - py, state.z - pz));
+
+    /* ---- A-LAB: THE ATTACH BLEND. Rotate the velocity you arrived with onto the tangent plane of the
+       new rope instead of letting the constraint delete its radial half next frame. Speed-preserving
+       by construction (`want` is interpolated toward the INCOMING speed and never past it), so this
+       redirects momentum, it does not manufacture any. See `attachBlend`. ---- */
+    const blend = P('attachBlend');
+    if (blend > 0 && state.rope > 1e-4) {
+      const nx = (state.x - px) / state.rope, ny = (state.y - py) / state.rope, nz = (state.z - pz) / state.rope;
+      const radial = state.vx * nx + state.vy * ny + state.vz * nz;
+      if (radial > 0.01) {
+        const sp0 = Math.hypot(state.vx, state.vy, state.vz);
+        const tx = state.vx - nx * radial, ty = state.vy - ny * radial, tz = state.vz - nz * radial;
+        const tl = Math.hypot(tx, ty, tz);
+        if (tl > 1e-4) {
+          const k = (tl + (sp0 - tl) * blend) / tl;
+          state.vx = tx * k; state.vy = ty * k; state.vz = tz * k;
+        }
+      }
+    }
     return state.anchor;
   }
+  /* The simulation pivot, with a fallback to the visual point — so a state object built by an older
+     consumer (or by a probe that assigns `state.anchor` by hand) still solves correctly. */
+  const pivX = (a) => (a.px !== undefined ? a.px : a.x);
+  const pivY = (a) => (a.py !== undefined ? a.py : a.y);
+  const pivZ = (a) => (a.pz !== undefined ? a.pz : a.z);
 
   function step(state, axes, dt, world) {
     /* Adopt the shared fields into a real vector ONCE. Coming from another body we inherit a scalar
@@ -1377,6 +1518,19 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
       state.rope = clamp(state.rope - axes.lift * rate * dt, P('ropeMin'), P('ropeMax'));
     }
 
+    /* 3b) THE SWING FLOOR (A-LAB) — reel in rather than plough the street. `arcClear` decided once, at
+       attach, from where you were standing; this is the same rule enforced CONTINUOUSLY, against the
+       ground under you NOW. Shortening only (never lengthening) is Insomniac's own "no-slack" rule and
+       it is also what keeps this from oscillating: the line ratchets in over a bad patch and stays
+       there. Runs only while descending on a SWING line — a zip is climbing a wall on purpose, and a
+       rising arc is already leaving the problem. */
+    const fa = P('floorAssist');
+    if (fa > 0 && state.anchor && !state.anchor.zip && state.vy < 0) {
+      const gy0 = world && world.heightAt ? world.heightAt(state.x, state.z) : 0;
+      const want = pivY(state.anchor) - gy0 - P('skim') - P('arcClear');
+      if (want > P('ropeMin') && state.rope > want) state.rope = Math.max(want, state.rope - fa * dt);
+    }
+
     // 4) INTEGRATE, then satisfy the rope CONSTRAINT. Position first, then pull back onto the sphere
     //    and strip the radial velocity — that projection is the rope going taut, and it is the only
     //    place the arc actually comes from.
@@ -1387,13 +1541,15 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     const clearX = state.x, clearY = state.y, clearZ = state.z;
     state.x += state.vx * dt; state.y += state.vy * dt; state.z += state.vz * dt;
     if (state.anchor) {
-      const ax = state.x - state.anchor.x, ay = state.y - state.anchor.y, az = state.z - state.anchor.z;
+      // THE CONSTRAINT SOLVES AGAINST THE PIVOT, not the drawn anchor (A-LAB `pivotOut`).
+      const cx = pivX(state.anchor), cy = pivY(state.anchor), cz = pivZ(state.anchor);
+      const ax = state.x - cx, ay = state.y - cy, az = state.z - cz;
       const dist = Math.hypot(ax, ay, az) || 1e-6;
       if (dist > state.rope) {
         const nx = ax / dist, ny = ay / dist, nz = az / dist;
-        state.x = state.anchor.x + nx * state.rope;
-        state.y = state.anchor.y + ny * state.rope;
-        state.z = state.anchor.z + nz * state.rope;
+        state.x = cx + nx * state.rope;
+        state.y = cy + ny * state.rope;
+        state.z = cz + nz * state.rope;
         const radial = state.vx * nx + state.vy * ny + state.vz * nz;
         if (radial > 0) { state.vx -= nx * radial; state.vy -= ny * radial; state.vz -= nz * radial; }
       }
@@ -1418,8 +1574,9 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
       if (state.anchor && P('autoRelease') && fire) {
         state.hang = (state.hang || 0) + dt;
         const hs = Math.hypot(state.vx, state.vz);
+        // "past the anchor" is a fact about the ARC, so it is measured from the pivot the arc turns on
         const ahead = hs > 1e-4
-          ? ((state.x - state.anchor.x) * state.vx + (state.z - state.anchor.z) * state.vz) / hs : 0;
+          ? ((state.x - cx) * state.vx + (state.z - cz) * state.vz) / hs : 0;
         if (state.vy > 0.05) state.rose = true;             // this web has carried you upward at least once
         const earned = hs > 0.4 && state.vy > 0 && ahead > 0 && Math.atan2(state.vy, hs) >= P('releasePitch');
         // the far extreme of the arc: you rose, you are past the anchor, and vy has fallen back to zero
@@ -1462,8 +1619,14 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     //    compounding into escape velocity.
     const bleed = Math.max(0, 1 - P('airDrag') * dt);
     state.vx *= bleed; state.vy *= bleed; state.vz *= bleed;
-    const sp = Math.hypot(state.vx, state.vy, state.vz);
-    if (sp > P('maxSpeed')) { const k = P('maxSpeed') / sp; state.vx *= k; state.vy *= k; state.vz *= k; }
+    /* A-LAB: THE CAP IS HORIZONTAL. Clamping the 3D magnitude throttled the downswing — the part of an
+       arc the player earned — and did it hardest at exactly the moment the swing is supposed to feel
+       fastest. Insomniac cap horizontal speed and let 3D exceed it on the way down; `maxVertSpeed` is
+       the separate ceiling that still stops a pump chain compounding to orbit. */
+    const hcap = P('maxSpeed'), vcap = P('maxVertSpeed');
+    const hsp = Math.hypot(state.vx, state.vz);
+    if (hsp > hcap) { const k = hcap / hsp; state.vx *= k; state.vz *= k; }
+    if (state.vy > vcap) state.vy = vcap; else if (state.vy < -vcap) state.vy = -vcap;
 
     // 6) FLOOR — land, do not tunnel. Hitting the deck kills the line and the downward component;
     //    horizontal momentum survives so you skid out of a bad swing rather than stopping dead.

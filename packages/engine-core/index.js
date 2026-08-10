@@ -352,6 +352,15 @@ export { createBallistics } from './src/createBallistics.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
 // A-CHAR (2026-08-09): ONE character — walk/sprint/JUMP/fall/land + collision + a crosshair + the web as an ABILITY, with third-person and first-person cameras. Composes the walker (horizontal) + createGrappleModel (the rope); the vertical axis the walker never had lives here.
 export { createCharacterController } from './src/character.js';
+/* A-LAB (2026-08-09) — PROVING-GROUND GEOMETRY, and the collider that was unreachable behind it.
+   `createColliderWorld` had exactly one caller in the whole repo (createCityWorld), was
+   CORE_UNBARRELED, and the package `exports` map does not expose `./src/collide.js` — so a project
+   that wanted COLLISION WITHOUT A PROCEDURAL CITY physically could not get it. That is the gap
+   projects/swing-lab hit on its first line. `createBoxArena` is the level on top of it: a flat floor
+   and a parameterised tower grid that hands back the four-function world bag every body here speaks,
+   sized from the SWING's own numbers (`swingableHeight`) rather than copied off a city. */
+export { createBoxArena, swingableHeight } from './src/box-arena.js';
+export { createColliderWorld } from './src/collide.js';
 
 // Lesson M6 — GPU particle system: ping-pong FBO sim (pos/vel state textures) + scissor-ring spawn +
 // parameterized emitters (burst/muzzle/dust), additive point render. Generalizes the water-flow-gpu GPGPU
