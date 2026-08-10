@@ -132,8 +132,34 @@ export function createFirstPersonWalker(opts = {}) {
     }
   }
 
-  // Move one step. `input.x` = strafe (+right), `input.y` = forward (+forward), `input.sprint` = bool.
+  /* ---- A-LOCK (2026-08-09): SUB-STEP WHEN THE BODY IS MOVING FASTER THAN IT IS WIDE. ------------
+     `resolveCollision` is a DEPENETRATION: it lets the body overlap a solid and then pushes it out.
+     That is sound while the per-frame move is small compared with the body — which was always true
+     while the fastest this walker could go was a 0.95 u/s sprint (0.016 u per frame against a 0.09 u
+     radius). It stopped being true the moment a swing launch could hand this body 10 u/s: 0.17 u per
+     frame, nearly TWO body radii, so the body could arrive already deep inside a facade and the push
+     had a whole frame of penetration to undo. Measured the day free-flight momentum started working:
+     8 frames of 11 533 strictly enclosed, all of them at speed.
+     THE FIX IS RESOLUTION, NOT A SECOND COLLISION MODEL. Splitting the frame into steps no longer
+     than 80% of the body radius means the proven resolve never sees a move it cannot handle, and
+     nothing about its behaviour changes. Capped at 8 sub-steps so a pathological dt cannot turn one
+     frame into a stall; at this scale 8 covers 0.58 u of travel in a 60 Hz frame, i.e. 35 u/s.
+     A body under the old speeds takes exactly ONE step and integrates byte-identically to before.
+     THE CAP AND THE STEP SIZE ARE SIZED AGAINST THE WORST FRAME, not the average one. A consumer that
+     clamps dt at 0.1 s (the lab and metropolis both do, so a tab-switch cannot teleport a body through
+     a wall) can present a 0.885 u move at the measured 8.85 u/s peak — which 8 steps of 0.8·radius
+     could not cover, and the residue showed up as exactly one enclosed frame in 11 536. Half a radius
+     × 16 steps covers 0.72 u in one frame, and the cap only binds in a hitch that is already a
+     rendering failure. */
+  const MAX_SUBSTEPS = 16;
   function update(dt, input = {}) {
+    const stepMax = radius * 0.5;
+    const move = Math.hypot(vx, vz) * dt;
+    const n = move > stepMax ? Math.min(MAX_SUBSTEPS, Math.ceil(move / stepMax)) : 1;
+    for (let i = 0; i < n; i++) stepOnce(dt / n, input);
+  }
+  // Move one step. `input.x` = strafe (+right), `input.y` = forward (+forward), `input.sprint` = bool.
+  function stepOnce(dt, input = {}) {
     const ix = input.x || 0, iy = input.y || 0;
     const il = Math.hypot(ix, iy);
     const nx = il > 1 ? ix / il : ix, ny = il > 1 ? iy / il : iy;   // clamp diagonal to unit
@@ -157,8 +183,39 @@ export function createFirstPersonWalker(opts = {}) {
        mid-air like a hovercraft. Scaling accel keeps the momentum and softens the turn; scaling the
        SPEED would have braked you in flight, which is the opposite of a jump. */
     const ctl = input.control != null ? input.control : 1;
-    const k = 1 - Math.exp(-accel * ctl * dt);
-    vx += (desVx - vx) * k; vz += (desVz - vz) * k;
+    if (ctl >= 1) {
+      /* GROUNDED — converge on the desired velocity. This ONE line is doing two jobs: it accelerates
+         you toward what you asked for, and with no input (des = 0) it brakes you to a stop. On the
+         ground that second job is friction and it is correct. */
+      const k = 1 - Math.exp(-accel * ctl * dt);
+      vx += (desVx - vx) * k; vz += (desVz - vz) * k;
+    } else {
+      /* ---- AIRBORNE (A-LOCK, 2026-08-09): THE INPUT ACCELERATES, IT NEVER BRAKES. ---------------
+         MEASURED BUG, not a refinement. Converging on the desired velocity in mid-air means braking
+         to a stop whenever no key is held, because the desired velocity IS zero — so a body launched
+         off a swing at 3.6 u/s horizontal travelled, measured, 0.00 u over 181 frames while rising
+         2.67 u and falling back. It went straight up and straight down. And holding W was no better:
+         the target is WALK speed, so the convergence would have dragged 6 u/s down to 0.55.
+         The fix is the classic air-acceleration rule (Quake's, and every character controller since):
+         project the current velocity onto the input direction, and add acceleration only while that
+         projection is BELOW the walk speed you asked for. You can always start moving, you can always
+         steer, and you can never slow yourself down by holding a key. With no input at all the only
+         loss is `airDrag`, which defaults to the grapple's own 0.06/s so a body in free flight bleeds
+         at the same rate whichever integrator is holding it — one air, one drag.
+         GATED ON `ctl < 1`, which is the caller SAYING it is airborne (the character controller passes
+         `control: grounded ? 1 : airControl`). Every existing consumer omits `control` entirely, gets
+         ctl = 1, and takes the branch above — byte-identical to before this existed. */
+      const drag = input.airDrag != null ? input.airDrag : 0.06;
+      const bleed = Math.max(0, 1 - drag * dt);
+      vx *= bleed; vz *= bleed;
+      const dl = Math.hypot(desVx, desVz);
+      if (dl > 1e-4) {
+        const dirX = desVx / dl, dirZ = desVz / dl;
+        const along = vx * dirX + vz * dirZ;              // how fast you ALREADY go that way
+        const add = Math.min(dl - along, accel * ctl * dt);
+        if (add > 0) { vx += dirX * add; vz += dirZ * add; }
+      }
+    }
     x += vx * dt; z += vz * dt;
     resolveCollision(dt);
     if (moving) bobT += dt; else bobT *= (1 - Math.min(1, dt * 4));   // bob settles when you stop
@@ -178,6 +235,13 @@ export function createFirstPersonWalker(opts = {}) {
   return {
     addLook, update, eyePosition, eyeDirection,
     setPosition(nx, nz) { x = nx; z = nz; vx = 0; vz = 0; },
+    /* A-LOCK: the WRITE half of `vx`/`vz`, and it is the other half of the momentum bug above.
+       `setPosition` zeroes the velocity because a teleport has none — correct on its own, and fatal
+       in combination: the character controller calls it EVERY frame while roped, to keep the walker's
+       x/z in step with the arc, so the walker spent every swing pinned at zero and handed that zero
+       back the instant the line cut. Position and velocity are separate facts; there was only a
+       setter for one of them. Now the arc's momentum can be handed over explicitly. */
+    setVelocity(nvx, nvz) { vx = nvx || 0; vz = nvz || 0; },
     setYaw(r) { yaw = r; },
     setColliders(list) { colliders = list || []; },
     setAabbs(list) { aabbs = list || []; },

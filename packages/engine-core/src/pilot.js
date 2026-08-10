@@ -920,8 +920,39 @@ export const GRAPPLE_PROFILE = {
      last word: no line outlives it, whatever the geometry does. */
   topOut: true,           // release at the far top of the arc even if releasePitch was never reached
   maxHang: 2.2,           // s — the longest any single web may last (the literal never-dead-hang rule)
+  /* ---- A-LOCK: THE SAME BACKSTOP, SIZED FOR A ROPE THE PLAYER CUTS. ----------------------------
+     `maxHang` 2.2 s was fitted to a scheme where `topOut` cut the line FIRST and this was only ever
+     the safety net behind it. Take `topOut` away — which is exactly what the latched scheme does, so
+     that "swing all the way up if you want" means something — and 2.2 s becomes the PRIMARY rule, and
+     it is far too short to be one. The arithmetic says so rather than a feel report: a pendulum's
+     period is 2π√(L/g), so at ropeMax 3.2 under gravity 5.4 a FULL swing takes 2π√(3.2/5.4) ≈ 4.84 s
+     and a half-swing to the far top takes ≈2.4 s. A 2.2 s cap would fire before the arc ever reached
+     the point the player is waiting to release at — the cut would feel random, and it would be
+     random, because it would be a clock racing a pendulum it was never sized against.
+     6.0 s is that full period plus margin: long enough for a full there-and-back plus a pump, short
+     enough that a rope forgotten on a dead hang still ends. Recompute it if you move ropeMax or
+     gravity — this number is derived from them, not chosen beside them. */
+  maxHangLatched: 6.0,    // s — the cap when the PLAYER owns the release (axes.latched)
   launchUp: 0.7,          // u/s added UP on any release — the flick that turns an arc into a jump
   launchFwd: 0.5,         // u/s added FORWARD on any release
+  /* ---- A-LOCK (2026-08-09): THE *PLAYER-COMMANDED* RELEASE IS A BIGGER LAUNCH THAN THE AUTOMATIC ONE,
+     and the two are separate constants because they are separate verbs. `launchUp`/`launchFwd` above
+     are the flick on an AUTOMATIC cut (`topOut`, `maxHang`, a zip arriving) — the game tidying up after
+     an arc that ended on its own, where a large impulse would read as the game throwing you somewhere
+     you did not ask to go. `releaseUp`/`releaseFwd` are what a SPACE PRESS buys, and the owner's ask is
+     explicit about what that has to feel like: "you can swing low, you can swing all the way up if you
+     want and jump off and get more air".
+     WHY THIS IS AN IMPULSE AND NOT A MULTIPLIER. The arc already supplies the direction and most of the
+     magnitude — releasing at the bottom is fast and flat, releasing on the way up is slower and steep —
+     and scaling that would amplify the difference between a good and a bad release into a cliff. An
+     additive up+forward kick keeps the arc's own shape and adds a constant, so the timing still decides
+     WHERE you go and the press decides HOW FAR. The apex it buys is not the impulse squared over 2g but
+     the CROSS term: at vy = 3 u/s a +1.8 u/s kick adds (4.8² − 3²)/2g = 1.30 u, i.e. ten jump-heights,
+     which is the difference between "the rope ended" and "I launched".
+     Both default to a value MEASURED against a bare cut (docs/design/swing-ledger.md, A-LOCK table);
+     set them to `launchUp`/`launchFwd` to make the two releases identical again. */
+  releaseUp: 1.8,         // u/s added UP when the PLAYER cuts the line (Space) — the "get air" verb
+  releaseFwd: 1.2,        // u/s added FORWARD when the player cuts the line
   refireDelay: 0.10,      // s — the shortest gap between two webs (a cut must read as a cut)
   refireVy: 0.55,         // u/s — do not re-web while still climbing faster than this (let the launch fly)
   zipAccel: 15.0,         // u/s² pull ALONG the line toward an anchor above you — the takeoff winch
@@ -1294,14 +1325,35 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
      was always true — plus a small up+forward flick, which is what turns "the rope ended" into "I threw
      myself". `refire` is the gap before the next web can be taken: without it, a held button re-attaches
      on the very next frame and the launch never happens, so the cut would be invisible. */
-  function cutLine(state, launch) {
+  function cutLine(state, launch, up, fwd) {
     state.anchor = null;
     state.refire = P('refireDelay');
     state.hang = 0; state.rose = false;      // per-web bookkeeping dies with the web that owns it
     if (!launch) return;
+    const u = up != null ? up : P('launchUp');
+    const f = fwd != null ? fwd : P('launchFwd');
     const h = Math.hypot(state.vx, state.vz);
-    state.vy += P('launchUp');
-    if (h > 1e-4) { state.vx += (state.vx / h) * P('launchFwd'); state.vz += (state.vz / h) * P('launchFwd'); }
+    state.vy += u;
+    if (h > 1e-4) { state.vx += (state.vx / h) * f; state.vz += (state.vz / h) * f; }
+  }
+
+  /* ---- A-LOCK (2026-08-09): THE RELEASE AS A VERB A CONSUMER CAN CALL -----------------------------
+     `step` already cuts the line when the trigger goes false, and that was the whole release story for
+     as long as the trigger WAS the rope ("hold the button to stay attached"). The owner's new scheme
+     separates them — the web is fired once and LATCHES, and a separate key cuts it — so the consumer
+     that owns the body (createCharacterController) needs to be able to say "cut it, now, with this much
+     launch" without pretending the trigger dropped. That is this function, and it is deliberately the
+     SAME `cutLine` the automatic paths use: one implementation of "what a cut does to your velocity",
+     called with different constants, so a player release and a top-out release can never drift into two
+     different physics.
+     Returns the speed the body left with, so a caller (or a probe) can measure the launch rather than
+     infer it. `{ up, fwd }` default to the profile's PLAYER constants (`releaseUp`/`releaseFwd`), and
+     `{ up: 0, fwd: 0 }` is a BARE cut — the control arm of the A/B in the ledger. */
+  function release(state, opts = {}) {
+    if (!state || !state.anchor) return 0;
+    cutLine(state, true, opts.up != null ? opts.up : P('releaseUp'), opts.fwd != null ? opts.fwd : P('releaseFwd'));
+    state.speed = Math.hypot(state.vx, state.vy, state.vz);
+    return state.speed;
   }
 
   /* ---- ATTACH, LIFTED OUT OF `step` (A-CHAR, 2026-08-09) --------------------------------------
@@ -1571,17 +1623,36 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
          taken to buy — and the next search, run from up there, finds a real SWING. */
       if (state.anchor && state.anchor.zip && state.y > state.anchor.y - P('minRise')) cutLine(state, true);
 
-      if (state.anchor && P('autoRelease') && fire) {
+      /* A-LOCK: `axes.latched` NAMES THE CONTROL SCHEME, and both of its consequences follow from that
+         one word rather than from two independent flags a consumer could set inconsistently.
+         · HOLD-TO-SWING (metropolis, the auto-anchor chain): the game must cut the line at the top of
+           the arc, or "hold the button" is a hang. autoRelease ON, `maxHang` behind it.
+         · LATCHED (the owner's new scheme): the rope stays up until SPACE, so a game that cut it at the
+           first top-out would be taking the verb back — "you can swing all the way up if you want" is
+           exactly the freedom `topOut` removes. The clock therefore becomes the PRIMARY rule, so it is
+           the longer, pendulum-derived `maxHangLatched` rather than the number fitted to sit behind
+           topOut. See that constant for the arithmetic.
+         Absent ⇒ the profile decides, so a consumer that never passes it is unchanged. */
+      const latched = !!axes.latched;
+      const autoRel = latched ? false : P('autoRelease');
+      const hangCap = latched ? P('maxHangLatched') : P('maxHang');
+      if (state.anchor && fire) {
+        /* THE HANG CLOCK AND ITS BACKSTOP RUN WHETHER OR NOT `autoRelease` IS ON, and separating them
+           is the point of this edit rather than a tidy-up. They used to live inside the autoRelease
+           gate, so switching that off would have produced a rope with NO upper bound at all — the
+           "never dead-hang" rule silently deleted by a flag that reads like it only governs the
+           top-out. `maxHang` is the last word in every scheme (its own comment says so); only the
+           TIMED-TO-THE-ARC cuts belong to the game. */
         state.hang = (state.hang || 0) + dt;
         const hs = Math.hypot(state.vx, state.vz);
         // "past the anchor" is a fact about the ARC, so it is measured from the pivot the arc turns on
         const ahead = hs > 1e-4
           ? ((state.x - cx) * state.vx + (state.z - cz) * state.vz) / hs : 0;
         if (state.vy > 0.05) state.rose = true;             // this web has carried you upward at least once
-        const earned = hs > 0.4 && state.vy > 0 && ahead > 0 && Math.atan2(state.vy, hs) >= P('releasePitch');
+        const earned = autoRel && hs > 0.4 && state.vy > 0 && ahead > 0 && Math.atan2(state.vy, hs) >= P('releasePitch');
         // the far extreme of the arc: you rose, you are past the anchor, and vy has fallen back to zero
-        const topped = P('topOut') && state.rose && ahead > 0 && state.vy <= 0;
-        if (earned || topped || state.hang >= P('maxHang')) cutLine(state, true);
+        const topped = autoRel && P('topOut') && state.rose && ahead > 0 && state.vy <= 0;
+        if (earned || topped || state.hang >= hangCap) cutLine(state, true);
       }
     }
 
@@ -1683,9 +1754,11 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
     state.quat.setFromEuler(_e);
     return state;
   }
-  /* `attach` and `reach` are exposed for a consumer that owns the body itself (the unified character
-     controller) — the pilot-controller path only ever needs `step`, and calls both internally. */
-  return { step, attach, reach: reachFromAim };
+  /* `attach`, `reach` and `release` are exposed for a consumer that owns the body itself (the unified
+     character controller) — the pilot-controller path only ever needs `step`, and calls all three
+     internally. `release` is A-LOCK's addition: a latched rope needs a cut that is not "the trigger
+     went false". */
+  return { step, attach, reach: reachFromAim, release };
 }
 
 /* the model registry the controller dispatches on (a PilotProfile names its model by key). Adding a

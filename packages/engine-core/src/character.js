@@ -21,6 +21,14 @@
        UP; the moment the line cuts, this controller takes the same velocity back and flies it as a
        jump. One state object, two integrators, no conversion — which is exactly why the transition
        preserves momentum instead of approximating it.
+       *** AND THAT LAST SENTENCE WAS A CLAIM, NOT A FACT, FOR THE WHOLE OF A-CHAR — corrected in
+       A-LOCK (2026-08-09), and left standing rather than quietly rewritten, because "the architecture
+       makes this impossible" is precisely the confidence that stopped anyone measuring it. A shared
+       state object is NOT a lossless seam if a DELEGATE keeps its own copy of a field. The walker owns
+       x/z and its own vx/vz; the roped branch called `walker.setPosition` every frame to keep them in
+       step, `setPosition` zeroes velocity (correctly — a teleport has none), and the free branch's
+       `state.vx = walker.vx` handed that zero straight back. Measured: a body released from a swing at
+       3.6 u/s horizontal covered 0.00 u over 181 frames. It is true now — see `handOff()` below. ***
 
    SO THE COMPOSITION IS: this module owns Y (gravity/jump/land) + the look + the camera, and DELEGATES
      · X/Z movement + horizontal collision  → `createFirstPersonWalker` (proven: 8/8 facades, 0/1440
@@ -66,8 +74,19 @@
      state, view, grounded, airborne, swinging, jumps, landings, x, y, z, lookYaw, lookPitch,
    }
 
-   `input` = { x, y, sprint|boost, jump, fire, lift, steer, aimPoint } — the same axis vocabulary the
-   rest of the engine speaks, so a project wires ONE key map for the whole character.
+   `input` = { x, y, sprint|boost, jump, fire, web, lift, steer, aimPoint } — the same axis vocabulary
+   the rest of the engine speaks, so a project wires ONE key map for the whole character.
+
+   TWO CONTROL SCHEMES LIVE HERE, chosen by whether `input.web` is supplied at all (A-LOCK, 2026-08-09):
+     · LEGACY / hold-to-swing — pass `fire` and never `web`. The trigger IS the rope: it attaches while
+       held and cuts when released, and `autoRelease` in the profile cuts it for you at the top of the
+       arc. metropolis is on this path and every PROVEN row in swing-ledger.md was measured on it.
+     · LATCHED / lock-and-launch — pass `web` (and keep passing `jump`). The owner's scheme: the button
+       THROWS one web per press, the rope stays up on its own, and SPACE cuts it with a launch. Space
+       still jumps when grounded — one verb, "get air", in both states, which is the point of binding
+       them together rather than to two keys.
+   Nothing selects between them at runtime except the presence of that one field, so a consumer cannot
+   half-adopt it and end up with a rope that answers to two masters.
    ============================================================ */
 import * as THREE from 'three';
 import { createFirstPersonWalker } from './createFirstPersonWalker.js';
@@ -114,6 +133,17 @@ export function createCharacterController(opts = {}) {
      standing next to. Small on purpose. */
   const stepUp = opts.stepUp != null ? opts.stepUp : 0.06;
   const skim = opts.skim != null ? opts.skim : 0.06;          // clearance above the floor (grapple's own idiom)
+  /* ---- A-LOCK (2026-08-09): HOW FAR ABOVE THE GROUND THE CAMERA MAY GET. -----------------------
+     The audit case nobody had tested, and it was broken: the third-person spring arm asks
+     `world.segmentHit`, which in every world in this repo tests the BUILDING colliders and nothing
+     else — the ground is a plane or a heightfield, not a box. So aiming up (which is most of what an
+     aimed swing does: the anchors are overhead) swings the arm DOWN and straight through the floor,
+     and the frame fills with the underside of the world. Fixed by clamping the eye against the same
+     `groundAt` every other part of this controller reads, which is also why it needs no new query.
+     0.08 u ≈ 0.5 m at the metropolis scale: enough that the near plane (0.02) never sees through. */
+  const camGroundClear = opts.camGroundClear != null ? opts.camGroundClear : 0.08;
+  // the height up the body the horizontal collision sphere sits at (see the feet-pass note below)
+  const collideYOff = opts.collideYOff != null ? opts.collideYOff : eyeHeight * 0.5;
   const sensitivity = opts.sensitivity != null ? opts.sensitivity : 0.0022;   // rad per pixel
   const pitchUp = (opts.pitchUp != null ? opts.pitchUp : 78) * D;
   const pitchDown = (opts.pitchDown != null ? opts.pitchDown : 78) * D;
@@ -179,6 +209,14 @@ export function createCharacterController(opts = {}) {
   let grounded = false, coyote = 0, buffered = 0, jumpHeld = false, bobT = 0;
   let jumps = 0, landings = 0, airT = 0, lastAirT = 0, apex = -Infinity, jumpFromY = 0, lastJumpRise = 0;
   let swinging = false;
+  /* ---- A-LOCK: THE LATCHED WEB. `webHeld` is the edge detector for `input.web`; `webLatched` is the
+     rope's own state, and it is what makes this scheme different from the old one. Under hold-to-swing
+     the TRIGGER *was* the rope: let go and the line cut, so a long swing was a button-hold endurance
+     test. Here the fire button only ever throws the web, and the rope stays up until the player cuts
+     it with the SAME key that jumps — "get air", one verb, both states, which is the owner's own
+     framing and the reason it is one key and not two. ---- */
+  let webHeld = false, webLatched = false;
+  let webs = 0, releases = 0, lastReleaseSpeed = 0, lastReleaseY = 0;
   const _euler = new THREE.Euler();          // hoisted: an Euler per frame is a hot-path allocation
 
   /* THE ONE GROUND ANSWER. Every part of this controller — the walk floor, the fall test, the landing
@@ -203,10 +241,30 @@ export function createCharacterController(opts = {}) {
     colliders: opts.colliders || [], aabbs: opts.aabbs || [],
     groundY: () => state.y,
     resolveSpatial: world.resolveSphere
-      ? (st, dt) => world.resolveSphere(st, dt, {
-          r: radius, yOff: opts.collideYOff != null ? opts.collideYOff : eyeHeight * 0.5,
-          PUSH_MAX: 6, SLIDE_FRICTION: 0.85, SKIN: 0.02,
-        })
+      ? (st, dt) => {
+          world.resolveSphere(st, dt, { r: radius, yOff: collideYOff, PUSH_MAX: 6, SLIDE_FRICTION: 0.85, SKIN: 0.02 });
+          /* ---- THE FEET PASS (A-LOCK, 2026-08-09) — and it is deliberately NARROW. --------------
+             The horizontal resolve is ONE sphere at `collideYOff`, so its vertical reach is that
+             height ±`radius`: with the defaults it sees 0.05 u to 0.23 u up the body and is BLIND to
+             anything whose top lies in the bottom 5 cm. That band is not hypothetical — it is where
+             the last containment failure lived, and the diagnostic printed its geometry rather than
+             a count: `feet: true, mid: false, head: false, belowTop: 0.0445, vy: +1.585`. A body
+             launched off a swing, rising past a roof EDGE, drifts horizontally into the footprint at
+             a height where only its feet are below the roof top. Six frames in 11 527, none of them
+             roped, the fastest at 4.87 u/s — so not tunnelling, and no amount of sub-stepping would
+             have found it. (swing-ledger.md's guard-scope lesson, exactly: a guard's green only covers
+             what its sample can SEE.)
+             WHY IT IS GATED ON *RISING AND AIRBORNE* rather than run always, which is the interesting
+             half. A second sphere down at the feet overlaps the roof you are STANDING on — its bottom
+             sits below the surface by construction — so an ungated version would shove you off every
+             rooftop perch, and one gated only on `airborne` would shove you sideways out of the
+             footprint on the frame you DESCEND through the roof plane, i.e. delete the rooftop
+             landing. Going up through a roof is a defect; coming down onto one is the feature. The
+             sign of `vy` is exactly the difference, so it is the gate. */
+          if (!grounded && state.vy > 0) {
+            world.resolveSphere(st, dt, { r: radius, yOff: radius, PUSH_MAX: 6, SLIDE_FRICTION: 0.85, SKIN: 0.02 });
+          }
+        }
       : null,
     x: state.x, z: state.z, yaw: state.yaw,
   });
@@ -214,6 +272,27 @@ export function createCharacterController(opts = {}) {
   const grapple = opts.grapple || null;
   const gProfile = opts.grappleProfile || null;
   const _gAxes = { steer: 0, lift: 0, throttle: 0, boost: 0, fire: false, aimPoint: null };
+
+  /* ---- THE HAND-OFF (A-LOCK, 2026-08-09) — and this is the seam this module's header CLAIMED it had
+     and did not. The claim: "the moment the line cuts, this controller takes the same velocity back
+     and flies it as a jump… no conversion, which is exactly why the transition preserves momentum
+     instead of approximating it." The measurement: a body released from a swing at 3.6 u/s horizontal
+     covered 0.00 u over 181 frames. Straight up, straight down.
+     THE CAUSE WAS TWO CORRECT LINES IN COMBINATION, which is why reading either one found nothing.
+     While roped, this branch kept the walker's x/z in step with the arc via `walker.setPosition` —
+     and `setPosition` zeroes velocity, because a teleport has none. So the walker sat at zero for the
+     whole swing, and the free branch's `state.vx = walker.vx` then overwrote the arc's momentum with
+     that zero on the very first frame after the cut. The state object was shared; the WALKER's copy
+     was not, and it was the one that won.
+     Called every roped frame rather than on the cut EDGE, deliberately: there are four ways a line
+     ends (Space, `maxHang`, the floor, a zip arriving) and an edge-triggered version would have to
+     know all of them. Keeping the walker continuously loaded with the arc's velocity means whichever
+     frame the rope ends on, the momentum is already there — the repo's own "entry paths don't guard
+     what exit paths clear" lesson, applied by removing the edge instead of enumerating it. ---- */
+  function handOff() {
+    walker.setPosition(state.x, state.z);        // position first — it zeroes velocity, so it goes first
+    walker.setVelocity(state.vx, state.vz);      // …then the momentum the arc built
+  }
 
   /* ---- LOOK. Same 1:1 pointer-lock convention as the walker (grab-the-world: dragging right looks
      left), so a project that already routes drags to `walker.addLook` gets identical feel here. ---- */
@@ -226,7 +305,21 @@ export function createCharacterController(opts = {}) {
   function update(dt, input = {}) {
     if (!(dt > 0)) dt = 0;
     const sprint = !!(input.sprint || (input.boost || 0) > 0.5);
-    const fire = !!input.fire;
+    /* ---- A-LOCK: WHICH CONTROL SCHEME IS THIS CONSUMER SPEAKING? -------------------------------
+       Decided by whether `input.web` was supplied AT ALL, not by a mode flag, so an existing consumer
+       that has never heard of it is bit-for-bit unchanged (metropolis passes `fire` and only `fire`).
+         · LATCHED  (`web` present): the button THROWS the web; the rope stays up until Space or a
+           natural break. This is the owner's scheme.
+         · LEGACY   (`fire` only):   the button IS the rope; letting go cuts it. Every PROVEN row in
+           swing-ledger.md was measured on this path, so it does not move. */
+    const latchedScheme = input.web !== undefined;
+    /* THE JUMP EDGE IS DETECTED ONCE, AT THE TOP, and that move is load-bearing rather than tidy: it
+       used to live inside the free branch, which is exactly the branch that does not run while you are
+       roped — so a Space press mid-swing was literally unreachable. Space now means "get air" in both
+       states, and one detector serves both. */
+    const jumpNow = !!input.jump;
+    const jumpPressed = jumpNow && !jumpHeld;
+    jumpHeld = jumpNow;
     /* THE RE-FIRE BEAT IS TICKED HERE, and forgetting it is a real bug this seam creates. `refire` is
        normally decremented inside `grapple.step`, which now only runs while the line is UP — so after
        a cut the timer would freeze at its full value and the character could never web again. Owning
@@ -238,11 +331,38 @@ export function createCharacterController(opts = {}) {
        this controller exists not to be. `attach` is a pure query+assign on the state (pilot.js's own
        section-1 block, factored out for exactly this): it either hangs a rope or does nothing, and it
        never integrates. So a fire with nothing in range costs you no movement at all. */
-    if (grapple && grapple.attach && fire && !state.anchor) {
+    const webNow = latchedScheme ? !!input.web : false;
+    const webPressed = webNow && !webHeld;
+    webHeld = webNow;
+    /* EDGE-TRIGGERED, NOT LEVEL-TRIGGERED, and the owner's words are why: "you RIGHT CLICK to shoot a
+       web". A click is one web. Auto-re-firing on a held button would quietly restore hold-to-swing
+       under a different button and take the release timing back off the player — which is the whole
+       thing this scheme moves to Space. */
+    const wantAttach = latchedScheme ? webPressed : !!input.fire;
+    if (grapple && grapple.attach && wantAttach && !state.anchor) {
       _gAxes.aimPoint = input.aimPoint || null;
       _gAxes.fire = true; _gAxes.boost = input.boost || 0;
       _gAxes.steer = input.steer || 0; _gAxes.lift = input.lift || 0; _gAxes.throttle = 0;
-      grapple.attach(state, _gAxes, world);
+      if (grapple.attach(state, _gAxes, world)) { webLatched = latchedScheme; webs++; }
+    }
+    /* 1b) SPACE, WHILE ROPED, IS THE RELEASE — and it happens BEFORE the branch below picks an owner
+       for this frame, so the launched velocity is integrated by the FREE path on the very same frame.
+       That is what makes the launch instant rather than one frame of rope-constrained flight later,
+       and it needs no handoff code: cutting the line simply changes which branch runs.
+       The impulse is the grapple's own `releaseUp`/`releaseFwd` (pilot.js), not a number invented
+       here — the model owns what a cut does to a velocity, in one place, so a player release and a
+       top-out release cannot drift into two physics. */
+    let pressSpent = false;                      // this press bought a release; it must not also buy a jump
+    if (latchedScheme && jumpPressed && state.anchor && grapple && grapple.release) {
+      lastReleaseY = state.y;
+      lastReleaseSpeed = grapple.release(state, opts.release || undefined);
+      webLatched = false;
+      releases++;
+      pressSpent = true;
+      /* THE LAUNCH IMPULSE HAS TO REACH THE WALKER TOO. This frame falls through to the FREE branch,
+         where the walker owns x/z — and the last hand-off it got was the previous frame's, before
+         `launchFwd` was added. Without this line the forward half of the launch is silently dropped. */
+      handOff();
     }
     /* …and publish the reach verdict every frame whether or not the trigger is down, so a crosshair can
        dim on the SAME rule the attach uses. One implementation of "in range", read twice — the drift
@@ -262,10 +382,20 @@ export function createCharacterController(opts = {}) {
       _gAxes.lift = input.lift || 0;
       _gAxes.throttle = 0;                       // this body's forward is WALK, never a grapple throttle
       _gAxes.boost = input.boost || 0;
-      _gAxes.fire = fire;
+      /* THE TRIGGER THE MODEL SEES IS THE LATCH, NOT THE BUTTON. `step` cuts the line the moment
+         `fire` reads false (that IS hold-to-swing), so a latched rope has to keep telling it the
+         trigger is down long after the click ended. The button is now an EVENT; the latch is the
+         state — and this line is the whole translation between the two schemes. */
+      _gAxes.fire = latchedScheme ? webLatched : !!input.fire;
+      /* ONE WORD NAMES THE SCHEME, and pilot.js derives BOTH of its consequences from it — no auto
+         top-out (the player owns the release) and the longer, pendulum-derived hang cap that has to
+         replace it. False in the legacy scheme leaves the profile wholly in charge, so metropolis's
+         held-button chain keeps its auto-release exactly as measured. */
+      _gAxes.latched = latchedScheme;
       _gAxes.aimPoint = input.aimPoint || null;
       grapple.step(state, _gAxes, dt, world);
-      walker.setPosition(state.x, state.z);      // keep the horizontal half in sync for the frame we land
+      if (!state.anchor) webLatched = false;     // a NATURAL break (maxHang, the floor, a zip arriving)
+      handOff();                                 // …and the arc's momentum goes with it. See handOff.
       walker.setYaw(state.yaw);
       grounded = false; coyote = 0;
       bobT *= (1 - Math.min(1, dt * 4));
@@ -283,7 +413,15 @@ export function createCharacterController(opts = {}) {
 
       // --- HORIZONTAL: the walker, with the accel scaled by the air (see `airControl`).
       walker.setYaw(lookYaw);
-      walker.update(dt, { x: input.x || 0, y: input.y || 0, sprint, control: grounded ? 1 : airControl });
+      /* `airDrag` is the grapple's own number when there is a grapple, so a body in free flight bleeds
+         at the same rate whichever integrator is holding it. Two drags would make the body feel
+         heavier the instant a web cut — the same seam requirement that pins gravity to one value. */
+      walker.update(dt, {
+        x: input.x || 0, y: input.y || 0, sprint,
+        control: grounded ? 1 : airControl,
+        airDrag: opts.airDrag != null ? opts.airDrag
+          : (gProfile && gProfile.airDrag != null ? gProfile.airDrag : 0.06),
+      });
       state.x = walker.x; state.z = walker.z;
 
       /* THE FLOOR — and the CEILING of the query is the position we were CLEAR AT, not the one we
@@ -308,12 +446,16 @@ export function createCharacterController(opts = {}) {
         if (state.y > apex) apex = state.y;
       }
 
-      // --- THE JUMP. Edge-triggered (a HELD key must not re-fire on landing), and allowed from either
-      //     the floor or the coyote window. A press with neither is not thrown away — it is BUFFERED.
-      const jumpNow = !!input.jump;
-      const pressed = jumpNow && !jumpHeld;
-      jumpHeld = jumpNow;
-      if (pressed) buffered = jumpBuffer;
+      /* --- THE JUMP. Edge-triggered (a HELD key must not re-fire on landing), and allowed from either
+             the floor or the coyote window. A press with neither is not thrown away — it is BUFFERED.
+             The edge itself is detected at the TOP of update() now, because the same press means
+             RELEASE while roped and this branch never runs then (see 1b). */
+      /* ONE PRESS, ONE VERB. A release taken at street level lands you inside the buffer window, and
+         without `pressSpent` that single Space would cut the line AND fire a jump off the landing —
+         a double impulse from one key, and a `jumps` counter that lies. The forgiveness timers exist
+         to make a press that missed still count; they must not make a press that already counted
+         count twice. */
+      if (jumpPressed && !pressSpent) buffered = jumpBuffer;
       else buffered = Math.max(0, buffered - dt);
       if (buffered > 0 && (grounded || coyote > 0)) {
         state.vy = jumpSpeed;
@@ -375,13 +517,29 @@ export function createCharacterController(opts = {}) {
     out.x = Math.sin(lookYaw) * cp; out.y = Math.sin(lookPitch); out.z = Math.cos(lookYaw) * cp;
     return out;
   }
+  /* THE GROUND CLAMP — the half of camera containment `segmentHit` structurally cannot do.
+     The spring arm asks the world whether a SOLID is in the way, and in every world in this repo the
+     solids are the BUILDINGS: metropolis's colliders, box-arena's towers. The ground is a plane or a
+     heightfield answered by `heightAt`/`surfaceAt`, so it is invisible to the sweep — and an aimed
+     swing spends its life looking UP, which swings the arm DOWN. Measured before this existed: the
+     chase eye went 0.30 u under the floor of the lab just by pitching up from a standing start.
+     Lifting the eye (rather than shortening the arm) is the standard answer and the right one here:
+     `outDir` is the look vector the crosshair stands for and is NOT recomputed from the eye, so
+     sliding the camera up the ground plane changes the framing without lying about where you are
+     aiming. Applied to BOTH views — first person is nowhere near the floor today, and "nowhere near
+     today" is how the next regression gets in. */
+  function clampToGround(outPos) {
+    const g = groundAt(outPos.x, outPos.z, outPos.y) + camGroundClear;
+    if (outPos.y < g) outPos.y = g;
+    return outPos;
+  }
   function cameraPose(outPos = _pos, outDir = _dir) {
     lookDir(outDir);
     if (view === 'first') {
       outPos.x = state.x;
       outPos.y = state.y + eyeHeight + Math.sin(bobT * first.bobRate) * first.bob * (walker.moving && grounded ? 1 : 0);
       outPos.z = state.z;
-      return outPos;
+      return clampToGround(outPos);
     }
     /* THE ARM IS SWEPT IN TWO STAGES, AND BOTH STAGES ARE LOAD-BEARING — found by looking at a
        screenshot, not by reading. The first version swept only the BACKWARD arm from an already-offset
@@ -412,12 +570,12 @@ export function createCharacterController(opts = {}) {
     }
     if (dist < third.minDist) {                                     // no room — sit at the head
       outPos.x = state.x; outPos.y = state.y + eyeHeight; outPos.z = state.z;
-      return outPos;
+      return clampToGround(outPos);
     }
     outPos.x = px - outDir.x * dist;
     outPos.y = py - outDir.y * dist;
     outPos.z = pz - outDir.z * dist;
-    return outPos;
+    return clampToGround(outPos);
   }
 
   /* A-LAB: the eased FOV for the CURRENT speed. Read HORIZONTAL speed, not the 3D magnitude — a
@@ -441,6 +599,9 @@ export function createCharacterController(opts = {}) {
       state.vx = 0; state.vy = 0; state.vz = 0;
       state.anchor = null; state.rope = 0; state.refire = 0;
       grounded = false; coyote = 0; buffered = 0; airT = 0; apex = -Infinity; jumpFromY = state.y;
+      // the latch is state the entry path TOOK; a teleport is an exit path, so it clears it (the
+      // repo's recurring bug class — a respawn that leaves you holding a rope to nowhere).
+      webLatched = false; webHeld = false;
     },
     setYaw(r) { lookYaw = r; state.yaw = r; walker.setYaw(r); },
     recenterPitch() { lookPitch = 0; },
@@ -458,6 +619,9 @@ export function createCharacterController(opts = {}) {
     get lookYaw() { return lookYaw; }, get lookPitch() { return lookPitch; },
     get eyeHeight() { return eyeHeight; },
     // verification handles — the probe reads these rather than re-deriving them from samples
+    get latched() { return webLatched; },
+    get webs() { return webs; }, get releases() { return releases; },
+    get lastReleaseSpeed() { return lastReleaseSpeed; }, get lastReleaseY() { return lastReleaseY; },
     get jumps() { return jumps; }, get landings() { return landings; },
     get airTime() { return airT; }, get lastAirTime() { return lastAirT; },
     get lastJumpRise() { return lastJumpRise; },

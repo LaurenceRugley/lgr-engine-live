@@ -36,6 +36,7 @@ import {
   THREE, createEngineCore, CAM, createBoxArena, swingableHeight,
   createCharacterController, createGrappleModel, GRAPPLE_PROFILE,
   resolveAimPoint, createAimReticle, createPointerLockAim,
+  createTargetLock, createLockMarker,
 } from '@lgr/engine-core';
 
 const $ = (id) => document.getElementById(id);
@@ -150,18 +151,47 @@ scene.add(anchorDot);
    --------------------------------------------------------------------------------------------- */
 const aimReach = () => SWING.ropeMax + 1.2 + 2.6;    // rope + chase-arm + the "too far" readout band
 const _aimPt = { x: 0, y: 0, z: 0 };
-let aimHit = null, fireHeld = false;
+let aimHit = null;
 const reticle = createAimReticle({ container: document.body });
 reticle.setVisible(true);
+
+/* ---- A-LOCK (2026-08-09): THE OWNER'S CONTROL SCHEME, wired. His words:
+   "You left click to LOCK ONTO a place, and then you RIGHT CLICK to shoot a web and then swing… you
+   can use the SPACE BAR to jump off of your swing."
+     LMB → take a lock on whatever the crosshair is over. It PERSISTS and it is VISIBLE.
+     RMB → throw the web at the lock. WITH NO LOCK IT FIRES AT THE CROSSHAIR ANYWAY — an assumption
+           stated plainly, and made because a quick web must never be blocked by a missing ceremony;
+           if the owner wants a hard lock requirement it is the one line below.
+     SPACE → release + launch (and jump when grounded — one verb, both states).
+   The ABILITIES are engine-core's (`createTargetLock` copies the point so a lock cannot silently
+   alias the reused crosshair buffer; `createLockMarker` draws it). This file only decides the keys. */
+const targetLock = createTargetLock();
+const lockMark = createLockMarker({ container: document.body });
+lockMark.setVisible(true);
+let webPressed = false;                 // ONE frame of true per right-click — the model edge-triggers
+let lockFlash = 0;
 const lockAim = createPointerLockAim({
   element: renderer.domElement,
   onLook: (dx, dy) => character.addLook(dx, dy),
-  onFire: (down) => { fireHeld = down; },
-  // Losing the lock (Esc, tab switch) must drop the line, or the trigger latches held and the player
-  // is hanging from a web they have no way to cut. Same exit-path rule as metropolis.
-  onLockChange: (locked) => { if (!locked) fireHeld = false; },
+  onButton: (btn, down) => {
+    if (!down) return;
+    if (btn === 0) {                    // LEFT — lock on
+      if (targetLock.lock(aimHit)) { lockFlash = 1; flash('LOCKED — right-click to web it'); }
+      else flash('nothing under the crosshair to lock');
+    } else if (btn === 2) {             // RIGHT — throw the web
+      webPressed = true;
+    }
+  },
+  /* Losing the lock (Esc, tab switch) must not leave an input latched. The ROPE is not cleared here —
+     it is the character's now, not the mouse's, and Space is always available to cut it. That is the
+     scheme's own answer to the bug this callback originally existed for. */
+  onLockChange: (locked) => { if (!locked) webPressed = false; },
 });
 renderer.domElement.addEventListener('pointerdown', () => { if (!lockAim.locked) lockAim.request(); });
+/* THE POINT THE WEB FLIES AT: the lock if you took one, otherwise whatever is under the crosshair.
+   One function, read by the attach AND by the crosshair's range verdict, so the mark cannot promise
+   something the web will not do (aim.js's own rule about one implementation of "in range"). */
+const webTarget = () => (targetLock.has ? targetLock.point : aimHit);
 
 /* ---------------------------------------------------------------------------------------------
    5. INPUT. One key map for the whole character — the same axis vocabulary the rest of the engine
@@ -175,17 +205,26 @@ const spawn = () => {
   stats.webs = 0; stats.peak = 0; stats.travel = 0; stats.groundPerSwing = [];
   stats.lastX = character.x; stats.lastZ = character.z;
 };
+/* SPACE IS AN EDGE THAT MUST SURVIVE TO THE NEXT FRAME, exactly like the web button — and this is a
+   real input-fidelity fix, not probe plumbing. A tap whose keydown and keyup both land between two
+   rAFs is invisible to a level-triggered `held.has(' ')` read, so the press is silently dropped. On a
+   144 Hz display that window is 7 ms; a human can beat it, and a harness beats it every time (measured:
+   `page.keyboard.press('Space')` produced 826 presses and ZERO releases in a 12 s chain run — the
+   press was real and the read was blind). The character already edge-triggers internally, so one
+   frame of `true` is exactly what it wants; this just guarantees the frame happens. */
+let spacePulse = false;
 addEventListener('keydown', (e) => {
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (e.repeat) return;
   held.add(k);
+  if (k === ' ') spacePulse = true;
   if (k === 'v') character.toggleView();
   if (k === 'r') spawn();
   if (k === 't') { SWING.aimMode = SWING.aimMode === 'point' ? 'auto' : 'point'; flash(`aim: ${SWING.aimMode}`); }
   if (k === ' ') e.preventDefault();
 });
 addEventListener('keyup', (e) => held.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
-addEventListener('blur', () => { held.clear(); fireHeld = false; });   // an unfocused window must not hold keys down
+addEventListener('blur', () => { held.clear(); webPressed = false; });   // an unfocused window must not hold keys down
 
 /* ---------------------------------------------------------------------------------------------
    6. THE READOUT. `stats` is the lab's whole reason to exist: the numbers a tuner needs and cannot
@@ -216,8 +255,15 @@ function updateHud(dt) {
   set('v-anchy', a ? a.y.toFixed(2) : '—');
   set('v-rise', a ? (a.y - character.y).toFixed(2) : '—');
   set('v-kind', a ? (a.zip ? 'ZIP (winch)' : 'SWING (arc)') : '—', a && a.zip ? 'hot' : '');
-  set('v-aim', s.aimInRange ? 'YES' : (aimHit ? 'too far' : 'no target'), s.aimInRange ? 'on' : 'off');
-  set('v-webs', String(stats.webs));
+  set('v-aim', s.aimInRange ? 'YES' : (webTarget() ? 'too far' : 'no target'), s.aimInRange ? 'on' : 'off');
+  /* THE LOCK IS ON THE READOUT because "why did my web not fire" has exactly two answers under this
+     scheme — no target, or a target out of range — and the player must be able to tell them apart
+     without guessing which one the dim crosshair meant. */
+  set('v-lock', targetLock.has ? `${targetLock.point.y.toFixed(2)} y  (${lockMark.onScreen ? 'on screen' : 'off screen'})` : 'none — LMB to lock',
+    targetLock.has ? 'on' : 'off');
+  set('v-src', targetLock.has ? 'LOCK' : (aimHit ? 'crosshair' : '—'));
+  set('v-latch', character.latched ? 'HELD — space to launch' : 'no', character.latched ? 'on' : 'off');
+  set('v-webs', `${stats.webs} fired · ${character.releases} launched`);
   const g = stats.groundPerSwing;
   const mean = g.length ? g.reduce((x, y) => x + y, 0) / g.length : 0;
   set('v-per', g.length ? `${mean.toFixed(2)} u (n=${g.length})` : '—');
@@ -311,17 +357,29 @@ function frame() {
 
   const fwd = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
   const side = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
+  const target = webTarget();
   character.update(dt, {
     x: side, y: fwd,
     sprint: held.has('Shift'),
     boost: held.has('Shift') ? 1 : 0,
-    jump: held.has(' '),
-    fire: fireHeld,
+    /* SPACE IS ONE VERB IN TWO STATES — jump on your feet, release-and-launch off a swing. The
+       controller edge-triggers it internally and spends the press on exactly one of them. */
+    jump: held.has(' ') || spacePulse,
+    /* THE WEB IS AN EVENT, NOT A HELD AXIS: one right-click, one web. Consumed here so a press that
+       arrives between frames is never lost and never counted twice. */
+    web: webPressed,
     steer: side,                    // while roped, A/D steer the arc instead of strafing
     lift: fwd,                      // while roped, W/S reel the rope in and out
-    aimPoint: aimHit,
+    /* THE LOCK IS THE TARGET WHEN THERE IS ONE. `reachFromAim` measures range from the BODY, so the
+       same point drives the attach and the crosshair's verdict — no second copy of "in range". */
+    aimPoint: target,
   });
+  webPressed = false;
+  spacePulse = false;                 // both edges are consumed by exactly one frame, then cleared
   reticle.setInRange(!!character.state.aimInRange);
+  lockMark.setInRange(!!character.state.aimInRange);
+  targetLock.tick(dt);
+  if (lockFlash > 0) lockFlash = Math.max(0, lockFlash - dt * 2.5);
 
   /* --- the measurements. GROUND PER SWING is banked on the attach→detach EDGE, because that is the
      unit the mechanic is scored in and an average over frames would weight a long hang the same as a
@@ -367,6 +425,11 @@ function frame() {
 
   renderer.setRenderTarget(null);
   renderer.render(scene, rig.camera);
+  /* THE LOCK MARKER IS PLACED *AFTER* THE RENDER, and that is a real ordering requirement rather than
+     housekeeping: it projects through `camera.matrixWorldInverse`, which is what `renderer.render`
+     freshens. Place it before, and the mark trails the camera by one frame — invisible standing still
+     and obvious at 7 u/s, which is precisely when a player is looking at it. */
+  lockMark.place(rig.camera, targetLock.point);
   frameEnd();
   updateHud(dt);
 
@@ -396,9 +459,27 @@ window.__aim = { pt: _aimPt, get hit() { return !!aimHit; }, get inRange() { ret
    mouse-down while locked — so a lost lock silently turns "hold the button and fly" into "stand
    still"). A bench that cannot see its own input cannot tell a bad tuning from a dropped click. */
 window.__input = {
-  get fire() { return fireHeld; },
+  /* A-LOCK: THREE receipts now, not one. `fire` used to be the whole trigger; under this scheme the
+     verbs are LEFT (lock), RIGHT (web) and SPACE (launch), and a probe has to be able to prove each
+     one arrived — the same rule that caught three benches of nonsense, applied to three buttons.
+     `lmb`/`rmb` read the pointer-lock module's OWN button state, so they cannot agree with a probe
+     that merely believes it clicked. */
+  get fire() { return lockAim.down(2); },        // the web button, under its old probe name
+  get lmb() { return lockAim.down(0); },
+  get rmb() { return lockAim.down(2); },
+  get space() { return held.has(' ') || spacePulse; },
   get locked() { return lockAim.locked; },
   get keys() { return [...held]; },
+};
+/* THE LOCK, EXPOSED, so a probe can prove the thing the owner asked for by name: that a lock PERSISTS
+   and does not silently follow the crosshair (the aliasing bug `createTargetLock` exists to prevent —
+   a probe that only ever samples it on the frame it was taken could never see the difference). */
+window.__lock = {
+  get has() { return targetLock.has; },
+  get point() { return targetLock.has ? { ...targetLock.point } : null; },
+  get age() { return targetLock.age; },
+  get marker() { return { visible: lockMark.visible, onScreen: lockMark.onScreen, screen: lockMark.screen }; },
+  clear: () => targetLock.clear(),
 };
 window.__spawn = spawn;
 window.__setAimMode = (m) => { SWING.aimMode = m === 'auto' ? 'auto' : 'point'; return SWING.aimMode; };

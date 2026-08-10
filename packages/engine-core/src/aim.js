@@ -62,6 +62,168 @@ export function resolveAimPoint(camera, world, out, { maxDist = 8, radius = 0.05
 }
 
 /* ---------------------------------------------------------------------------------------------
+   createTargetLock() → { lock, clear, has, point, age, tick }        (A-LOCK, 2026-08-09)
+   ------------------------------------------------------------------------------------------
+   THE OWNER'S NEW SCHEME, in one sentence of his: "you left click to LOCK ONTO a place, and then you
+   right click to shoot a web". So the aim splits into two moments — CHOOSING a point and USING it —
+   and the thing between them is a stored world position that outlives the frame it was picked in.
+
+   WHY THIS IS AN ENGINE ABILITY AND NOT FOUR LINES IN THE LAB. Because those four lines contain a bug
+   that is invisible until it bites, and it is a bug this repo has the shape of already:
+   `resolveAimPoint` writes into a REUSED out-parameter (the no-hot-alloc invariant demands it — one
+   `{x,y,z}` per consumer, rewritten every frame). Store that object as "the lock" and the lock is not
+   a lock at all: it is a live alias of the crosshair, silently following your view, and every
+   downstream range check answers about where you are looking NOW. It would look correct in every
+   still screenshot and be wrong in every frame of motion. So the one job this module has is to COPY,
+   and it exists so that job is done once, in the place the next aimed verb will also reach for.
+
+   `age` is seconds since the lock was taken (`tick(dt)` to advance it) — a consumer that wants a lock
+   to expire has the number; nothing here expires anything on its own, because a lock the game quietly
+   dropped is exactly the kind of latched-state bug this repo keeps writing down.
+
+   C++ anchor: a `std::optional<vec3>` with value semantics. The whole point is that `lock()` copies
+   rather than storing a pointer to someone else's frame buffer.
+   --------------------------------------------------------------------------------------------- */
+export function createTargetLock() {
+  const pt = { x: 0, y: 0, z: 0 };
+  let has = false, age = 0;
+  return {
+    /* Returns true if a lock was taken. A null point (the player clicked at the sky) is NOT an error
+       and is NOT a clear either — it simply takes no lock, so an existing one survives a fumbled
+       click. Clearing is an explicit verb. */
+    lock(p) {
+      if (!p || typeof p.x !== 'number') return false;
+      pt.x = p.x; pt.y = p.y; pt.z = p.z;      // COPY. See the header — this line is the module.
+      has = true; age = 0;
+      return true;
+    },
+    clear() { has = false; age = 0; },
+    tick(dt) { if (has && dt > 0) age += dt; },
+    get has() { return has; },
+    get age() { return age; },
+    /* The stored point, or null. Returned by reference for the same no-hot-alloc reason — a consumer
+       hands it straight to a model as `axes.aimPoint` — and it is only ever written by `lock()`. */
+    get point() { return has ? pt : null; },
+  };
+}
+
+/* ---------------------------------------------------------------------------------------------
+   createLockMarker({ container, size, color }) → { place, setVisible, setInRange, element, dispose }
+   ------------------------------------------------------------------------------------------
+   THE LOCK MADE VISIBLE — the owner asked for this by name: "it should be VISIBLE — a marker on the
+   locked point — and it should persist so you can see what you are about to web".
+
+   IT IS A DOM ELEMENT, NOT A MESH, and that is a deliberate choice with three consequences worth the
+   ink. (1) It keeps this module free of THREE, which is the property that lets it sit next to
+   `resolveAimPoint` — the projection below reads the camera's two matrices by hand, exactly as
+   `resolveAimPoint` reads `matrixWorld` by hand. (2) A screen-space mark stays a constant, readable
+   size at 1 u and at 30 u, where a world-space sphere becomes a dot you cannot find — and "where is
+   my lock" is the question it exists to answer. (3) It cannot be occluded by the geometry it is
+   stuck to, which for a marker ON a facade is the difference between an affordance and a peekaboo.
+
+   AN OFF-SCREEN LOCK IS CLAMPED TO THE EDGE rather than hidden, because "I locked something and then
+   looked away" must not read as "my lock is gone". It dims (`.off`) so the two cases stay distinct.
+   Behind the eye it is hidden outright — a clamped mark for something behind you points the wrong
+   way, which is worse than no mark.
+
+   `place(camera, point, opts)` is called once per frame from the consumer's loop, AFTER the render,
+   because `camera.matrixWorldInverse` is what the renderer freshens — calling it before renders the
+   marker one frame stale, which on a fast swing is visible.
+   --------------------------------------------------------------------------------------------- */
+let _lockStyleInjected = false;
+function injectLockStyle() {
+  if (_lockStyleInjected) return;
+  _lockStyleInjected = true;
+  const s = document.createElement('style');
+  s.textContent = `
+    .lgr-lock {
+      position: fixed; left: 0; top: 0; z-index: 44; pointer-events: none; display: none;
+      width: var(--lgr-lock-size, 30px); height: var(--lgr-lock-size, 30px);
+      margin-left: calc(var(--lgr-lock-size, 30px) / -2); margin-top: calc(var(--lgr-lock-size, 30px) / -2);
+      opacity: 1; transition: opacity 0.12s linear;
+      will-change: transform;
+    }
+    .lgr-lock.on { display: block; }
+    .lgr-lock.off { opacity: 0.4; }
+    .lgr-lock.out-of-range i { background: var(--lgr-lock-dim, #8a7a5e); }
+    /* four corner brackets — the classic "target acquired" read, and the open middle keeps the
+       actual locked pixel visible, same rule as the reticle. */
+    .lgr-lock i { position: absolute; display: block; background: var(--lgr-lock-color, #f0884a); }
+    .lgr-lock i:nth-child(1) { left: 0; top: 0; width: 34%; height: 2px; }
+    .lgr-lock i:nth-child(2) { left: 0; top: 0; width: 2px; height: 34%; }
+    .lgr-lock i:nth-child(3) { right: 0; top: 0; width: 34%; height: 2px; }
+    .lgr-lock i:nth-child(4) { right: 0; top: 0; width: 2px; height: 34%; }
+    .lgr-lock i:nth-child(5) { left: 0; bottom: 0; width: 34%; height: 2px; }
+    .lgr-lock i:nth-child(6) { left: 0; bottom: 0; width: 2px; height: 34%; }
+    .lgr-lock i:nth-child(7) { right: 0; bottom: 0; width: 34%; height: 2px; }
+    .lgr-lock i:nth-child(8) { right: 0; bottom: 0; width: 2px; height: 34%; }
+  `;
+  document.head.appendChild(s);
+}
+
+/* World point → normalised screen, by hand. `matrixWorldInverse` is the VIEW matrix and
+   `projectionMatrix` the projection; THREE stores both COLUMN-MAJOR, so element [row + 4*col] — i.e.
+   row 0 is e[0], e[4], e[8], e[12]. Returns false when the point is at or behind the eye plane
+   (clip w <= 0), which is the case a naive divide turns into a mirrored ghost on the wrong side of
+   the screen. C++ anchor: this is `gl_Position = P * V * vec4(p,1)` done on the CPU. */
+export function projectToScreen(camera, x, y, z, out) {
+  if (!camera || !camera.matrixWorldInverse || !camera.projectionMatrix || !out) return false;
+  const v = camera.matrixWorldInverse.elements, p = camera.projectionMatrix.elements;
+  const ex = v[0] * x + v[4] * y + v[8] * z + v[12];
+  const ey = v[1] * x + v[5] * y + v[9] * z + v[13];
+  const ez = v[2] * x + v[6] * y + v[10] * z + v[14];
+  const cx = p[0] * ex + p[4] * ey + p[8] * ez + p[12];
+  const cy = p[1] * ex + p[5] * ey + p[9] * ez + p[13];
+  const cw = p[3] * ex + p[7] * ey + p[11] * ez + p[15];
+  if (!(cw > 1e-6)) return false;                       // behind the eye (also catches NaN)
+  out.x = (cx / cw) * 0.5 + 0.5;                        // 0..1, left→right
+  out.y = 0.5 - (cy / cw) * 0.5;                        // 0..1, top→bottom (screen y is flipped)
+  return true;
+}
+
+export function createLockMarker({ container = document.body, size = 30, color = '#f0884a', margin = 26 } = {}) {
+  injectLockStyle();
+  const el = document.createElement('div');
+  el.className = 'lgr-lock';
+  el.setAttribute('aria-hidden', 'true');
+  el.style.setProperty('--lgr-lock-size', `${size}px`);
+  el.style.setProperty('--lgr-lock-color', color);
+  for (let i = 0; i < 8; i++) el.appendChild(document.createElement('i'));
+  container.appendChild(el);
+  const _s = { x: 0, y: 0 };                    // hoisted: the projection's out-param (invariant #7)
+  let visible = false, onScreen = false, sx = 0, sy = 0;
+  const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+  return {
+    element: el,
+    /* Returns true if the point projected in FRONT of the eye. The consumer needs that answer anyway
+       (a HUD may want to say "behind you"), and returning it beats making the caller re-project. */
+    place(camera, point) {
+      if (!visible || !point) { el.classList.remove('on'); return false; }
+      const w = window.innerWidth, h = window.innerHeight;
+      if (!projectToScreen(camera, point.x, point.y, point.z, _s)) {
+        el.classList.remove('on');
+        onScreen = false;
+        return false;
+      }
+      const px = _s.x * w, py = _s.y * h;
+      onScreen = px >= 0 && px <= w && py >= 0 && py <= h;
+      sx = clamp(px, margin, w - margin);
+      sy = clamp(py, margin, h - margin);
+      el.style.transform = `translate3d(${sx}px, ${sy}px, 0)`;
+      el.classList.add('on');
+      el.classList.toggle('off', !onScreen);
+      return true;
+    },
+    setVisible(v) { visible = !!v; if (!visible) el.classList.remove('on'); },
+    setInRange(v) { el.classList.toggle('out-of-range', !v); },
+    get visible() { return visible; },
+    get onScreen() { return onScreen; },
+    get screen() { return { x: sx, y: sy }; },
+    dispose() { el.remove(); },
+  };
+}
+
+/* ---------------------------------------------------------------------------------------------
    applyLook(orbit, dx, dy, opts) — THE ONE PLACE THE MOUSE→ORBIT SIGN CONVENTION LIVES.
    ------------------------------------------------------------------------------------------
    WHY THIS FUNCTION EXISTS AT ALL, rather than a `-dy` at each call site. The owner's report was
@@ -184,31 +346,67 @@ export function createAimReticle({ container = document.body, size = 26, color =
 export function createPointerLockAim({
   element,
   onLook = null,        // (movementX, movementY) — raw pixel deltas while locked
-  onFire = null,        // (down: boolean) — the press edge and the release edge
+  onFire = null,        // (down: boolean) — the press edge and the release edge of the LEFT button
+  onButton = null,      // (button: number, down: boolean) — EVERY button, including 2 (right). A-LOCK.
   onLockChange = null,  // (locked: boolean)
 } = {}) {
   let locked = false, firing = false;
+  /* A-LOCK (2026-08-09): THE RIGHT BUTTON IS A SECOND VERB, and `onFire` could not carry it.
+     The owner's scheme binds LEFT to "lock onto a place" and RIGHT to "shoot the web", so this module
+     had to stop being a one-trigger device. `onFire` is UNCHANGED — still the left button, still the
+     press/release edges — because metropolis binds the web to it and this arc is not allowed to break
+     that (Rule 7: the call sites were grepped; metropolis/main.js:661 is the other one). `onButton` is
+     the general form beside it, and a consumer picks whichever it needs.
+     `held` is the state a lost lock has to clear, and it is a SET rather than a pair of booleans so
+     adding a middle-click verb later is not a third latch to remember to release. */
+  const held = new Set();
 
   const setFiring = (v) => { if (firing === v) return; firing = v; if (onFire) onFire(v); };
+  const setButton = (btn, down) => {
+    if (down === held.has(btn)) return;         // edges only — a repeat is not an edge
+    if (down) held.add(btn); else held.delete(btn);
+    if (onButton) onButton(btn, down);
+  };
+  /* THE ONE EXIT PATH, and everything the entry path took goes back through it. The repo's recurring
+     bug class is a latched input a lost lock forgot to clear (this file's own header names it), and
+     a SECOND button doubled the surface — a right button stuck down means a rope you cannot re-fire. */
+  const clearHeld = () => {
+    setFiring(false);
+    for (const b of [...held]) setButton(b, false);
+  };
 
   const onMove = (e) => { if (locked && onLook) onLook(e.movementX || 0, e.movementY || 0); };
-  const onDown = (e) => { if (locked && e.button === 0) { setFiring(true); e.preventDefault(); } };
-  const onUp = (e) => { if (e.button === 0) setFiring(false); };
+  const onDown = (e) => {
+    if (!locked) return;
+    if (e.button === 0) setFiring(true);
+    setButton(e.button, true);
+    e.preventDefault();
+  };
+  const onUp = (e) => {
+    if (e.button === 0) setFiring(false);
+    setButton(e.button, false);
+  };
+  /* A RIGHT-CLICK VERB AND A CONTEXT MENU CANNOT COEXIST. Chrome suppresses the menu under pointer
+     lock, but the press that ACQUIRES the lock is not yet locked — so without this the very first
+     right-click of a session pops the menu over the canvas and eats the web. Swallowed on the element
+     rather than the document, so the rest of the page keeps its normal menu. */
+  const onMenu = (e) => { e.preventDefault(); };
   const onWheel = (e) => { if (locked) { e.preventDefault(); e.stopPropagation(); } };
   const onChange = () => {
     const now = document.pointerLockElement === element;
     if (now === locked) return;
     locked = now;
-    if (!locked) setFiring(false);              // exit path clears what the entry path took
+    if (!locked) clearHeld();                   // exit path clears what the entry path took
     if (onLockChange) onLockChange(locked);
   };
-  const onError = () => { if (locked) { locked = false; setFiring(false); if (onLockChange) onLockChange(false); } };
+  const onError = () => { if (locked) { locked = false; clearHeld(); if (onLockChange) onLockChange(false); } };
 
   document.addEventListener('pointerlockchange', onChange);
   document.addEventListener('pointerlockerror', onError);
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mousedown', onDown);
   document.addEventListener('mouseup', onUp);
+  if (element) element.addEventListener('contextmenu', onMenu);
   // capture:true + passive:false so the swallow beats any zoom handler already bound to the canvas.
   window.addEventListener('wheel', onWheel, { capture: true, passive: false });
 
@@ -224,12 +422,17 @@ export function createPointerLockAim({
     exit() { if (locked && document.exitPointerLock) document.exitPointerLock(); },
     get locked() { return locked; },
     get firing() { return firing; },
+    /* The live button state, for a consumer that polls rather than latching on the callback — and for
+       a PROBE, which must be able to assert the trigger actually arrived (swing-ledger.md technique
+       #5: any harness that synthesises input must assert the input ARRIVED). */
+    down(btn) { return held.has(btn); },
     dispose() {
       document.removeEventListener('pointerlockchange', onChange);
       document.removeEventListener('pointerlockerror', onError);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('mouseup', onUp);
+      if (element) element.removeEventListener('contextmenu', onMenu);
       window.removeEventListener('wheel', onWheel, { capture: true });
     },
   };
