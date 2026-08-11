@@ -44,6 +44,7 @@
     #state-chip.walk { background: #2b3a2b; color: #7fd6a2; }
     #state-chip.air  { background: #3a352b; color: #e8c66a; }
     #state-chip.swing{ background: #3a2b2b; color: #f0884a; }
+    #state-chip.climb{ background: #2b333a; color: #7fc4f0; }
 
     /* ---- THE DOCK. The layout is an ARGUMENT — that is the whole point of the lab. ---- */
     #dock {
@@ -101,6 +102,10 @@
     <div class="row"><span class="k">anchor rise</span><span class="v" id="v-rise">—</span></div>
     <div class="row"><span class="k">line kind</span><span class="v" id="v-kind">—</span></div>
     <div class="row"><span class="k">aim in range</span><span class="v" id="v-aim">no</span></div>
+    <div class="row"><span class="k">web range</span><span class="v" id="v-range">—</span></div>
+    <hr />
+    <div class="row"><span class="k">wall cling</span><span class="v" id="v-cling">no</span></div>
+    <div class="row"><span class="k">climbs · roofs</span><span class="v" id="v-climb">0 · 0</span></div>
     <hr />
     <div class="row"><span class="k">webs fired</span><span class="v" id="v-webs">0</span></div>
     <div class="row"><span class="k">ground/swing</span><span class="v" id="v-per">—</span></div>
@@ -147,6 +152,8 @@
     <br />
     <b>WASD</b> move &amp; steer the arc &nbsp;·&nbsp; <b>shift</b> sprint &nbsp;·&nbsp; <b>W/S</b> reel while roped &nbsp;·&nbsp;
     <b>V</b> camera &nbsp;·&nbsp; <b>R</b> respawn &nbsp;·&nbsp; <b>T</b> aim mode
+    <br />
+    <b>W at a wall</b> CLIMB it — keep holding W over the lip and you top out on the roof (<b>S</b> climbs down)
   </div>
 
   <script type="module" src="./main.js"></script>

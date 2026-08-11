@@ -13,7 +13,7 @@ export * as THREE from 'three';
 export { createEngine } from './src/createEngine.js';
 export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.js';
 export { createCityWorld } from './src/createCityWorld.js';
-export { createCameraRig, CAM } from './src/camera-rig.js';
+export { createCameraRig, CAM, cameraNearRadius } from './src/camera-rig.js';
 export { measureBounds, autoFrame } from './src/asset-viewer.js';   // Arc A-VIEW: bbox auto-framing
 export { createCameraPath, bankAngleFromCurvature } from './src/camera-path.js';
 export { createCity, makePalm, PROFILES, PROFILE_KEYS, LAYOUT, mulberry32, tintTower, seabedY, SEABED } from './src/citygen.js';   // A-FISH: seabedY is THE shared depth function — the seabed mesh and the physics sampler both call it
@@ -117,7 +117,7 @@ export { createBallistics } from './src/createBallistics.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
 // A-CHAR (2026-08-09): ONE character — walk/sprint/JUMP/fall/land + collision + a crosshair + the web as an ABILITY, with third-person and first-person cameras. Composes the walker (horizontal) + createGrappleModel (the rope); the vertical axis the walker never had lives here.
 export { createCharacterController } from './src/character.js';
-export { createBoxArena, swingableHeight } from './src/box-arena.js';   // A-LAB: parameterised proving-ground geometry (flat floor + tower grid) that hands back the four-function world bag
+export { createBoxArena, swingableHeight, swingableRope } from './src/box-arena.js';   // A-LAB: parameterised proving-ground geometry (flat floor + tower grid) that hands back the four-function world bag
 export { createColliderWorld } from './src/collide.js';                 // A-LAB: the collider itself — was reachable ONLY by booting the whole procedural city
 export { createParticles } from './src/createParticles.js';
 export { createDecals } from './src/createDecals.js';

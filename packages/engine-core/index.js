@@ -26,7 +26,7 @@ export { createEngine } from './src/createEngine.js';
 // Generality fix (2026-07-08): the core/city split — future projects boot createEngineCore without the city.
 export { createEngineCore, showWebGLUnsupported } from './src/createEngineCore.js';
 export { createCityWorld } from './src/createCityWorld.js';
-export { createCameraRig, CAM } from './src/camera-rig.js';
+export { createCameraRig, CAM, cameraNearRadius } from './src/camera-rig.js';
 // C2-ish flight path + curvature-derived banking (2026-08-01) — pairs with camera-rig's setEye(pos,lookDir,roll).
 export { createCameraPath, bankAngleFromCurvature } from './src/camera-path.js';
 // Arc A-VIEW — auto-frame a camera-rig from a loaded object's bounding box (the asset viewer's one new ability).
@@ -360,7 +360,7 @@ export { createCharacterController } from './src/character.js';
    projects/swing-lab hit on its first line. `createBoxArena` is the level on top of it: a flat floor
    and a parameterised tower grid that hands back the four-function world bag every body here speaks,
    sized from the SWING's own numbers (`swingableHeight`) rather than copied off a city. */
-export { createBoxArena, swingableHeight } from './src/box-arena.js';
+export { createBoxArena, swingableHeight, swingableRope } from './src/box-arena.js';
 export { createColliderWorld } from './src/collide.js';
 
 // Lesson M6 — GPU particle system: ping-pong FBO sim (pos/vel state textures) + scissor-ring spawn +

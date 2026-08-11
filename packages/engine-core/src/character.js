@@ -142,6 +142,27 @@ export function createCharacterController(opts = {}) {
      `groundAt` every other part of this controller reads, which is also why it needs no new query.
      0.08 u ≈ 0.5 m at the metropolis scale: enough that the near plane (0.02) never sees through. */
   const camGroundClear = opts.camGroundClear != null ? opts.camGroundClear : 0.08;
+  /* ---- A-CLIMB (2026-08-10): HOW MUCH ROOM THE EYE ITSELF MUST KEEP FROM A SOLID. ---------------
+     THE OWNER SAID HE WAS STILL CLIPPING THROUGH BUILDINGS AND EVERY CHECK SAID HE WAS NOT. He was
+     right; the checks were measuring the wrong point. `segmentHit` sweeps and `enclosed` tests are
+     both about the eye POSITION, and a camera does not render from a point — it renders from a NEAR
+     PLANE, a rectangle `near` in front of the eye whose corners stick out `hypot(near, near·tan(fov/2)·aspect,
+     near·tan(fov/2))` from it. Measured in projects/swing-lab: through a real swing the eye was
+     enclosed on 0 of 260 frames (which is what the old probe asserted, and it was true) while a
+     near-plane CORNER was inside a solid on 52 — 20% of the arc — with the eye 0.0200 u off the
+     facade and the corners reaching 0.0320 u. 0.032 > 0.020, so the frustum's front face was in the
+     wall while the eye was outside it, and the frame filled with the inside of a building.
+     WHY THE EYE GETS THAT CLOSE AT ALL is not a bug in the spring arm: it is the COLLAPSE branch
+     below (no room for a chase ⇒ sit at the head) plus first person, and a body hanging off a web is
+     FLUSH WITH THE FACADE IT WEBBED by construction (pilot.js's A-SOLID note) — 0.02 u off it, which
+     is the grapple's own `wallStop`. So the head is a legal place for the BODY and an illegal place
+     for a CAMERA, and nothing had ever measured the difference.
+     THE FIX IS A CLEARANCE, NOT A SWEEP: after every branch has chosen a position, push the eye out
+     of anything within `camEyeClear` along the axis that is blocking. Six rays, bounded, no state.
+     DEFAULTS TO 0 (OFF) so every existing consumer is byte-identical — the same opt-in shape
+     `third.distMax` and `fov` use above. A project switches it on by naming its own number, and
+     `cameraNearRadius()` in camera-rig.js computes the honest one from its camera. */
+  const camEyeClear = opts.camEyeClear != null ? opts.camEyeClear : 0;
   // the height up the body the horizontal collision sphere sits at (see the feet-pass note below)
   const collideYOff = opts.collideYOff != null ? opts.collideYOff : eyeHeight * 0.5;
   const sensitivity = opts.sensitivity != null ? opts.sensitivity : 0.0022;   // rad per pixel
@@ -194,6 +215,42 @@ export function createCharacterController(opts = {}) {
   let fovNow = fov.base;
   let view = opts.view === 'first' ? 'first' : 'third';   // THIRD is the default (the owner's ruling)
 
+  /* ---- A-CLIMB (2026-08-10): WALL CLING, LIFTED INTO THE CHARACTER. -----------------------------
+     swing-ledger.md OPEN #2, closed: "the character has no wall CLING… cling lives in the `!anchor`
+     branch of `createGrappleModel.step`, which this controller never runs, so it is unreachable."
+     That was exactly right, and this is the lift. The RULE is pilot.js's own, term for term, because
+     two climbs with two rules is how a body behaves differently depending on which integrator happens
+     to own it: a short ray at arm's length says whether a facade is there, and the LIFT AXIS being
+     held is the opt-in. Sticking on mere CONTACT is refuted and stays refuted (pilot.js's note: it
+     shipped a swinger that touched a wall on its first fall and froze at speed 0 — most of a city is
+     within arm's reach of a wall, so "near a wall" cannot be the trigger).
+     WHAT IS GENUINELY NEW HERE, AND WHY THE PILOT VERSION COULD NEVER GET YOU TO A ROOF: the pilot
+     cling has no TOP-OUT. Climb to the lip and the ray goes clear, cling ends, gravity resumes, and
+     you fall back down the face you just climbed — the wall is climbable and the building is not.
+     `mantle` is the missing half: the frame the wall runs out from under a CLIMBING body, ask whether
+     there is a roof a step ahead at about the height your feet have reached, and if so put the body
+     on it. It is a short deliberate move (the standard mantle), not a physics hope, so it cannot
+     half-succeed — and it lands ON a solid by construction, never inside one.
+     THE PROBE RAY STARTS AT THE FEET, and that is what makes the top-out land where it should: a ray
+     from mid-body would go clear while the feet were still `collideYOff` BELOW the roof, and the
+     mantle would be asked to step onto a surface above its own head.
+     DEFAULTS OFF, like every other ability added to this file after its consumers existed. */
+  /* The climb's two physical numbers come from the GRAPPLE PROFILE when there is one, so a project
+     that already tuned `clingReach`/`climbRate` for its scale does not get a second, silently
+     different copy of them here. Stated once, read twice. */
+  const _gp = opts.grappleProfile || {};
+  const cling = Object.assign({
+    enabled: false,
+    reach: _gp.clingReach != null ? _gp.clingReach : 0.24,     // u — how close a facade must be
+    climbRate: _gp.climbRate != null ? _gp.climbRate : 1.15,   // u/s up the wall on a held lift
+    probeR: 0.05,      // the cling ray's thickness — pilot.js's own number
+    probeY: 0.02,      // u above the FEET the ray is cast from (see the note above)
+    mantle: 0.30,      // u forward the top-out step goes — must exceed the walker's own stand-off
+                       // (radius 0.09 + the resolver's 0.02 SKIN) or it steps back onto the facade
+    mantleUp: 0.22,    // u above the feet a lip may still be and be mantled onto
+    mantleDrop: 0.30,  // u below the feet a roof may be and still count (a lower lip is a DROP, not a top-out)
+  }, opts.cling || {});
+
   /* ---- THE SHARED BODY STATE. This exact object is what `createGrappleModel.step` mutates, which is
      why it carries the pilot vocabulary (vx/vy/vz/yaw/pitch/bank/speed/quat/anchor/rope) verbatim.
      A conversion layer between "my character" and "the pilot state" is precisely the seam a momentum
@@ -217,6 +274,9 @@ export function createCharacterController(opts = {}) {
      framing and the reason it is one key and not two. ---- */
   let webHeld = false, webLatched = false;
   let webs = 0, releases = 0, lastReleaseSpeed = 0, lastReleaseY = 0;
+  // A-CLIMB: the cling's whole state is "am I stuck to a wall this frame", plus two counters a probe
+  // reads instead of inferring the ability from a y trace.
+  let clinging = false, climbs = 0, mantles = 0, clingT = 0;
   const _euler = new THREE.Euler();          // hoisted: an Euler per frame is a hot-path allocation
 
   /* THE ONE GROUND ANSWER. Every part of this controller — the walk floor, the fall test, the landing
@@ -400,11 +460,73 @@ export function createCharacterController(opts = {}) {
       grounded = false; coyote = 0;
       bobT *= (1 - Math.min(1, dt * 4));
       airT += dt;
+      clinging = false;                          // a rope owns the vertical; the two must never both run
       if (state.y > apex) apex = state.y;
     } else {
       /* 2b) FREE — walking, running, jumping, falling. All four are the same integrator; what changes
          is whether there is a floor under the feet and how much of the accel the air lets you use. */
       const prevY = state.y;
+
+      /* --- 2b-i) WALL CLING + CLIMB (A-CLIMB) — BEFORE gravity, because clinging is the absence of
+         falling, and after nothing, because it must be able to take the frame away from the fall.
+         The ray is horizontal along the LOOK yaw rather than `state.yaw`: the body's facing is derived
+         from MOTION and freezes the moment you stop (pilot.js pays for that exact fact in its steer
+         fallback), and a climber is by definition not moving horizontally. You climb where you look. */
+      const wasClinging = clinging;
+      const liftAx = input.lift || 0;
+      clinging = false;
+      if (cling.enabled && world.segmentHit && liftAx !== 0) {
+        const cfx = Math.sin(lookYaw), cfz = Math.cos(lookYaw);
+        const cy = state.y + cling.probeY;
+        const t = world.segmentHit(state.x, cy, state.z, state.x + cfx * cling.reach, cy, state.z + cfz * cling.reach, cling.probeR);
+        if (t < 1) {
+          clinging = true;
+          if (!wasClinging) climbs++;
+          clingT += dt;
+          /* Hold position against the facade and climb under the lift axis. Zeroing the horizontal
+             velocity is what makes it read as ADHESION rather than a very slow slide — pilot.js's
+             own wording and its own factor. The walker is told BOTH halves (position then velocity),
+             because `setPosition` zeroes velocity and the free branch reads `walker.vx` back out:
+             the exact leak `handOff()` exists to plug, arriving here by a second route. */
+          state.vy = liftAx * cling.climbRate;
+          state.y += state.vy * dt;
+          state.vx *= 0.12; state.vz *= 0.12;
+          walker.setPosition(state.x, state.z);
+          walker.setVelocity(state.vx, state.vz);
+          walker.setYaw(lookYaw);
+          grounded = false; coyote = 0; airT += dt; buffered = 0;
+          state.grounded = false; state.airborne = false; state.clinging = true;
+          state.speed = Math.hypot(state.vx, state.vy, state.vz);
+          _euler.set(0, state.yaw, 0, 'YXZ'); state.quat.setFromEuler(_euler);
+          tickChase(dt);
+          return state;                          // the climb owns this frame entirely
+        }
+      }
+      /* --- 2b-ii) THE TOP-OUT (MANTLE). The wall ran out from under a body that was climbing UP it.
+         Without this the climb is a dead end by construction — you reach the lip, the ray goes clear,
+         and gravity takes back everything you climbed. Ask whether there is a roof one step ahead at
+         roughly the height the feet have reached; if there is, stand on it.
+         THE THREE GATES ARE ALL NECESSARY: `wasClinging` (this is a top-out, not a jump); `liftAx > 0`
+         (you were going UP — letting go of the axis must still drop you past the facade, which is the
+         opt-in half of cling); and the height window, which is what stops a body that climbed off the
+         SIDE of a tower being teleported down onto the street 5 u below. */
+      if (wasClinging && liftAx > 0 && world.surfaceAt) {
+        const cfx = Math.sin(lookYaw), cfz = Math.cos(lookYaw);
+        const tx = state.x + cfx * cling.mantle, tz = state.z + cfz * cling.mantle;
+        const top = world.surfaceAt(tx, tz, state.y + cling.mantleUp, footR);
+        if (top > -Infinity && top <= state.y + cling.mantleUp && top >= state.y - cling.mantleDrop) {
+          state.x = tx; state.z = tz; state.y = top + skim;
+          walker.setPosition(tx, tz); walker.setVelocity(0, 0);
+          state.vx = 0; state.vy = 0; state.vz = 0;
+          grounded = true; coyote = coyoteTime; airT = 0; apex = -Infinity;
+          landings++; mantles++;
+          state.grounded = true; state.airborne = false; state.clinging = false;
+          state.speed = 0;
+          _euler.set(0, state.yaw, 0, 'YXZ'); state.quat.setFromEuler(_euler);
+          tickChase(dt);
+          return state;
+        }
+      }
 
       // --- VERTICAL: gravity, then the floor, then the two forgiveness timers.
       state.vy -= gravity * dt;
@@ -484,8 +606,9 @@ export function createCharacterController(opts = {}) {
       state.quat.setFromEuler(_euler);
     }
     state.grounded = grounded;
-    state.airborne = !grounded && !swinging;
+    state.airborne = !grounded && !swinging && !clinging;
     state.swinging = swinging;
+    state.clinging = clinging;
     tickChase(dt);              // the camera's own eases, ticked exactly once per frame (see tickChase)
     return state;
   }
@@ -533,13 +656,46 @@ export function createCharacterController(opts = {}) {
     if (outPos.y < g) outPos.y = g;
     return outPos;
   }
+  /* THE EYE CLEARANCE — the half of camera containment that a SWEEP structurally cannot do, for the
+     same reason the ground clamp was: a sweep decides where the eye may TRAVEL to, and says nothing
+     about the volume the frustum then occupies once it is there. See `camEyeClear` for the
+     measurement (0 eye frames enclosed, 52 near-plane-corner frames enclosed, on the same 260).
+     SIX AXIS RAYS, ZERO-RADIUS, PUSHED BY THE SHORTFALL. A zero-radius ray is the honest probe here
+     for the reason the ledger's REFUTED table gives: a radius INFLATES every box, so a fat ray from
+     a legally-placed eye reports "blocked" in every direction and the pushes cancel. Two passes,
+     because clearing an x wall can leave you short on z; a third would be chasing a corner case a
+     0.04 u budget cannot produce.
+     OPPOSITE FACES ARE A DEADLOCK BY DESIGN: in a gap narrower than 2·clear the two pushes cancel and
+     the eye stays put, which is right — there is nowhere to go, and the alternative is a camera that
+     oscillates between two walls. */
+  const _CLEAR_AXES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  function clearEye(outPos) {
+    const r = camEyeClear;
+    if (!(r > 0) || !world.segmentHit) return outPos;
+    for (let pass = 0; pass < 2; pass++) {
+      let moved = false;
+      for (let i = 0; i < 6; i++) {
+        const a = _CLEAR_AXES[i];
+        const t = world.segmentHit(outPos.x, outPos.y, outPos.z,
+          outPos.x + a[0] * r, outPos.y + a[1] * r, outPos.z + a[2] * r, 0);
+        if (t >= 1) continue;
+        const push = r * (1 - t);
+        outPos.x -= a[0] * push; outPos.y -= a[1] * push; outPos.z -= a[2] * push;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    return outPos;
+  }
+  // one exit for every branch of cameraPose, so a new branch cannot forget either guard
+  const placeEye = (outPos) => clearEye(clampToGround(outPos));
   function cameraPose(outPos = _pos, outDir = _dir) {
     lookDir(outDir);
     if (view === 'first') {
       outPos.x = state.x;
       outPos.y = state.y + eyeHeight + Math.sin(bobT * first.bobRate) * first.bob * (walker.moving && grounded ? 1 : 0);
       outPos.z = state.z;
-      return clampToGround(outPos);
+      return placeEye(outPos);
     }
     /* THE ARM IS SWEPT IN TWO STAGES, AND BOTH STAGES ARE LOAD-BEARING — found by looking at a
        screenshot, not by reading. The first version swept only the BACKWARD arm from an already-offset
@@ -570,12 +726,12 @@ export function createCharacterController(opts = {}) {
     }
     if (dist < third.minDist) {                                     // no room — sit at the head
       outPos.x = state.x; outPos.y = state.y + eyeHeight; outPos.z = state.z;
-      return clampToGround(outPos);
+      return placeEye(outPos);
     }
     outPos.x = px - outDir.x * dist;
     outPos.y = py - outDir.y * dist;
     outPos.z = pz - outDir.z * dist;
-    return clampToGround(outPos);
+    return placeEye(outPos);
   }
 
   /* A-LAB: the eased FOV for the CURRENT speed. Read HORIZONTAL speed, not the 3D magnitude — a
@@ -602,6 +758,7 @@ export function createCharacterController(opts = {}) {
       // the latch is state the entry path TOOK; a teleport is an exit path, so it clears it (the
       // repo's recurring bug class — a respawn that leaves you holding a rope to nowhere).
       webLatched = false; webHeld = false;
+      clinging = false;                          // …and so is a hand on a wall you have been moved off
     },
     setYaw(r) { lookYaw = r; state.yaw = r; walker.setYaw(r); },
     recenterPitch() { lookPitch = 0; },
@@ -612,8 +769,13 @@ export function createCharacterController(opts = {}) {
     state, walker,
     get view() { return view; },
     get grounded() { return grounded; },
-    get airborne() { return !grounded && !swinging; },
+    get airborne() { return !grounded && !swinging && !clinging; },
     get swinging() { return swinging; },
+    // A-CLIMB verification handles — counted, not inferred from a y trace (which cannot tell a climb
+    // from a zip). `mantles` is the one that matters: it is "I got ONTO the roof", not "I went up".
+    get clinging() { return clinging; },
+    get climbs() { return climbs; }, get mantles() { return mantles; },
+    get clingTime() { return clingT; },
     get moving() { return walker.moving; },
     get x() { return state.x; }, get y() { return state.y; }, get z() { return state.z; },
     get lookYaw() { return lookYaw; }, get lookPitch() { return lookPitch; },

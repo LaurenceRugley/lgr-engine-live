@@ -95,6 +95,33 @@ export function swingableHeight({ ropeMax = 3.2, arcClear = 0.45, skim = 0.06, g
   return groundY + skim + arcClear + ropeMax * (1 + margin);
 }
 
+/* ---- THE INVERSE (A-CLIMB, 2026-08-10), and it is the direction a real level is actually built in.
+   `swingableHeight` answers "how tall must a tower be for THIS rope"; every level after the first
+   asks the opposite — "the towers are what they are, how long a rope does this room afford?" The
+   owner asked for more web range, and the honest way to pick a number is to invert the rule the range
+   is constrained BY rather than to raise a constant until it feels right.
+
+   THE CONSTRAINT IS THE SAME ONE, rearranged. A full-length rope hung from `top` bottoms out at
+   `top - ropeMax`, and `arcClear` demands that clear the ground by its own margin, so
+
+       ropeMax  <  top - groundY - skim - arcClear
+
+   THERE IS DELIBERATELY NO `margin` ARGUMENT, and that is the interesting design decision rather than
+   an omission. The obvious shape — median tower times some safety fraction — has a fudge factor whose
+   only meaning is "a bit less than the most". Feeding a PERCENTILE instead makes the margin state a
+   fact about the level: derive the rope from `topAt(0.35)` and, by construction, 65% of the towers
+   clear the arc-bottom rule, because `need` comes out equal to the very tower you measured. One knob,
+   one meaning, and the answer is legible in the same breath as the question. (Two ways to express the
+   same margin is precisely the drift the project CLAUDE.md's rule 6 is about.)
+
+   WHY IT IS HERE AND NOT IN THE LAB THAT NEEDED IT. It is the arithmetic half of "state a level as
+   parameters", which is this module's whole job, and it belongs beside its own inverse — two
+   derivations of one rule, in one place, is how they stay each other's check. A project passes a
+   measured tower top and gets a rope; nothing about a lab, a city or a renderer is assumed. */
+export function swingableRope({ towerTop, arcClear = 0.45, skim = 0.06, groundY = 0, ropeMin = 0.55 } = {}) {
+  return Math.max(ropeMin, towerTop - groundY - skim - arcClear);
+}
+
 export function createBoxArena(opts = {}) {
   const P = {
     cols: 7, rows: 7,
@@ -230,6 +257,17 @@ export function createBoxArena(opts = {}) {
     get boxes() { return boxes; },
     params: P,
     get stats() { return stats(); },
+    /* THE SKYLINE AT A PERCENTILE (A-CLIMB, 2026-08-10). `stats` gives min/median/max, which answers
+       "how tall is this level" and cannot answer "how tall is the level for MOST of it" — the question
+       every derived traversal constant actually asks (see `swingableRope`). p=0 is the shortest tower,
+       1 the tallest, 0.5 the median. Sorting 80 numbers on demand is cheaper than caching a list that
+       `rebuild` could invalidate. */
+    topAt(p = 0.5) {
+      if (!boxes.length) return P.groundY;
+      const tops = boxes.map((b) => b.top).sort((a, b) => a - b);
+      const i = Math.min(tops.length - 1, Math.max(0, Math.floor(p * tops.length)));
+      return tops[i];
+    },
     /* A CLEAR SPAWN, because "where do I stand" is a question the level should answer and every probe
        in this repo has had to re-derive. Returns the centre of the widest street near (x,z), i.e. a
        point the arena guarantees is not inside a tower. */

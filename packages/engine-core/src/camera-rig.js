@@ -88,6 +88,23 @@ const CANONICAL_AZIMUTH  = Math.PI / 4;               // 45° — corner-on, bot
 /* Mode ids double as the keyboard keys that select them (4 / 5 / 6). */
 export const CAM = { PERSPECTIVE: 4, ISOMETRIC: 5, DIMETRIC: 6 };
 
+/* ---- HOW BIG A CAMERA ACTUALLY IS (A-CLIMB, 2026-08-10) --------------------------------------
+   A camera is not a point, and every containment check in this repo had been treating it as one.
+   It renders from a NEAR PLANE: a rectangle `near` in front of the eye, `2·near·tan(fov/2)` tall and
+   that times `aspect` wide. The furthest part of the frustum from the eye is therefore a corner of
+   that rectangle, at `hypot(near, halfW, halfH)` — and ANY geometry inside that radius is being
+   rendered from the inside.
+   MEASURED, in projects/swing-lab, on a real swing: the eye was enclosed on 0 of 260 frames while a
+   near-plane corner was inside a facade on 52 of them, with the eye 0.0200 u clear and the corners
+   reaching 0.0320 u. The eye check was correct AND the owner was right that he was clipping.
+   PASS THE MAXIMUM FOV, not the current one, when the project runs a speed-driven FOV cue: a
+   clearance budget that shrinks exactly when the frame widens is a budget that fails at speed.
+   `aspect` likewise wants the WIDEST the window can get; the default 2 covers an ultrawide. */
+export function cameraNearRadius({ near = 0.1, fov = 60, aspect = 2, margin = 1.25 } = {}) {
+  const halfH = Math.tan((fov * Math.PI / 180) / 2) * near;
+  return Math.hypot(near, halfH * aspect, halfH) * margin;
+}
+
 /* Damping rate, shared by every smoothed value. k≈8 → ~0.12 s to close 63% of the
    gap: visibly eased, never sluggish. (Tunable; reported in the handoff.) */
 const K = 8;

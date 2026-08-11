@@ -33,10 +33,10 @@
    nothing but references to things it did not implement.
    ============================================================ */
 import {
-  THREE, createEngineCore, CAM, createBoxArena, swingableHeight,
+  THREE, createEngineCore, CAM, createBoxArena, swingableHeight, swingableRope,
   createCharacterController, createGrappleModel, GRAPPLE_PROFILE,
   resolveAimPoint, createAimReticle, createPointerLockAim,
-  createTargetLock, createLockMarker,
+  createTargetLock, createLockMarker, cameraNearRadius,
 } from '@lgr/engine-core';
 
 const $ = (id) => document.getElementById(id);
@@ -94,13 +94,63 @@ scene.add(arena.group);
    every other consumer in the bundle (the same shared-default hazard CAR_PROFILE spreads to avoid).
    --------------------------------------------------------------------------------------------- */
 const SWING = { ...GRAPPLE_PROFILE, aimMode: Q.get('aim') === 'auto' ? 'auto' : 'point' };
+
+/* ---- A-CLIMB (2026-08-10): THE RANGE IS DERIVED FROM *THIS* ROOM, NOT INHERITED FROM A CITY. -----
+   The owner's ask was "increase the distance I can shoot a web and lock on a target". The constant he
+   was hitting is `GRAPPLE_PROFILE.ropeMax` = 3.2, and that number's own comment says where it comes
+   from: metropolis's arithmetic, where anchors land near y 3.5 and the street near 0.3. This lab's
+   towers are nothing like that — median top 5.58 u, streets 2.50 u — so the constant is fitted to the
+   wrong room, which is precisely swing-ledger.md OPEN #7 ("re-fitting the constants PER LEVEL is the
+   better answer") arriving as a feature request.
+   SO IT IS RE-DERIVED HERE, from the arena's own measured skyline, through the engine's `swingableRope`
+   — the exact inverse of the `swingableHeight` this level's towers were built with. The arc-bottom
+   rule says a full-length rope needs `top > skim + arcClear + ropeMax`; invert it and the rope is
+   whatever the towers afford.
+   THE PERCENTILE IS THE WHOLE OF THE SAFETY MARGIN, and picking it that way is what makes the number
+   defensible instead of tuned. Derive from `topAt(0.35)` and the answer states its own guarantee: the
+   tower you measured IS the arc-bottom minimum, so exactly the towers ABOVE it — 65% of them —
+   support a full-length swing. Deriving off the MEDIAN instead reads better and is worse: it gives
+   4.46 u and leaves only 60% of the skyline swingable, which is the level's own gate sitting on its
+   threshold. Measured here: topAt(0.35) = 4.61 u → rope 4.10 u (+28% on 3.2), 51/80 towers clear.
+   WHAT THAT BUYS, measured off this arena rather than asserted: from the street spawn the nearest
+   facade is 1.768 u away, so the highest anchor a rope of R can reach on it is sqrt(R^2 - 1.768^2) —
+   2.67 u at 3.2 and 3.70 u at 4.10, i.e. +39% up the tower you are standing next to.
+   THE PRICE, and it is real: this is ledger OPEN #0 ("higher and faster versus lower and steadier"),
+   which was recorded as an owner call and has now been made by the owner asking for range. The chain
+   trades net ground for altitude and airtime — numbers in the ledger's A-CLIMB table.
+   WHY NOT RAISE THE PROFILE CONSTANT: metropolis's median building top is 1.14 u. A longer rope there
+   is the exact opposite of a fix, and its two probes drive the shipped number. The ABILITY (deriving a
+   rope from a skyline) is in engine-core; the NUMBER is this level's. */
+function fitRopeToArena() {
+  SWING.ropeMax = Number(swingableRope({
+    towerTop: arena.topAt(0.35), arcClear: SWING.arcClear, skim: SWING.skim,
+    groundY: arena.params.groundY, ropeMin: SWING.ropeMin,
+  }).toFixed(2));
+  /* THE HANG CAP IS DERIVED FROM THE ROPE AND HAS TO MOVE WITH IT — the ledger says so in as many
+     words ("recompute it if you move ropeMax or gravity; this number is derived from them, not chosen
+     beside them"). A latched rope's backstop is a full pendulum period plus margin: 2*pi*sqrt(L/g) is
+     4.84 s at rope 3.2 and 5.71 s at 4.46, so a 6.0 s cap fitted to the SHORT rope would start cutting
+     long swings on the LONG one — a clock racing a pendulum it was never sized against, which is the
+     exact failure that constant's own comment warns about. */
+  SWING.maxHangLatched = Number((2 * Math.PI * Math.sqrt(SWING.ropeMax / SWING.gravity) * 1.24).toFixed(2));
+  return SWING.ropeMax;
+}
+fitRopeToArena();
+
 /* EVERY tuning constant is url-addressable, including the four A-LAB assists — so an A/B is a URL
    pair and not a rebuild, and a probe can zero one knob to attribute a delta to it. */
 for (const k of ['ropeMax', 'ropeMin', 'assist', 'launchUp', 'launchFwd', 'releasePitch', 'maxSpeed', 'maxVertSpeed',
-  'gravity', 'pump', 'airDrag', 'maxHang', 'pivotOut', 'attachBlend', 'floorAssist', 'arcClear', 'minRise', 'zipSlopeMin']) {
+  'gravity', 'pump', 'airDrag', 'maxHang', 'maxHangLatched', 'pivotOut', 'attachBlend', 'floorAssist', 'arcClear',
+  'minRise', 'zipSlopeMin', 'climbRate', 'clingReach']) {
   if (Q.has(k)) SWING[k] = qNum(k, SWING[k]);
 }
 const EYE = 0.28;
+/* THE CHASE BLOCK IS A NAMED OBJECT because TWO things need `distMax` and the second one silently had
+   a copy of it (A-CLIMB). `aimReach` below measures the aim ray from the EYE, so it has to add back the
+   arm the eye sits behind — and it was adding a literal 1.2 that had been correct until A-LAB raised
+   the chase to 3.0. Nobody noticed, because the wrong number is not an error, just a shorter ray. One
+   object, read twice. */
+const THIRD = { dist: 1.9, distMax: 3.0, distAtSpeed: 6, height: 0.34, side: 0.16, springR: 0.06, minDist: 0.35 };
 const character = createCharacterController({
   world: arena.world,
   grapple: createGrappleModel(SWING),
@@ -118,8 +168,23 @@ const character = createCharacterController({
      it: the first mid-swing capture off this lab came back with the body FILLING the frame (the
      spring arm had clipped 0.9 down to 0.42), which is the one thing a third-person swing camera must
      not do. `distMax` opts into the engine's speed dolly on top. */
-  third: { dist: 1.9, distMax: 3.0, distAtSpeed: 6, height: 0.34, side: 0.16, springR: 0.06, minDist: 0.35 },
+  third: THIRD,
   fov: { base: 58, max: 78, atSpeed: 7 },
+  /* ---- A-CLIMB: THE CAMERA IS NOT A POINT, so the containment budget is not a point either. -------
+     The owner reported clipping through buildings that every check said was not happening, and both
+     were true: the eye was never inside a solid (0/260 measured frames) while the NEAR PLANE's corners
+     were, on 52 of the same 260. This is the one line that fixes it, and the radius is COMPUTED from
+     this camera rather than picked — at near 0.02 and the widest FOV the speed cue reaches (78°) the
+     frustum's front corner sticks out 0.036 u from the eye, which is more than the 0.020 u the eye was
+     measured to have. `cameraNearRadius` is fed the MAX fov, not the current one: a clearance that
+     shrinks exactly when the frame widens is a clearance that fails at speed, which is when a chase
+     camera is nearest a wall. */
+  camEyeClear: cameraNearRadius({ near: 0.02, fov: 78, aspect: 2, margin: 1.25 }),
+  /* ---- A-CLIMB: WALL CLING, ON. The ability is engine-core's and it defaults OFF, so this line is
+     the whole of "the lab has climbing" — the numbers come from the swing profile above, which is
+     where `clingReach`/`climbRate` already lived. See character.js for why the top-out (mantle) is
+     the half that makes it a way ONTO a roof rather than a way up a wall. */
+  cling: { enabled: true },
 });
 
 /* The body you look at in third person, and the line you hang from. Placeholder geometry is an
@@ -149,7 +214,21 @@ scene.add(anchorDot);
    is too far" is a DIFFERENT answer from "there is nothing there", and the dim crosshair is how a
    player learns the difference (aim.js's own rule). Sized off the LIVE ropeMax plus the chase.
    --------------------------------------------------------------------------------------------- */
-const aimReach = () => SWING.ropeMax + 1.2 + 2.6;    // rope + chase-arm + the "too far" readout band
+/* ---- A-CLIMB (2026-08-10): THE *LOCK* RANGE IS A SEPARATE, LONGER NUMBER THAN THE WEB RANGE, and
+   the owner asked for both to go up. They are not the same question:
+     · the WEB range is `ropeMax`, measured from the BODY, and `reachFromAim` is the only judge of it;
+     · the LOCK range is how far this ray is cast from the EYE, and it decides what you can put a mark
+       on — including things you cannot web YET. That is the useful half: lock a tower across the
+       plaza, run at it, and the mark brightens the moment it comes into rope range.
+   THE OLD NUMBER WAS THREE CONSTANTS, ONE OF THEM STALE: `ropeMax + 1.2 + 2.6`, where 1.2 stood for
+   the chase arm — which A-LAB raised to `distMax` 3.0 without this line hearing about it, so the ray
+   was 1.8 u shorter from the body than it read. Each term is now what it says it is:
+     ropeMax            — everything you can actually web
+   + third.distMax      — the arm the eye sits behind, so the range is measured from the BODY
+   + arena spacing      — one full block beyond your web, which is the LOCK band: enough to mark the
+                          next tower over (measured 5.59 u to the second ring from a street spawn) and
+                          enough that the dim crosshair means "too far", never "nothing there". */
+const aimReach = () => SWING.ropeMax + THIRD.distMax + arena.params.spacing;
 const _aimPt = { x: 0, y: 0, z: 0 };
 let aimHit = null;
 const reticle = createAimReticle({ container: document.body });
@@ -180,6 +259,15 @@ const lockAim = createPointerLockAim({
       else flash('nothing under the crosshair to lock');
     } else if (btn === 2) {             // RIGHT — throw the web
       webPressed = true;
+      /* A-CLIMB: A WEB THAT DOES NOT FIRE HAS TO SAY WHY. This is the control-feel gap the audit
+         found that no latency number could: a right-click with nothing in range produced NO feedback
+         whatsoever — the same silence as a dropped input — so a player cannot tell "the game ignored
+         me" from "I missed". There are exactly two reasons under this scheme and the state already
+         knows which, so name it. Read BEFORE the frame consumes the press, which is why it is here and
+         not in the frame loop: by then `aimInRange` has been recomputed for the web that just fired. */
+      if (!character.state.aimInRange) {
+        flash(webTarget() ? `too far — web reaches ${SWING.ropeMax.toFixed(1)} u` : 'nothing under the crosshair');
+      }
     }
   },
   /* Losing the lock (Esc, tab switch) must not leave an input latched. The ROPE is not cleared here —
@@ -244,7 +332,7 @@ function updateHud(dt) {
   const s = character.state, a = s.anchor;
   const hs = Math.hypot(s.vx, s.vz);
   const chip = $('state-chip');
-  const st = character.swinging ? 'swing' : (character.grounded ? 'walk' : 'air');
+  const st = character.swinging ? 'swing' : character.clinging ? 'climb' : (character.grounded ? 'walk' : 'air');
   chip.className = st; chip.textContent = st.toUpperCase();
   set('v-speed', s.speed.toFixed(2), s.speed > 4 ? 'hot' : '');
   set('v-hspeed', hs.toFixed(2));
@@ -262,6 +350,11 @@ function updateHud(dt) {
   set('v-lock', targetLock.has ? `${targetLock.point.y.toFixed(2)} y  (${lockMark.onScreen ? 'on screen' : 'off screen'})` : 'none — LMB to lock',
     targetLock.has ? 'on' : 'off');
   set('v-src', targetLock.has ? 'LOCK' : (aimHit ? 'crosshair' : '—'));
+  /* THE TWO RANGES, SIDE BY SIDE, because they are different numbers and "why did that not fire" has
+     to be answerable without guessing which one the dim crosshair meant (A-CLIMB). */
+  set('v-range', `web ${SWING.ropeMax.toFixed(2)} u · lock ${aimReach().toFixed(2)} u`);
+  set('v-cling', character.clinging ? 'STUCK — W up, S down' : 'no', character.clinging ? 'on' : 'off');
+  set('v-climb', `${character.climbs} · ${character.mantles} roofs`);
   set('v-latch', character.latched ? 'HELD — space to launch' : 'no', character.latched ? 'on' : 'off');
   set('v-webs', `${stats.webs} fired · ${character.releases} launched`);
   const g = stats.groundPerSwing;
@@ -305,7 +398,10 @@ function wireDock() {
     const el = $('p-' + k); if (!el) continue;
     el.addEventListener('input', () => { SWING[k] = Number(el.value); $('n-' + k).textContent = Number(el.value).toFixed(2); });
   }
-  $('b-reset').addEventListener('click', () => { for (const k of TUNE) SWING[k] = GRAPPLE_PROFILE[k]; syncDock(); flash('swing profile reset'); });
+  /* RESET RESTORES THE PROFILE *AND* RE-DERIVES THE ROPE (A-CLIMB) — `GRAPPLE_PROFILE.ropeMax` is
+     metropolis's 3.2, and handing that back here would silently undo the range the level affords and
+     look like the slider had broken. "Reset" means the shipped tuning for THIS room. */
+  $('b-reset').addEventListener('click', () => { for (const k of TUNE) SWING[k] = GRAPPLE_PROFILE[k]; fitRopeToArena(); syncDock(); flash(`swing profile reset · rope ${SWING.ropeMax.toFixed(2)} u`); });
   $('b-spawn').addEventListener('click', spawn);
   $('b-copy').addEventListener('click', () => {
     const p = new URLSearchParams();
@@ -321,7 +417,11 @@ function wireDock() {
   /* THREE PRESETS, and the middle one is the control. "METROPOLIS" reproduces the city's measured
      proportions (median top 1.14 u, 2.45 u block pitch, 0.55 u streets) so any claim that the lab
      feels better than the city can be A/B'd in one click instead of argued. */
-  const preset = (o, msg) => () => { arena.rebuild(o); syncDock(); spawn(); flash(msg); };
+  /* A PRESET CHANGES THE ROOM, SO IT RE-FITS THE ROPE (A-CLIMB). That is the lab's whole thesis
+     applied to itself: the range is a function of the skyline, so switching to the METROPOLIS preset
+     (median top 1.14 u) must hand back the short rope that room affords, not keep the long one this
+     one earned. Before `syncDock`, so the slider shows the number actually in force. */
+  const preset = (o, msg) => () => { arena.rebuild(o); fitRopeToArena(); syncDock(); spawn(); flash(`${msg} · rope ${SWING.ropeMax.toFixed(2)} u`); };
   $('b-preset-swing').addEventListener('click', preset({ cols: 9, rows: 9, spacing: 4.2, width: 1.7, height: Number(swingableHeight().toFixed(2)), heightVary: 0.45, plaza: 1 }, 'preset: SWING'));
   $('b-preset-metro').addEventListener('click', preset({ cols: 13, rows: 13, spacing: 2.45, width: 1.9, height: 1.14, heightVary: 0.6, plaza: 0 }, 'preset: METROPOLIS (the control)'));
   $('b-preset-open').addEventListener('click', preset({ cols: 5, rows: 5, spacing: 8.0, width: 2.2, height: 9.0, heightVary: 0.3, plaza: 1 }, 'preset: OPEN (far towers)'));
