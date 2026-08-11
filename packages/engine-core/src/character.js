@@ -668,13 +668,28 @@ export function createCharacterController(opts = {}) {
      OPPOSITE FACES ARE A DEADLOCK BY DESIGN: in a gap narrower than 2·clear the two pushes cancel and
      the eye stays put, which is right — there is nowhere to go, and the alternative is a camera that
      oscillates between two walls. */
-  const _CLEAR_AXES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  /* ---- SIX AXES *AND THE FOUR HORIZONTAL DIAGONALS* (A-METRO-INHERIT, 2026-08-10). The four extra
+     rays are a GUARD-SCOPE fix, measured, not a belt-and-braces: six axis rays are blind at a convex
+     VERTICAL EDGE of a building, which is the most common camera position in a city of boxes.
+     Standing off the corner of a tower the eye is outside the box in BOTH x and z, so the −x ray's
+     endpoint is still outside the box's z span and the −z ray's is outside its x span — both report
+     CLEAR — while a near-plane corner offset diagonally lands inside. Measured in metropolis after
+     `camEyeClear` was first wired: near-plane corners inside dropped 30/260 → 1/75, and the residual
+     frame was exactly this geometry. The diagonals are normalised so `r` still means "u of clearance"
+     in every direction rather than 1.41× more on four of them.
+     STILL BOUNDED, STILL STATELESS, STILL AN EXACT NO-OP AT `camEyeClear` 0 — the whole guard is
+     skipped before this list is ever read. */
+  const _D = Math.SQRT1_2;
+  const _CLEAR_AXES = [
+    [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+    [_D, 0, _D], [_D, 0, -_D], [-_D, 0, _D], [-_D, 0, -_D],
+  ];
   function clearEye(outPos) {
     const r = camEyeClear;
     if (!(r > 0) || !world.segmentHit) return outPos;
     for (let pass = 0; pass < 2; pass++) {
       let moved = false;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < _CLEAR_AXES.length; i++) {
         const a = _CLEAR_AXES[i];
         const t = world.segmentHit(outPos.x, outPos.y, outPos.z,
           outPos.x + a[0] * r, outPos.y + a[1] * r, outPos.z + a[2] * r, 0);

@@ -122,6 +122,36 @@ export function swingableRope({ towerTop, arcClear = 0.45, skim = 0.06, groundY 
   return Math.max(ropeMin, towerTop - groundY - skim - arcClear);
 }
 
+/* ---- THE SKYLINE AT A PERCENTILE, OVER A PACKED SOLIDS BUFFER (A-METRO-INHERIT, 2026-08-10).
+   `swingableRope` above needs ONE input — a tower top — and `arena.topAt(p)` was the only thing in
+   the repo that could supply it. That made the whole derivation an ability of `createBoxArena`, i.e.
+   available to the lab and to nothing else: metropolis has 162 towers from citygen and no arena, so
+   the project that most needed "derive my rope from my own skyline" was the one project that could
+   not ask the question. Engine-first says the ABILITY moves, so it is here, beside the two
+   derivations it feeds — three statements of one rule in one place, which is how they stay each
+   other's check.
+
+   IT TAKES THE PACKED SoA BUFFER, not a box list, because that is the ONE representation both level
+   generators already produce: 6 floats per box (minX,minY,minZ, maxX,maxY,maxZ), which is the exact
+   buffer `createColliderWorld.rebuild` is fed. `citygen`'s `city.state.solids` and `createBoxArena`'s
+   own `solids` are the same shape, so neither has to be adapted.
+
+   THE TOP IS ELEMENT 4 of each stride (maxY). p=0 is the shortest tower, 1 the tallest, 0.5 the
+   median. Sorting on demand rather than caching, for the same reason `arena.topAt` does: a cached
+   list is a list `rebuild` can invalidate, and this is called at boot, not per frame.
+
+   C++ anchor: `std::nth_element` over a strided view of a `std::vector<float>` — except JS has no
+   strided iterator, so the tops are copied out first. */
+export function topAtPercentile(solids, p = 0.5) {
+  if (!solids || !solids.length) return 0;
+  const n = Math.floor(solids.length / 6);
+  const tops = new Float64Array(n);
+  for (let k = 0; k < n; k++) tops[k] = solids[k * 6 + 4];
+  tops.sort();
+  const i = Math.min(n - 1, Math.max(0, Math.floor(p * n)));
+  return tops[i];
+}
+
 export function createBoxArena(opts = {}) {
   const P = {
     cols: 7, rows: 7,
@@ -262,11 +292,12 @@ export function createBoxArena(opts = {}) {
        every derived traversal constant actually asks (see `swingableRope`). p=0 is the shortest tower,
        1 the tallest, 0.5 the median. Sorting 80 numbers on demand is cheaper than caching a list that
        `rebuild` could invalidate. */
+    /* Delegates to `topAtPercentile` (A-METRO-INHERIT) — same arithmetic, over the same `solids`
+       buffer `layout()` already packed, so the answer is byte-identical to the old boxes-list version
+       (solids[k*6+4] IS boxes[k].top). One implementation, two callers. */
     topAt(p = 0.5) {
       if (!boxes.length) return P.groundY;
-      const tops = boxes.map((b) => b.top).sort((a, b) => a - b);
-      const i = Math.min(tops.length - 1, Math.max(0, Math.floor(p * tops.length)));
-      return tops[i];
+      return topAtPercentile(solids, p);
     },
     /* A CLEAR SPAWN, because "where do I stand" is a question the level should answer and every probe
        in this repo has had to re-derive. Returns the centre of the widest street near (x,z), i.e. a

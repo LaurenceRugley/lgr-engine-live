@@ -54,6 +54,7 @@ import {
   createCelestial, createTrueStars, createSolarSystem, createConstellations,
   createDiveController, createTouchControls, createPedestrians,
   resolveAimPoint, createAimReticle, createPointerLockAim, applyLook,
+  createTargetLock, createLockMarker, cameraNearRadius, swingableRope, topAtPercentile,
 } from '@lgr/engine-core';
 import { createOffice } from '@lgr/office';   // A-DIVE: the proven office interior (city/main.js's own dive target)
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';   // A-PEDS: the consumer pays for the model, not every lib user
@@ -410,6 +411,66 @@ const charWorld = {
    hazard CAR_PROFILE spreads ROAD_PROFILE to avoid). `point` because this body has a crosshair and the
    owner asked to click a chosen anchor; the auto fan still exists, it just is not what this verb is. */
 const CHAR_SWING_PROFILE = { ...GRAPPLE_PROFILE, aimMode: 'point' };
+
+/* ---- A-METRO-INHERIT (2026-08-10): THE CONSTANTS ARE DERIVED FROM *THIS* CITY'S SKYLINE ----------
+   swing-ledger.md OPEN #0's still-open half: "nothing derives arcClear, releasePitch, assist or
+   maxHang per level, so the rope is the only constant that fits its room". projects/swing-lab derives
+   its rope from its own towers through `swingableRope`; metropolis never could, because the only thing
+   in the repo that could hand `swingableRope` a tower top was `arena.topAt`, and metropolis has 162
+   citygen towers and no arena. `topAtPercentile` is that ability lifted into engine-core, so the same
+   two functions now answer the question in both rooms and the ANSWER is what differs.
+
+   AND THE ANSWER IS BRUTAL, which is why it is written down rather than quietly rounded. Run the
+   lab's own derivation at the lab's own percentile and metropolis returns the ropeMin FLOOR:
+
+     topAt(0.35) = 0.84 u  →  swingableRope = max(0.55, 0.84 − 0.30 − 0.06 − 0.45) = 0.55  (the FLOOR)
+
+   i.e. metropolis's 35th-percentile tower affords NO rope at all. The derivation only clears the floor
+   above the 60th percentile (measured: topAt(0.60) = 1.36 u → 0.56 u of rope). The shipped 3.2 is the
+   NINETY-FIFTH percentile: topAt(0.95) = 4.09 u → 3.28 u, so `ropeMax` 3.2 is `swingableRope(topAt(0.95))`
+   rounded down, and its guarantee — the thing a percentile derivation exists to state — is that
+   **9 of 162 towers (5.6%) clear the arc-bottom rule**. That single number explains every "the swing
+   reads as a zip" report in this ledger: from a street the arc bottom `anchorY − rope` can never exceed
+   the body's own y (a geometric identity, true in every level), and from the air metropolis only offers
+   a swing-tier anchor once you are ~1.2 u up. It is not a tuning failure. It is the room.
+
+   SO THE ROPE STAYS 3.2 AND THE DERIVATION SHIPS AS A CHECK, not as a new number. Raising it is
+   REFUTED for this city in the ledger, and the anchor supply says the same thing independently:
+   measured over 200 street spots with the model's own fan, 97.1% of anchor hits lie within 3.0 u, so a
+   longer rope would buy under 3% more reachable geometry and lengthen every arc in the one room that
+   is already too short for the arcs it has. What DOES follow from the rope is derived live below —
+   getting those wrong is how a constant fitted to a third room survives a port. */
+const SKYLINE_P = 0.95;                     // the percentile metropolis affords (see above; the lab's is 0.35)
+const CHAR_GROUND = LAYOUT.PLINTH_TOP;      // the walkable floor on land — what charWorld.heightAt returns
+const DERIVED = {
+  towerTop: topAtPercentile(city.state.solids, SKYLINE_P),
+  ropeFromSkyline: 0, ropeShipped: CHAR_SWING_PROFILE.ropeMax, towersClearing: 0, towers: 0,
+};
+DERIVED.ropeFromSkyline = swingableRope({
+  towerTop: DERIVED.towerTop, arcClear: CHAR_SWING_PROFILE.arcClear, skim: CHAR_SWING_PROFILE.skim,
+  groundY: CHAR_GROUND, ropeMin: CHAR_SWING_PROFILE.ropeMin,
+});
+{ // the guarantee the percentile makes, counted rather than assumed
+  const s = city.state.solids, need = CHAR_GROUND + CHAR_SWING_PROFILE.skim + CHAR_SWING_PROFILE.arcClear + CHAR_SWING_PROFILE.ropeMax;
+  DERIVED.towers = s.length / 6;
+  for (let i = 0; i < s.length; i += 6) if (s[i + 4] > need) DERIVED.towersClearing++;
+  DERIVED.arcBottomMin = need;
+}
+/* THE HANG CAP IS DERIVED FROM THE ROPE AND HAS TO MOVE WITH IT — the constant's own comment in
+   pilot.js demands exactly this ("recompute it if you move ropeMax or gravity; this number is derived
+   from them, not chosen beside them"). It has never MATTERED in metropolis before now: `maxHangLatched`
+   only applies on the LATCHED path, and metropolis was on hold-to-swing, so the number sat unused. The
+   moment this file starts passing `web` it becomes the backstop on every rope the player leaves up.
+   2π√(3.2/5.4) × 1.24 = 6.00 s — which is the shipped 6.0 to the centisecond, so this line CONFIRMS a
+   constant rather than changing one. Computed anyway: a derivation that agrees is a check; a literal
+   that agrees is a coincidence waiting to rot. */
+CHAR_SWING_PROFILE.maxHangLatched = Number(
+  (2 * Math.PI * Math.sqrt(CHAR_SWING_PROFILE.ropeMax / CHAR_SWING_PROFILE.gravity) * 1.24).toFixed(2));
+
+/* THE CHASE BLOCK IS A NAMED OBJECT because two things read `dist` and the second one had a literal
+   copy of it (the lab paid for this exact bug in A-CLIMB: `aimReach` was adding a stale 1.2). */
+const CHAR_THIRD = { dist: 0.9, height: 0.34, side: 0.14, springR: 0.06, minDist: 0.12 };
+
 const character = createCharacterController({
   world: charWorld,
   grapple: createGrappleModel(CHAR_SWING_PROFILE),
@@ -426,7 +487,33 @@ const character = createCharacterController({
   /* THIRD PERSON IS THE DEFAULT (the arc reads best from outside the body) and carries its own tuning;
      first person has its own block inside the module. 0.9 u back ≈ 3.2 body-heights — close enough to
      stay in a 0.55 u street canyon, far enough to see the rope. */
-  third: { dist: 0.9, height: 0.34, side: 0.14, springR: 0.06, minDist: 0.12 },
+  third: CHAR_THIRD,
+  /* ---- A-METRO-INHERIT: THE NEAR-PLANE CLEARANCE. A camera is a FRUSTUM, not a point. -------------
+     projects/swing-lab measured this and it is the single highest-value line in the whole port: over
+     one real swing the EYE was inside a solid on 0 of 260 frames (which is what every camera check in
+     this repo asserted, and it was true) while a NEAR-PLANE CORNER was inside on 52. The owner saw
+     clipping; three probes said zero; both were right about different points.
+     METROPOLIS IS THE WORSE CASE AND THAT PREDICTION WAS TESTED BEFORE THIS LINE WAS WRITTEN, not
+     after: driven through one aimed swing here, corners were inside on 30 of 260 frames (11.5%) with
+     the eye inside on 0 — because a 0.55 u street canyon against a `minDist` of 0.12 makes the
+     COLLAPSE-to-the-head branch metropolis's ordinary state, and the head is a legal place for a body
+     and an illegal one for a frustum.
+     THE RADIUS IS COMPUTED FROM THIS CAMERA, never picked: at near 0.02 and fov 48 the front corner
+     sticks out 0.0282 u from the eye, ×1.25 margin = 0.0353 u. Aspect 2 rather than the live one
+     because the live one moves with the window and the clearance must not shrink when the frame
+     widens — 1.25 covers everything up to a 2.5:1 ultrawide. */
+  camEyeClear: cameraNearRadius({ near: rig.camera.near, fov: rig.camera.fov, aspect: 2, margin: 1.25 }),
+  /* ---- A-METRO-INHERIT: WALL CLING + THE TOP-OUT. The ability is engine-core's and defaults OFF, so
+     this line is the whole of "metropolis has climbing". The two physical numbers (`clingReach` 0.24,
+     `climbRate` 1.15) come from the grapple profile above — which is where metropolis already kept
+     them for the legacy swinger, so the body cannot end up with two silently different copies.
+     THE MANTLE IS THE HALF THAT MATTERS: the pilot cling has no top-out, so climbing to a lip ends the
+     cling and gravity takes back the whole climb — the wall was climbable and the building was not.
+     KNOWN CONSEQUENCE, stated rather than discovered later (ledger OPEN #18): W is now three verbs
+     here as well — walk, reel, and climb — so walking into a facade while holding W starts a climb.
+     That is the genre's gesture and it is what the lab ships, but metropolis's streets are 0.55 u
+     wide, so it happens far more often here than there. */
+  cling: { enabled: true },
 });
 character.setPosition(0, null, -(city.extent * 0.55));
 
@@ -443,10 +530,21 @@ charRopeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(
 const charRope = new THREE.Line(charRopeGeo, new THREE.LineBasicMaterial({ color: '#f2f4f8' }));
 charRope.frustumCulled = false; charRope.visible = false;
 scene.add(charRope);
-/* AIM_REACH for this body: ropeMax 3.2 + the 0.9 u the eye sits behind the shoulder = 4.1 just to
-   reach the limit, plus ~1.9 u of "there is a building there and it is too far" — the band the dim
-   crosshair is made of (aim.js's own note on why the ray must overshoot rather than stop at the limit). */
-const CHAR_AIM_REACH = 6.0;
+/* ---- A-METRO-INHERIT: THE *LOCK* RANGE IS A SEPARATE, LONGER NUMBER THAN THE WEB RANGE, and it is
+   DERIVED from this city rather than typed. They answer different questions:
+     · the WEB range is `ropeMax`, measured from the BODY, and `reachFromAim` is its only judge;
+     · the LOCK range is how far this ray is cast from the EYE, and it decides what you can put a MARK
+       on — including things you cannot web yet. That is the useful half: lock a tower across the
+       street, run at it, and the mark brightens the moment it comes into rope range.
+   EACH TERM IS WHAT IT SAYS IT IS (the lab's version of this line carried a stale chase constant for a
+   whole arc and nobody noticed, because a wrong number here is not an error, just a shorter ray):
+     ropeMax        — everything you can actually web
+   + CHAR_THIRD.dist — the arm the eye sits behind, so the range is measured from the BODY
+   + LAYOUT.PITCH   — one full block (2.45 u) beyond your web: the LOCK band, wide enough to mark the
+                      next block over and wide enough that a dim crosshair means "too far", never
+                      "nothing there" (aim.js's rule that the ray must OVERSHOOT the limit).
+   = 3.2 + 0.9 + 2.45 = 6.55 u, against the 6.0 that was typed here before. */
+const CHAR_AIM_REACH = Number((CHAR_SWING_PROFILE.ropeMax + CHAR_THIRD.dist + LAYOUT.PITCH).toFixed(2));
 const _charAim = { x: 0, y: 0, z: 0 };
 let charAimHit = null;
 const _camPos = { x: 0, y: 0, z: 0 }, _camDir = { x: 0, y: 0, z: 0 };
@@ -658,6 +756,39 @@ const _aim = { x: 0, y: 0, z: 0 };           // ONE reused point — handed to t
 let aimHit = null;                            // === _aim on a hit, null on clear sky
 let fireHeld = false;                         // the MOUSE trigger only — the key trigger is Space (A-FIRE), read straight off heldKeys
 const reticle = createAimReticle({ container: document.body });
+
+/* ---- A-METRO-INHERIT (2026-08-10): THE OWNER'S LATCHED CONTROL SCHEME, wired into the city --------
+   His words, from A-LOCK: "You left click to LOCK ONTO a place, and then you RIGHT CLICK to shoot a
+   web and then swing… you can use the SPACE BAR to jump off of your swing."
+     LMB   → take a lock on whatever the crosshair is over. It PERSISTS and it is VISIBLE.
+     RMB   → throw the web at the lock. WITH NO LOCK IT FIRES AT THE CROSSHAIR ANYWAY (the lab's own
+             stated assumption, kept identical here so the two rooms cannot drift apart).
+     SPACE → release + launch, and jump when grounded — one verb, "get air", in both states.
+   The rope LATCHES: it stays up until Space or a natural break, so a long swing stops being a
+   button-hold endurance test. swing-ledger.md OPEN #12 is this exact wire, logged as deliberate drift
+   for two arcs ("it is exactly the drift the project CLAUDE.md names as the recurring failure").
+   THE ABILITIES ARE ENGINE-CORE'S and were already there: `createCharacterController` picks the scheme
+   purely on whether `input.web` is supplied (so every consumer that never heard of it stays
+   byte-identical), `createTargetLock` COPIES the point (the four-line version stores a live alias of
+   `resolveAimPoint`'s reused buffer and silently follows your view), `createLockMarker` draws it.
+   This file decides the keys and nothing else. */
+const targetLock = createTargetLock();
+const lockMark = createLockMarker({ container: document.body });
+let webPressed = false;                       // ONE frame of true per right-click — the model edge-triggers
+/* A message that replaces the hint for a beat and then puts it back. `refreshHint()` is the restore,
+   so a flash can never leave the bar lying about which body's controls you are looking at. */
+function flashHint(msg) {
+  const h = document.getElementById('hint');
+  if (!h) return;
+  h.textContent = msg;
+  clearTimeout(flashHint._t);
+  flashHint._t = setTimeout(refreshHint, 1700);
+}
+/* THE POINT THE WEB FLIES AT: the lock if you took one, otherwise whatever is under the crosshair.
+   ONE function, read by the attach AND by the crosshair's range verdict, so the mark cannot promise
+   something the web will not do (aim.js's rule about one implementation of "in range"). */
+const webTarget = () => (targetLock.has ? targetLock.point : charAimHit);
+
 const lockAim = createPointerLockAim({
   element: renderer.domElement,
   // Raw movement deltas turn the ORBIT through the engine's ONE look convention — the same call the
@@ -667,9 +798,32 @@ const lockAim = createPointerLockAim({
      by who is holding the body, and neither can double-drive the other. */
   onLook: (dx, dy) => { if (mode === 'walk') character.addLook(dx, dy); else applyLook(rig.orbit, dx, dy, AIM_LOOK); },
   onFire: (down) => { fireHeld = down; },
+  /* A-METRO-INHERIT: `onButton` is the GENERAL form beside `onFire`, and both are live at once on
+     purpose — `onFire` still drives the LEGACY swing body's trigger (mode 'swing', untouched by this
+     arc), while these two verbs belong to the character. Scoped to `mode === 'walk'` so a right-click
+     in the legacy swinger cannot arm a web the character is not holding. */
+  onButton: (btn, down) => {
+    if (!down || mode !== 'walk' || diveCtl.mode !== 'a') return;
+    if (btn === 0) {                          // LEFT — lock on
+      if (targetLock.lock(charAimHit)) flashHint('LOCKED — right-click to web it · SPACE to launch off the swing');
+      else flashHint('nothing under the crosshair to lock');
+    } else if (btn === 2) {                   // RIGHT — throw the web
+      webPressed = true;
+      /* A WEB THAT DOES NOT FIRE HAS TO SAY WHY (the lab's A-CLIMB finding): a right-click with
+         nothing in range produced the same SILENCE as a dropped input, so a player cannot tell "the
+         game ignored me" from "I missed". There are exactly two reasons under this scheme and the
+         state already knows which. Read BEFORE the frame consumes the press — by then `aimInRange`
+         has been recomputed for the web that just fired. */
+      if (!character.state.aimInRange) {
+        flashHint(webTarget() ? `too far — the web reaches ${CHAR_SWING_PROFILE.ropeMax.toFixed(1)} u` : 'nothing under the crosshair');
+      }
+    }
+  },
   /* Losing the lock (Esc, tab switch) must drop the line. Without this the trigger latches held, and
-     a swinger that can never let go is the same bug class as a cling that never releases. */
-  onLockChange: (locked) => { if (!locked) fireHeld = false; },
+     a swinger that can never let go is the same bug class as a cling that never releases.
+     The ROPE is NOT cut here — under the latched scheme it belongs to the character, not to the
+     mouse, and Space is always available to release it. Only the one-frame press edge is cleared. */
+  onLockChange: (locked) => { if (!locked) { fireHeld = false; webPressed = false; } },
 });
 /* Verification probe (house convention — see docs/engine-invariants.md's __wash/__celestial pattern).
    Records the aim point and the anchor from the SAME frame the line attached, so the "did it web what
@@ -695,6 +849,10 @@ function setMode(next) {
   if (mode === 'walk') {
     lockAim.exit(); fireHeld = false;
     reticle.setVisible(false); reticle.setInRange(false);
+    /* A-METRO-INHERIT: the LOCK is a sixth thing this mode took, so it goes back on the same one exit
+       path. A mark left on screen for a body you are no longer in is the repo's recurring latch bug
+       wearing a HUD. */
+    lockMark.setVisible(false); targetLock.clear(); webPressed = false;
     charBody.visible = false; charRope.visible = false;
     rig.clearEye();                                  // the character drove the eye directly every frame
   }
@@ -720,6 +878,7 @@ function setMode(next) {
     rig.setMode(CAM.PERSPECTIVE);
     character.setYaw(rig.azimuth + Math.PI); character.recenterPitch();
     reticle.setVisible(true);
+    lockMark.setVisible(true);                       // A-METRO-INHERIT: LMB's mark, armed with the crosshair
     charBody.visible = character.view === 'third';
   }
   else if (mode === 'drive') { rig.setMode(CAM.PERSPECTIVE); pilotCtl.possess(carPilotable); rig.setSpringArm({ segmentQuery: pilotWorld.segmentHit, radius: 0.3, enabled: true }); }
@@ -822,7 +981,10 @@ function setMode(next) {
 const USES_LIFT = new Set(['heli', 'bird', 'fish', 'swing', 'walk']);   // swing: the rocker REELS THE ROPE IN — the pump. walk: the rocker's UP is JUMP (a phone has no space bar)
 const HINTS = {
   fly:   'WASD pan · Shift boost · drag look · scroll zoom · click a tower to step inside',
-  walk:  'WASD walk · Shift SPRINT · SPACE JUMP · click to capture the mouse, then AIM — CLICK-AND-HOLD to shoot a web at the crosshair and swing · W/S reel · A/D steer the arc · let go to launch · V = 1st/3rd person · Esc frees the mouse',
+  /* A-METRO-INHERIT: the walk hint now describes the LATCHED scheme, because the old one described a
+     control scheme this body no longer has. A hint bar that lies is worse than none — it is the only
+     place these bindings are written down for a player. */
+  walk:  'WASD walk · Shift SPRINT · SPACE JUMP · click to capture the mouse, then AIM — LEFT-CLICK locks a target, RIGHT-CLICK webs it (no lock = webs the crosshair) · the rope STAYS UP · A/D steer the arc · W/S reel — and hold W at a wall to CLIMB it onto the roof · SPACE launches off the swing · V = 1st/3rd person · Esc frees the mouse',
   drive: 'W/S throttle · A/D steer · Shift boost (you cannot corner at full boost)',
   heli:  'W/S thrust · A/D steer · Space climb · C descend · Shift boost',
   boat:  'W/S throttle · A/D rudder (only steers with way on) · Shift full-ahead',
@@ -833,7 +995,10 @@ const HINTS = {
 };
 const MOBILE_HINTS = {
   fly:   'stick to move · push past the ring to boost · drag to look · tap a tower',
-  walk:  'stick to walk · push past the ring to sprint · rocker UP = JUMP · drag to look   (the web needs a mouse button — desktop only for now)',
+  /* Still honest on a phone: the web is TWO mouse buttons now, and a touchscreen has neither. The
+     climb DOES work here (the rocker is the lift axis), so it is named — swing-ledger.md OPEN #5
+     ("the web is desktop-only") is unchanged and this line keeps saying so. */
+  walk:  'stick to walk · push past the ring to sprint · rocker UP = JUMP, and hold it at a wall to CLIMB · drag to look   (the web needs mouse buttons — desktop only for now)',
   drive: 'stick to drive · push past the ring to boost',
   heli:  'stick to fly · push past the ring to boost',
   boat:  'stick to steer · push past the ring for full ahead',
@@ -946,6 +1111,10 @@ window.__office = office; window.__diveCtl = diveCtl;   // harness probes (house
 
 /* ---------- input: WASD (mode-routed) + drag-look + scroll-zoom ---------- */
 const heldKeys = new Set();
+/* A-METRO-INHERIT: SPACE IS AN EDGE THAT MUST SURVIVE TO THE NEXT FRAME, exactly like the web button.
+   See the `jump:` axis in the frame loop for the measurement (826 presses, 0 releases seen by a
+   level-triggered read in one 12 s lab chain). Set on the press, consumed by exactly one frame. */
+let spacePulse = false;
 window.addEventListener('keydown', (e) => {
   // A-DIVE routing: Escape surfaces; arrows turn the seated head while inside (city keys stay off).
   if (diveCtl.mode === 'b' || diveCtl.mode === 'in') {
@@ -954,6 +1123,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   const k = e.key.toLowerCase();
+  if (k === ' ' && mode === 'walk') spacePulse = true;   // see `spacePulse` above — the tap that lands between frames
   // A-CROSSING: the PRESS (not the hold) of the dive key, while the gull is on the water, is the plunge.
   if (k === KEY.down && !heldKeys.has(k) && plunge()) { e.preventDefault(); return; }
   /* A-FLOW: Q swaps the two ways of choosing an anchor. 'auto' (the default) is the swing — hold the
@@ -988,6 +1158,10 @@ window.addEventListener('keyup', (e) => {
   if (LOOK_KEY[e.key]) lookKeys[LOOK_KEY[e.key]] = false;
   heldKeys.delete(e.key.toLowerCase());
 });
+/* AN UNFOCUSED WINDOW MUST NOT HOLD KEYS DOWN. Without this, alt-tabbing mid-sprint leaves Shift and W
+   latched forever — the keyup is delivered to whatever took focus, never here. Same latched-input
+   failure class `onLockChange` guards on the mouse side; it had no keyboard half until now. */
+window.addEventListener('blur', () => { heldKeys.clear(); spacePulse = false; webPressed = false; });
 let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, downT = 0;
 const ORBIT_SPEED = 0.006;
 /* A-LOOK (2026-08-09) — THE AIMED-BODY LOOK CONVENTION, hoisted so it never allocates on a mousemove
@@ -1173,24 +1347,37 @@ function frame(dt, t) {
        matrix was set by LAST frame's `rig.setEye` from this same character, so the ray the mark
        stands for is the ray the eye is actually looking down (aim.js's own rule). */
     charAimHit = resolveAimPoint(rig.camera, charWorld, _charAim, { maxDist: CHAR_AIM_REACH, radius: 0.05 });
+    /* THE LOCK IS THE TARGET WHEN THERE IS ONE (A-METRO-INHERIT). `reachFromAim` measures range from
+       the BODY, so the same point drives the attach and the crosshair's verdict — no second copy of
+       "in range" anywhere in this file. */
+    const charTarget = webTarget();
     character.update(dt, {
       x: axes.x, y: axes.y, sprint: axes.sprint, boost: axes.boost,
-      /* JUMP is Space here and the rocker's UP on a phone. Held or tapped makes no difference — the
-         controller edge-triggers internally, so leaning on the key does not pogo you. */
-      jump: heldKeys.has(KEY.up) || (touch.axes.lift || 0) > 0.5,
-      /* FIRE IS THE MOUSE, exactly as the owner said it ("click to spin a web to that anchor point").
-         Space is jump on this body, so the web does NOT also live there — one key, one verb, per the
-         same rule the hint bar exists for. */
-      fire: fireHeld,
+      /* SPACE IS ONE VERB IN TWO STATES — jump on your feet, release-and-launch off a swing. The
+         controller edge-triggers it internally and spends the press on exactly one of them.
+         `spacePulse` is an input-FIDELITY fix the lab measured, not probe plumbing: a tap whose
+         keydown and keyup both land between two rAFs is invisible to a level-triggered `heldKeys`
+         read, so the press is silently dropped. On a 144 Hz display that window is 7 ms — a human can
+         beat it and a harness beats it every time. */
+      jump: heldKeys.has(KEY.up) || spacePulse || (touch.axes.lift || 0) > 0.5,
+      /* THE WEB IS AN EVENT, NOT A HELD AXIS: one RIGHT-CLICK, one web, and the rope then LATCHES
+         until Space cuts it. Supplying this field AT ALL is what selects the latched scheme inside
+         `createCharacterController` — so `fire` (the left button) is deliberately no longer passed
+         here: LMB is the LOCK now, and a body answering to two triggers is the seam a rope that
+         "sometimes won't let go" hides in. */
+      web: webPressed,
       steer: axes.x,                       // while roped, A/D steer the arc instead of strafing
-      /* W/S REEL the rope in and out while a line is up. They are the walk axis when you are on your
-         feet and the pump axis when you are hanging — which is unambiguous because the two states are
-         mutually exclusive by construction (the grapple only owns the body while `anchor` is set). */
+      /* W/S REEL the rope in and out while a line is up — and, since A-METRO-INHERIT, CLIMB a facade
+         you are pressed against. Three verbs on one axis, mutually exclusive by state (the grapple
+         owns the body only while `anchor` is set; the cling only fires with a wall at arm's reach). */
       lift: (heldKeys.has('w') ? 1 : 0) - (heldKeys.has('s') ? 1 : 0),
-      aimPoint: charAimHit,
+      aimPoint: charTarget,
     });
+    webPressed = false;                    // both edges are consumed by exactly one frame, then cleared
     // the mark reads the MODEL's verdict, never a second copy of the range rule (see aim.js)
     reticle.setInRange(!!character.state.aimInRange);
+    lockMark.setInRange(!!character.state.aimInRange);
+    targetLock.tick(dt);
     charBody.position.set(character.x, character.y + EYE * 0.5, character.z);
     charBody.quaternion.copy(character.state.quat);
     charBody.visible = character.view === 'third';    // in first person you are inside your own head
@@ -1292,6 +1479,14 @@ function frame(dt, t) {
     renderer.toneMappingExposure = _baseTME * (1 + 1.1 * k * k);  // bloom-in ×2.1 → settle
   } else if (_baseTME != null && _dm !== 'b') { renderer.toneMappingExposure = _baseTME; _baseTME = null; }
   _lastDiveMode = _dm;
+
+  /* A-METRO-INHERIT: THE LOCK MARKER IS PLACED *AFTER* THE RENDER, and that is a real ordering
+     requirement rather than housekeeping — it projects through `camera.matrixWorldInverse`, which is
+     what `renderer.render` freshens. Place it before and the mark trails the camera by one frame:
+     invisible standing still, obvious at 7 u/s, which is exactly when a player is looking at it.
+     `diveCtl.update` above is what owns the present in this project, so "after the render" is here. */
+  if (mode === 'walk' && diveCtl.mode === 'a') lockMark.place(rig.camera, targetLock.point);
+  spacePulse = false;                     // the press edge is consumed by exactly one frame, then cleared
 }
 
 /* ---------- readiness + boot ---------- */
@@ -1333,6 +1528,35 @@ window.__setAimMode = (m) => {
    `__aim` below — two aimed bodies, two records, so a probe can never read one while driving the other). */
 window.__charAim = { pt: _charAim, get hit() { return !!charAimHit; }, get inRange() { return !!character.state.aimInRange; },
                      get reach() { return CHAR_AIM_REACH; } };
+/* ---- A-METRO-INHERIT: THE RECEIPTS. swing-ledger.md OPEN #8 — "no `perSwing`/`fire%` instrumentation
+   exists in metropolis… so a dropped pointer lock there still degrades silently into 'the mechanic is
+   broken'". This is that gap closed, with the lab's own three receipts: a probe must be able to prove
+   each of the THREE verbs arrived, and `lmb`/`rmb` read the pointer-lock module's OWN button state, so
+   they cannot agree with a harness that merely believes it clicked. */
+window.__input = {
+  get fire() { return lockAim.down(2); },        // the web button, under its old probe name
+  get lmb() { return lockAim.down(0); },
+  get rmb() { return lockAim.down(2); },
+  get space() { return heldKeys.has(KEY.up) || spacePulse; },
+  get locked() { return lockAim.locked; },
+  get keys() { return [...heldKeys]; },
+};
+/* THE LOCK, EXPOSED, so a probe can prove the thing the owner asked for BY NAME: that a lock PERSISTS
+   and does not silently follow the crosshair (the aliasing bug `createTargetLock` exists to prevent —
+   a probe that only samples it on the frame it was taken could never see the difference). */
+window.__lock = {
+  get has() { return targetLock.has; },
+  get point() { return targetLock.has ? { ...targetLock.point } : null; },
+  get age() { return targetLock.age; },
+  get marker() { return { visible: lockMark.visible, onScreen: lockMark.onScreen, screen: lockMark.screen }; },
+  clear: () => targetLock.clear(),
+};
+/* THE DERIVATION ITSELF, readable from a probe — so "is metropolis on numbers fitted to its own room"
+   is a query rather than an argument. */
+window.__derived = { ...DERIVED, skylineP: SKYLINE_P, groundY: CHAR_GROUND,
+  maxHangLatched: CHAR_SWING_PROFILE.maxHangLatched, lockReach: CHAR_AIM_REACH,
+  camEyeClear: cameraNearRadius({ near: rig.camera.near, fov: rig.camera.fov, aspect: 2, margin: 1.25 }) };
+window.__charProfile = CHAR_SWING_PROFILE;
 window.__aim = { pt: _aim, get hit() { return !!aimHit; }, get inRange() { return !!swingState.aimInRange; },
                  get locked() { return lockAim.locked; }, get firing() { return fireHeld; }, get reach() { return AIM_REACH; } };
 window.__aimFire = __aimFire;

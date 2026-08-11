@@ -360,7 +360,7 @@ export { createCharacterController } from './src/character.js';
    projects/swing-lab hit on its first line. `createBoxArena` is the level on top of it: a flat floor
    and a parameterised tower grid that hands back the four-function world bag every body here speaks,
    sized from the SWING's own numbers (`swingableHeight`) rather than copied off a city. */
-export { createBoxArena, swingableHeight, swingableRope } from './src/box-arena.js';
+export { createBoxArena, swingableHeight, swingableRope, topAtPercentile } from './src/box-arena.js';
 export { createColliderWorld } from './src/collide.js';
 
 // Lesson M6 — GPU particle system: ping-pong FBO sim (pos/vel state textures) + scissor-ring spawn +
