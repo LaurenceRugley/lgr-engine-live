@@ -208,6 +208,11 @@ const forgeMaterials = cityMats ? {
    frame (:328/:1103). Passing `sunRig.windowGlow` (a snapshot NUMBER) meant no window ever glowed at
    night. Same wiring-drift class as the lights — the contract lives in the engine's own consumer. */
 const windowGlow = { value: sunRig.windowGlow };
+/* A-SKYLINE (2026-08-10) — TIMING ONLY, and it is here so a level comparison is not a guess. The lab's
+   city mode publishes `window.__level.buildMs` around its OWN generator call; this brackets `createCity`
+   and nothing else (no forge, no palette pass, no lights), so the two numbers answer the same question.
+   Purely additive: one clock read either side of a call that is otherwise untouched. */
+const _cityT0 = performance.now();
 const city = createCity({
   seed, profileIndex, windowGlow, forgeMaterials, lights: false,
   beach: {},                          // A-SHORE: the sand terrace ring (engine defaults)
@@ -218,6 +223,7 @@ const city = createCity({
   // draws; the phone tier ships without until profiled on a real device (honest cap, not silent).
   streetDetail: MOBILE ? null : {},
 });
+window.__buildMs = performance.now() - _cityT0;
 scene.add(city.group);
 
 /* KNOWN ENGINE GAP (found + confirmed in Arc A-BLACK, not fixed there): citygen.js's addBuilding()/crown

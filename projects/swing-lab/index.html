@@ -112,6 +112,12 @@
     <div class="row"><span class="k">peak speed</span><span class="v" id="v-peak">0.00</span></div>
     <div class="row"><span class="k">travelled</span><span class="v" id="v-trav">0.00</span></div>
     <div class="row"><span class="k">fps</span><span class="v" id="v-fps">—</span></div>
+    <!-- A-SKYLINE: THE LEVEL'S OWN GUARANTEE, ON THE HUD. The whole point of the city mode is that its
+         swingability is a construction rather than a hope, so the number that states it is a readout
+         and not a comment — the same reason every other line here exists. -->
+    <div class="row"><span class="k">level</span><span class="v" id="v-level">lab</span></div>
+    <div class="row"><span class="k">swingable</span><span class="v" id="v-swingable">—</span></div>
+    <div class="row"><span class="k">draw calls</span><span class="v" id="v-draws">—</span></div>
   </div>
 
   <div id="dock">
@@ -127,6 +133,7 @@
       <label>seed<input id="p-seed" type="range" min="1" max="40" step="1" /><span class="n" id="n-seed"></span></label>
       <div class="btns">
         <button id="b-preset-swing" type="button">SWING</button>
+        <button id="b-preset-city" type="button">CITY</button>
         <button id="b-preset-metro" type="button">METROPOLIS</button>
         <button id="b-preset-open" type="button">OPEN</button>
       </div>

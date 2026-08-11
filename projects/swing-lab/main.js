@@ -42,6 +42,10 @@ import {
 const $ = (id) => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
 const qNum = (k, d) => { const v = Number(Q.get(k)); return Number.isFinite(v) && Q.has(k) ? v : d; };
+/* WHICH ROOM. Declared up here rather than beside the arena because the ATMOSPHERE has to know before
+   the arena is built — see the fog note below. `?level=city` is the A-SKYLINE city; anything else is
+   the original lab, unchanged. */
+const LEVEL = Q.get('level') === 'city' ? 'city' : 'lab';
 
 /* ---------------------------------------------------------------------------------------------
    1. THE ENGINE CORE — renderer, scene, camera rig, resize + context-restore backbone. No city.
@@ -52,8 +56,18 @@ const core = createEngineCore({ container: document.body });
 const { renderer, scene, rig, frameStart, frameEnd } = core;
 rig.setMode(CAM.PERSPECTIVE);
 rig.camera.near = 0.02; rig.camera.far = 400; rig.camera.updateProjectionMatrix();
-renderer.setClearColor(new THREE.Color('#141821'), 1);
-scene.fog = new THREE.Fog('#141821', 26, 120);
+/* ---- THE ATMOSPHERE IS SIZED TO THE ROOM, and this was found by LOOKING, not by a number (the
+   ledger's technique #4, paying off a third time). The lab's fog band is 26–120 u against an arena
+   17 u across, so it never touches anything. The city is 84.7 u across: at that band the skyline
+   dissolves into the clear colour about two blocks out, and the first capture of it came back as a
+   black frame with a red capsule in it — a city you cannot see is a city you cannot aim a web across,
+   and `lock` range 11.7 u means the player is MEANT to be picking targets at distance.
+   So the fog far plane is pushed past the arena's own extent, and the horizon is lifted off pure black
+   so a silhouette has something to be a silhouette AGAINST. Gated on LEVEL: the lab keeps its numbers
+   exactly, because 27 probe checks and every A-LAB/A-CLIMB capture were taken under them. */
+const SKY = LEVEL === 'city' ? '#1d2634' : '#141821';
+renderer.setClearColor(new THREE.Color(SKY), 1);
+scene.fog = LEVEL === 'city' ? new THREE.Fog(SKY, 45, 230) : new THREE.Fog(SKY, 26, 120);
 
 /* Lights. `createEngineCore` ships NO lights (it owns the renderer, not the look), so the arena
    supplies its own: one key with shadows, a hemisphere fill so the north faces are not black, and a
@@ -67,7 +81,14 @@ key.shadow.camera.top = 26; key.shadow.camera.bottom = -26;
 key.shadow.camera.near = 1; key.shadow.camera.far = 70;
 key.shadow.bias = -0.0006;
 scene.add(key); scene.add(key.target);
-scene.add(new THREE.HemisphereLight('#9fb4d8', '#2a2b30', 1.15));
+/* THE CITY GETS A STRONGER BOUNCE, and this is the same finding as the fog one frame earlier. The lab's
+   streets are 2.5 u wide with 5 u towers; the city's are 2.7 u with towers up to 12.7 u, so its canyons
+   are twice as deep and the shadowed floor came back BLACK in the first street capture — a player who
+   cannot see the pavement cannot judge the height a zip just bought them, which is the one thing this
+   level exists to give them. Bounce up, ground colour up, key untouched (the contrast is the look). */
+scene.add(LEVEL === 'city'
+  ? new THREE.HemisphereLight('#a8bcdc', '#414755', 1.5)
+  : new THREE.HemisphereLight('#9fb4d8', '#2a2b30', 1.15));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -75,7 +96,51 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
    2. THE LEVEL. Every parameter is a url param first, a slider second — so a probe and a human drive
    the identical world, and a bug report is a URL.
    --------------------------------------------------------------------------------------------- */
-const ARENA0 = {
+/* ---- A-SKYLINE (2026-08-10): THE LAB GROWS A REAL CITY, and it is `?level=city`. ------------------
+   WHY IT LIVES HERE RATHER THAN IN A NEW PROJECT. The question the city has to answer is "does the
+   chain run better in this room than in the lab, on the same bot" — and the only instrument in the repo
+   that can answer it is `swing-lab-probe`'s Phase 9, driving THIS page. A separate project would need
+   its own copy of the harness, and two harnesses measuring one mechanic is how the lab-vs-city drift
+   this arc exists to close got started. Same page, same code, same bot, one URL parameter: the LEVEL is
+   then the only variable in the comparison, which is the whole experiment.
+
+   THE CITY'S NUMBERS ARE DERIVED, NOT PICKED (the same discipline as the lab's rope):
+     · `ropeMax` 4.10 is NOT a new tuning — it is the lab's own A-CLIMB-derived rope, held FIXED so the
+       mechanic is identical in both rooms and any difference in the chain is the level.
+     · The skyline is then generated FROM that rope: the 30th percentile tower top IS the arc-bottom
+       minimum `skim + arcClear + ropeMax` = 4.61 u, so 70% of towers clear the rule BY CONSTRUCTION.
+       Feed the finished level back through `swingableRope(roofAt(0.30))` and you get 4.106 back — the
+       loop closes, which is a check on both derivations at once.
+     · `spacing` 4.6 was SWEPT, not chosen, and the sweep is the justification for the target. Wider
+       streets buy a bigger mean anchor offset and cost dead spots: measured over 220 street spots at
+       +1.2 u, spacing 4.6 gives h.mean 1.85 u with 0/220 spots having no swing available, while 5.2
+       gives h.mean 1.96 (and rise p50 2.27, i.e. the "offset >= 2.0" that reads nicer) at the price of
+       17/220 dead spots. Stranding is swing-ledger.md OPEN #9 — the number the ledger says to drive
+       DOWN next — so 0 dead spots wins over 6% more offset. Stated as a trade, with the sweep behind it.
+     · 19x19 at that spacing is 84.7 u across against metropolis's ~3 u swingable core, so a chain runs
+       out of time long before it runs out of city.
+   `silhouette` is the "better buildings" half — see box-arena.js. Every part is a collider solid, which
+   is what makes a spire an ANCHOR and not scenery. */
+const CITY_ROPE = 4.10, CITY_FRAC = 0.70;
+const CITY_ARENA = {
+  cols: qNum('cols', 19), rows: qNum('rows', 19),
+  spacing: qNum('spacing', 4.6),
+  width: qNum('width', 1.9),
+  plaza: qNum('plaza', 1),
+  seed: qNum('seed', 11),
+  groundY: 0,
+  heightVary: 0,                    // unused on the skyline path — heights come from the quantile map
+  height: 0,
+  skyline: {
+    frac: CITY_FRAC, ropeMax: CITY_ROPE,
+    arcClear: GRAPPLE_PROFILE.arcClear, skim: GRAPPLE_PROFILE.skim,
+    tall: qNum('tall', 2.1), low: 0.22, gamma: 1.0,
+    cores: qNum('cores', 3), coreSigma: 0.30, mix: 0.45,
+  },
+  silhouette: Q.get('plain') === '1' ? null : {},
+  groundMaterial: new THREE.MeshStandardMaterial({ color: '#3d4453', roughness: 0.95, metalness: 0 }),
+};
+const LAB_ARENA = {
   cols: qNum('cols', 9), rows: qNum('rows', 9),
   spacing: qNum('spacing', 4.2),
   width: qNum('width', 1.7),
@@ -85,7 +150,14 @@ const ARENA0 = {
   seed: qNum('seed', 7),
   groundY: 0,
 };
+const ARENA0 = LEVEL === 'city' ? CITY_ARENA : LAB_ARENA;
+/* THE PERCENTILE THE ROPE IS DERIVED AT IS THE LEVEL'S OWN. The lab's 0.35 is A-CLIMB's; the city's is
+   `1 - frac`, i.e. exactly the break the generator built its distribution around. Two rooms, one
+   arithmetic, and the number that differs is a fact about the room. */
+const SKYLINE_P = LEVEL === 'city' ? 1 - CITY_FRAC : 0.35;
+const _buildT0 = performance.now();
 const arena = createBoxArena(ARENA0);
+const LEVEL_BUILD_MS = performance.now() - _buildT0;
 scene.add(arena.group);
 
 /* ---------------------------------------------------------------------------------------------
@@ -121,9 +193,16 @@ const SWING = { ...GRAPPLE_PROFILE, aimMode: Q.get('aim') === 'auto' ? 'auto' : 
    WHY NOT RAISE THE PROFILE CONSTANT: metropolis's median building top is 1.14 u. A longer rope there
    is the exact opposite of a fix, and its two probes drive the shipped number. The ABILITY (deriving a
    rope from a skyline) is in engine-core; the NUMBER is this level's. */
+/* ---- A-SKYLINE: `roofAt`, NOT `topAt`, AND THE DIFFERENCE IS THE WHOLE POINT OF THE NEW ACCESSOR.
+   `topAt` is a percentile over EVERY solid. On the uniform grid those are the same set (proved in
+   box-arena.test.mjs at six percentiles, so this line does not move the lab's 4.10 by a bit), but a
+   silhouetted city's solids buffer is 80% cornices, roof plant and bridge decks — most of them low — so
+   `topAt(0.30)` there answers a question about cornices and would hand this derivation a rope with
+   nothing to do with the skyline. `roofAt` is the percentile over TOWER ROOFS: what you can stand on,
+   and what the arc-bottom rule is about. */
 function fitRopeToArena() {
   SWING.ropeMax = Number(swingableRope({
-    towerTop: arena.topAt(0.35), arcClear: SWING.arcClear, skim: SWING.skim,
+    towerTop: arena.roofAt(SKYLINE_P), arcClear: SWING.arcClear, skim: SWING.skim,
     groundY: arena.params.groundY, ropeMin: SWING.ropeMin,
   }).toFixed(2));
   /* THE HANG CAP IS DERIVED FROM THE ROPE AND HAS TO MOVE WITH IT — the ledger says so in as many
@@ -363,6 +442,17 @@ function updateHud(dt) {
   set('v-peak', stats.peak.toFixed(2));
   set('v-trav', stats.travel.toFixed(1));
   set('v-fps', stats.fps.toFixed(0));
+  /* A-SKYLINE: THE GUARANTEE AND THE COST, SIDE BY SIDE. The fraction is what the level promises; the
+     draw-call count is what it costs, and it has to sit next to the fraction because "make it taller"
+     and "make it cheaper" are the two ways this generator could be wrong. One InstancedMesh carries
+     every tower and every silhouette part, so the second number should barely move with the first. */
+  const ar = arena.stats;
+  set('v-level', `${LEVEL} · ${ar.towers} towers · ${ar.parts} parts · ${arena.stats.extent.toFixed(0)} u`);
+  set('v-swingable', ar.swingable
+    ? `${(100 * ar.swingable.frac).toFixed(1)}% clear ${ar.swingable.need.toFixed(2)} u (want ${(100 * ar.swingable.want).toFixed(0)}%)`
+    : `median roof ${ar.roofMedian.toFixed(2)} u`, ar.swingable ? 'on' : '');
+  const ri = renderer.info.render;
+  set('v-draws', `${ri.calls} · ${(ri.triangles / 1000).toFixed(0)}k tris · build ${LEVEL_BUILD_MS.toFixed(1)} ms`);
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -421,8 +511,22 @@ function wireDock() {
      applied to itself: the range is a function of the skyline, so switching to the METROPOLIS preset
      (median top 1.14 u) must hand back the short rope that room affords, not keep the long one this
      one earned. Before `syncDock`, so the slider shows the number actually in force. */
-  const preset = (o, msg) => () => { arena.rebuild(o); fitRopeToArena(); syncDock(); spawn(); flash(`${msg} · rope ${SWING.ropeMax.toFixed(2)} u`); };
+  /* EVERY PRESET NOW STATES `skyline`/`silhouette` EXPLICITLY, INCLUDING THE ONES THAT WANT NEITHER.
+     `rebuild` is an Object.assign merge, so a preset that simply omits them would inherit whatever the
+     last one set — click CITY then SWING and you would get the lab's spacing with the city's height
+     distribution, which is a level nobody chose and no comment would explain. The same class of bug as
+     the ledger's latched-mode entries: an entry path that does not clear what an exit path set. */
+  const preset = (o, msg) => () => {
+    arena.rebuild({ skyline: null, silhouette: null, ...o });
+    fitRopeToArena(); syncDock(); spawn();
+    flash(`${msg} · rope ${SWING.ropeMax.toFixed(2)} u`);
+  };
   $('b-preset-swing').addEventListener('click', preset({ cols: 9, rows: 9, spacing: 4.2, width: 1.7, height: Number(swingableHeight().toFixed(2)), heightVary: 0.45, plaza: 1 }, 'preset: SWING'));
+  /* THE CITY PRESET RE-DERIVES AT ITS OWN PERCENTILE, which `fitRopeToArena` reads from `SKYLINE_P` —
+     a constant of the page, not of the preset. Clicking CITY from a lab page therefore derives the
+     city's rope at 0.35 rather than 0.30 and reports whatever that is, honestly, instead of pretending.
+     The measured entry point is `?level=city`, which is what the probe and the bench drive. */
+  $('b-preset-city').addEventListener('click', preset({ ...CITY_ARENA }, 'preset: CITY (A-SKYLINE)'));
   $('b-preset-metro').addEventListener('click', preset({ cols: 13, rows: 13, spacing: 2.45, width: 1.9, height: 1.14, heightVary: 0.6, plaza: 0 }, 'preset: METROPOLIS (the control)'));
   $('b-preset-open').addEventListener('click', preset({ cols: 5, rows: 5, spacing: 8.0, width: 2.2, height: 9.0, heightVary: 0.3, plaza: 1 }, 'preset: OPEN (far towers)'));
   const dock = $('dock');
@@ -583,3 +687,16 @@ window.__lock = {
 };
 window.__spawn = spawn;
 window.__setAimMode = (m) => { SWING.aimMode = m === 'auto' ? 'auto' : 'point'; return SWING.aimMode; };
+/* A-SKYLINE: THE LEVEL, AS A READABLE FACT. The bench compares two rooms through one page, so it has to
+   be able to prove which room it is actually in — the same rule as `__input`: a harness that cannot see
+   its own configuration cannot tell a level difference from a URL typo. `buildMs` is the generator call
+   only (not the renderer, not the lights), so it is comparable with metropolis's `window.__buildMs`,
+   which times `createCity()` and nothing else. */
+window.__level = {
+  name: LEVEL,
+  buildMs: LEVEL_BUILD_MS,
+  ropeMax: SWING.ropeMax,
+  skylineP: SKYLINE_P,
+  get stats() { return arena.stats; },
+  get draws() { const r = renderer.info.render; return { calls: r.calls, triangles: r.triangles }; },
+};
