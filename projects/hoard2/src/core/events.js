@@ -20,6 +20,7 @@
 export const EVENTS = new Set([
   'wave:start', 'wave:clear',
   'zombie:spawn', 'zombie:death',
+  'infection:bite', 'infection:turn',
   'player:damage', 'player:death',
   'weapon:fire', 'weapon:hit', 'weapon:reload',
   'melee:swing', 'melee:hit',

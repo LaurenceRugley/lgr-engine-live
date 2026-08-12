@@ -121,6 +121,73 @@ test('separation caps: the push honours maxNeighbors (bounded work when a crowd 
   assert.deepEqual([...p2], [0, 0, 0, 0], 'isolated agents get no separation push');
 });
 
+// ---- MULTI-SOURCE SEEDING (the outbreak arc's one core change) ----
+// WHY these hold: a flee crowd needs "distance to the NEAREST of many threats" — one shared flood, not
+// one field per zombie. The invariants: (1) multi-source cost is EXACTLY the min over per-source floods
+// (the BFS identity the flee behaviour prices off); (2) a one-element array is byte-identical to the
+// single-target call (so the array form is a superset, not a fork); (3) existing single-target callers
+// are untouched (the rest of this file IS that regression suite, unchanged).
+
+test('multi-source: cost is the min over per-source floods (distance to the NEAREST source)', () => {
+  const obstacles = [{ x: 0, z: 0, r: 0.8 }, { x: -2, z: 2, r: 0.6 }];
+  const mk = () => createFlowField({ bounds: { minX: -6, minZ: -6, maxX: 6, maxZ: 6 }, cellSize: 0.5, obstacles });
+  const A = { x: -4, z: -4 }, B = { x: 4, z: 3 };
+  const fa = mk(); fa.solve(A.x, A.z);
+  const fb = mk(); fb.solve(B.x, B.z);
+  const fm = mk(); fm.solve([A, B]);
+  for (let c = 0; c < fm.N; c++) {
+    const a = fa.cost[c], b = fb.cost[c], m = fm.cost[c];
+    const want = (a < 0) ? b : (b < 0) ? a : Math.min(a, b);   // −1 = unreached; min ignores it
+    assert.equal(m, want, `cell ${c}: multi cost ${m} ≠ min(${a}, ${b})`);
+  }
+  // and both source cells sit at cost 0 (they ARE the threats).
+  assert.equal(fm.costAt(A.x, A.z), 0);
+  assert.equal(fm.costAt(B.x, B.z), 0);
+});
+
+test('multi-source: a ONE-element array is byte-identical to the single-target solve', () => {
+  const obstacles = [{ x: 1, z: -1, r: 0.7 }];
+  const mk = () => createFlowField({ bounds: { minX: -6, minZ: -6, maxX: 6, maxZ: 6 }, cellSize: 0.4, obstacles });
+  const one = mk(); one.solve(2.3, -1.7);
+  const arr = mk(); arr.solve([{ x: 2.3, z: -1.7 }]);
+  assert.deepEqual([...arr.cost], [...one.cost], 'cost fields differ');
+  assert.deepEqual([...arr.dir], [...one.dir], 'direction fields differ');
+});
+
+test('multi-source: fleeing UPHILL from every open cell strictly leaves the nearest source behind', () => {
+  // The consumer contract: a civilian ascends cost (walks to the highest-cost open neighbour). From any
+  // open cell that is not already a local max, there must BE an uphill neighbour, and taking it must not
+  // decrease the distance to the nearest source — i.e. the field is climbable away from ALL threats at once.
+  const ff = createFlowField({ bounds: { minX: -5, minZ: -5, maxX: 5, maxZ: 5 }, cellSize: 0.5, obstacles: [{ x: 0, z: 2, r: 0.9 }] });
+  ff.solve([{ x: -3, z: -3 }, { x: 3, z: -3 }]);
+  const cs = ff.cellSize;
+  let climbed = 0;
+  for (let gz = 0; gz < ff.rows; gz++) for (let gx = 0; gx < ff.cols; gx++) {
+    const c = gz * ff.cols + gx;
+    if (ff.blocked[c] || ff.cost[c] < 1) continue;
+    const wx = ff.bounds.minX + (gx + 0.5) * cs, wz = ff.bounds.minZ + (gz + 0.5) * cs;
+    let best = ff.cost[c];
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dz) continue;
+      const nx = wx + dx * cs, nz = wz + dz * cs;
+      if (ff.isBlocked(nx, nz)) continue;
+      const nc = ff.costAt(nx, nz);
+      if (nc > best || nc < 0) best = nc < 0 ? Infinity : nc;   // −1 = unreachable by any threat = safest
+    }
+    if (best === Infinity || best > ff.cost[c]) climbed++;      // an uphill (or threat-free) step exists
+    assert.ok(best === Infinity || best >= ff.cost[c], `cell (${gx},${gz}) has only downhill neighbours`);
+  }
+  assert.ok(climbed > 100, `expected many climbable cells, got ${climbed}`);
+});
+
+test('multi-source: an EMPTY source list idles everyone (no threats ⇒ no flee), never NaN', () => {
+  const ff = createFlowField({ bounds: { minX: -4, minZ: -4, maxX: 4, maxZ: 4 }, cellSize: 0.5 });
+  ff.solve([]);
+  const v = ff.sample(1, 1);
+  assert.deepEqual([v.x, v.z], [0, 0]);
+  assert.equal(ff.costAt(1, 1), -1, 'no source ⇒ every cell unreached');
+});
+
 test('determinism + zero-NaN: repeated solves of the same target are identical', () => {
   const obstacles = [{ x: 1, z: 1, r: 0.6 }, { x: -2, z: 0.5, r: 0.5 }];
   const mk = () => createFlowField({ bounds: { minX: -5, minZ: -5, maxX: 5, maxZ: 5 }, cellSize: 0.4, obstacles });

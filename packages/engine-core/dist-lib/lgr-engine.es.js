@@ -17621,19 +17621,33 @@ function Xm(e = {}) {
 	}
 	let S = -1, C = -1, w = 0, T = 0;
 	function E(e, t) {
-		let n = x(e, t), r = h(n.gx, n.gz);
-		if (d[r] && (r = O(n.gx, n.gz)), S = n.gx, C = n.gz, w = 0, T++, f.fill(-1), r < 0) {
-			p.fill(0);
-			return;
+		f.fill(-1);
+		let n = 0, r = 0;
+		if (Array.isArray(e)) {
+			S = -1, C = -1, w = 0, T++;
+			for (let t = 0; t < e.length; t++) {
+				let n = e[t], i = x(n.x, n.z), a = h(i.gx, i.gz);
+				d[a] && (a = O(i.gx, i.gz)), !(a < 0 || f[a] === 0) && (f[a] = 0, m[r++] = a);
+			}
+			if (r === 0) {
+				p.fill(0);
+				return;
+			}
+		} else {
+			let n = x(e, t), i = h(n.gx, n.gz);
+			if (d[i] && (i = O(n.gx, n.gz)), S = n.gx, C = n.gz, w = 0, T++, i < 0) {
+				p.fill(0);
+				return;
+			}
+			f[i] = 0, m[r++] = i;
 		}
-		let i = 0, a = 0;
-		for (f[r] = 0, m[a++] = r; i < a;) {
-			let e = m[i++], t = e % c, n = (e - t) / c, r = f[e];
+		for (; n < r;) {
+			let e = m[n++], t = e % c, i = (e - t) / c, a = f[e];
 			for (let e = 0; e < 8; e++) {
-				let i = Ym[e], o = t + i.dx, s = n + i.dz;
+				let n = Ym[e], o = t + n.dx, s = i + n.dz;
 				if (!g(o, s)) continue;
 				let c = h(o, s);
-				d[c] || f[c] !== -1 || i.diag && (d[h(t + i.dx, n)] || d[h(t, n + i.dz)]) || (f[c] = r + 1, m[a++] = c);
+				d[c] || f[c] !== -1 || n.diag && (d[h(t + n.dx, i)] || d[h(t, i + n.dz)]) || (f[c] = a + 1, m[r++] = c);
 			}
 		}
 		D();

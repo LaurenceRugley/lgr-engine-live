@@ -80,6 +80,27 @@ export function createZombiePool(config, srng, cap) {
     return z;
   }
 
+  // OUTBREAK (Phase 1): spawn a zombie AT a world position — a turned civilian rises WHERE IT FELL,
+  // not on the spawn ring. One srng roll (the type), same wave scaling as spawn(). The stat lines are
+  // kept in LOCKSTEP with spawn() above (deliberate small duplication, the rng.js precedent: extracting
+  // a shared init would reorder spawn()'s roll sequence type→angle→radius and shift every existing
+  // trace; a turn's sequence is just type).
+  function spawnAt(x, z, wave, nf) {
+    let slot = -1;
+    for (let i = 0; i < MAXZ; i++) if (!zs[i].alive) { slot = i; break; }
+    if (slot < 0) return null; // pool saturated → the caller retries next tick (the victim stays down)
+    const type = rollType(), t = Z[type], z2 = zs[slot];
+    const hpScale = 1 + wave * 0.08;
+    z2.x = x; z2.z = z;
+    z2.vx = 0; z2.vz = 0; z2.alive = true; z2.type = type;
+    z2.maxhp = t.hp * hpScale; z2.hp = z2.maxhp;
+    z2.baseSpeed = t.speed * (1 + wave * 0.015) * (wave === 1 ? 0.85 : 1);
+    z2.speed = z2.baseSpeed * N.speedMul(nf);
+    z2.scale = t.scale; z2.dmg = t.dmg; z2.flash = 0; z2.attacking = false;
+    aliveCount++;
+    return z2;
+  }
+
   // Is world point (x,z) inside barrier AABB `b` (inflated by margin)? aabbs use build.aabbs()'s lowercase keys.
   function pointInAabb(b, x, z, m) {
     return x >= b.minx - m && x <= b.maxx + m && z >= b.minz - m && z <= b.maxz + m;
@@ -90,12 +111,21 @@ export function createZombiePool(config, srng, cap) {
   }
 
   /* The per-frame crowd step. s = {
-       player:{x,z}, field|null, contactR, nf, aabbs|null, hitBarrier(id,amount)|null, damagePlayer(amount)|null
+       player:{x,z}, field|null, contactR, nf, aabbs|null, hitBarrier(id,amount)|null, damagePlayer(amount)|null,
+       civs|null — OUTBREAK opportunism (Phase 1's smallest slice of the research doc's §4 target-widening):
+         a susceptible civilian within CIVS.opportunityR AND closer than the survivor pulls the zombie off
+         its march into a direct chase, which is what makes infection SPREAD agent-to-agent on the street
+         (measured need: without it, 0 natural bites in 60 s — a fleeing civ just dodges the corridor of a
+         player-bound horde). Absent (every existing caller) ⇒ EXACT no-op; the field/player pathing,
+         barrier and contact code below are untouched either way. The bite itself stays the CIVILIAN
+         pool's job (contact × dt × p, civilians.js) — this only points the feet.
      }. Zero allocation. */
   function step(dt, s) {
     if (dt <= 0) return;
     const player = s.player, field = s.field, contactR = s.contactR, nf = s.nf || 0;
     const aabbs = s.aabbs, hitBarrier = s.hitBarrier, damagePlayer = s.damagePlayer;
+    const civilians = s.civs || null;
+    const oppR = (config.CIVS && config.CIVS.opportunityR) || 0;
 
     if (field) field.update(player.x, player.z, dt); // re-solve the shared field toward the survivor (near-free)
 
@@ -110,8 +140,19 @@ export function createZombiePool(config, srng, cap) {
       z.speed = z.baseSpeed * N.speedMul(nf); // LIVE night speed — visibly faster as nf ramps
       const dx = player.x - z.x, dz = player.z - z.z, td = Math.hypot(dx, dz) || 1;
 
+      // OUTBREAK opportunism (see the step contract above): prey = the nearest susceptible civilian,
+      // only if it is inside opportunityR AND closer than the survivor. Self-limiting: a civ that flees
+      // past the radius releases the zombie back to the field — a walker gets a dramatic near-miss, a
+      // runner gets its victim (fleeSpeed 1.8 sits between them BY DESIGN — config.CIVS).
+      let prey = null, pd = 1;
+      if (civilians && oppR > 0) {
+        const c = civilians.nearestS(z.x, z.z, oppR);
+        if (c) { const d = Math.hypot(c.x - z.x, c.z - z.z); if (d < td) { prey = c; pd = d || 1; } }
+      }
+
       let desX, desZ;
-      if (field) {
+      if (prey) { desX = ((prey.x - z.x) / pd) * z.speed; desZ = ((prey.z - z.z) / pd) * z.speed; } // direct chase (same class as the target-cell seek below)
+      else if (field) {
         const smp = field.sample(z.x, z.z);
         if (smp.x !== 0 || smp.z !== 0) { desX = smp.x * z.speed; desZ = smp.z * z.speed; }
         else { desX = (dx / td) * z.speed; desZ = (dz / td) * z.speed; } // in the target cell → direct seek for the bite
@@ -203,7 +244,7 @@ export function createZombiePool(config, srng, cap) {
   }
 
   return {
-    spawn, step, damage, queryTargets, queryCone, centroid, reset, forEach,
+    spawn, spawnAt, step, damage, queryTargets, queryCone, centroid, reset, forEach,
     get alive() { return aliveCount; }, get(i) { return zs[i]; }, get max() { return MAXZ; },
   };
 }

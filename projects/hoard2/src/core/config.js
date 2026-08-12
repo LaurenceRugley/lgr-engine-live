@@ -68,6 +68,35 @@ export const ZTYPE = {
 // live (owner taste). NOTE: presentation-only (feeds setTransform, never the sim) → the sim trace is unmoved.
 export const ZOMBIE_TURN_RATE = 4.0;
 
+/* ---- OUTBREAK (Phase 1 of the mass-agents arc — docs/design/research-agents-gameplay.md §3/§7) ----
+   A civilian population with SEIR infection dynamics: S = these civilians · E = bitten+incubating
+   (staggering, tint-shifting — the TELEGRAPH) · I = the existing zombie pool · R = the corpse pool.
+   `count` is the DENSITY DIAL and it is DIRECTOR-OWNED with a deliberately modest default: the art
+   doctrine is "sparse charming theater" (agents.js header) and the owner has NOT ratified "lots and
+   lots" — crank it here (or ?civs=<n> for an A/B), don't crank it in code. `incubationS` is THE
+   PACING LEVER: every turn is telegraphed across this window, never a pop. */
+export const CIVS = {
+  count: 24,            // DENSITY DIAL (desktop default — sparse, readable, owner-tunable)
+  countMobile: 10,      // mobile cap (M1 skinned-rig budget: fewer bodies is a tier, not a fork)
+  walkSpeed: 0.7,       // ambling wander
+  fleeSpeed: 1.8,       // > walker 1.15 (walkers menace, don't catch) · < runner 2.65 (runners CATCH)
+  staggerSpeed: 0.5,    // exposed shamble — the telegraph reads in the gait as well as the tint
+  populateRadius: 18,   // civilians scatter inside this disc at boot (inside the spawn ring's reach)
+  panicCells: 9,        // start fleeing when the nearest zombie is within ~5.4 u (9 cells × 0.6)
+  calmCells: 13,        // hysteresis: keep fleeing until ~7.8 u clear (no flicker at the boundary)
+  biteRadius: 0.55,     // zombie-to-civilian contact distance (≈ the player CONTACT_R class)
+  pTransmitPerSec: 0.9, // transmission = contact × dt × p (research doc §3) — ~1 s of contact infects
+  contactCells: 4,      // bite PREFILTER: only civs within this flee-field cost get the exact scan
+                        //   (covers biteRadius + one fleeResolveS of runner staleness — see sim/index.js)
+  incubationS: [7, 13], // THE PACING LEVER — bite → turn window, rolled per victim off rng.fork('sim')
+  opportunityR: 3.5,    // zombie OPPORTUNISM reach: a susceptible inside this (and closer than the
+                        //   survivor) pulls a zombie into a direct chase — the agent-to-agent spread
+                        //   mechanism (measured: without it, 0 natural street bites in 60 s)
+  fleeResolveS: 0.4,    // flee-field re-seed/re-solve throttle (threat staleness ≤ this)
+  wanderIdleS: [2, 6],  // idle dwell between wander legs
+  wanderRadius: 6,      // wander leg length
+};
+
 /* ---- NIGHT (harder AND measurable — ratified: speed ×1.4 AND count ×1.5 at full night) ---- */
 // nightFactor nf ∈ [0,1] (0 = day, 1 = deep night) is produced by the world day/night wiring and read
 // by the sim. Multipliers are LINEAR in nf so the probe can assert the exact value at a known phase.

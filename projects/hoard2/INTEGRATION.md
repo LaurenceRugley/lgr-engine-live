@@ -29,11 +29,12 @@ you, and drives your `update` every frame in this order:
 ## Registry facades (the pinned cross-owner surface)
 | name | method | returns / effect | who calls it |
 |---|---|---|---|
-| **sim** | `state` | READ-ONLY snapshot: `{ wave, kills, score, alive, hp, hunger, stamina, dead, cause, runTime }` | ui, build, fx |
+| **sim** | `state` | READ-ONLY snapshot: `{ wave, kills, score, alive, hp, hunger, stamina, dead, cause, runTime, civs, exposed }` (civs/exposed = the outbreak's S/E counts) | ui, build, fx |
 | | `queryTargets(seg)` | zombies a world-space segment `{o:{x,y,z}, e:{x,y,z}}` could hit → `[{id,x,y,z,type,hp}]` | player (gun/melee) |
 | | `trySpendStamina(cost)` | `bool` — deduct if available (melee/sprint pricing) | player |
 | | `damagePlayer(amount, from)` | apply injury (barriers breached, zombie contact resolved in sim) | sim-internal / build |
-| | `probe()` | `{ rt, wave, kills, score, alive, hp, hunger, night, px, pz }` (px,pz = horde centroid, deterministic) | harness |
+| | `probe()` | `{ rt, wave, kills, score, alive, hp, hunger, night, px, pz, civs, exposed, bites, turns }` (px,pz = horde centroid; the last four count the outbreak) | harness |
+| | `civSample()` | on-demand snapshot of live civilians `[{x,z,state:'s'\|'e'}]` (read-only; never a sim roll) | harness (flee measurement) |
 | **player** | `player` | live `{ x, z, facing }` (the survivor's ground pose) | sim (targeting), fx |
 | **build** | `castBarriers(seg)` | nearest barrier hit `{ point:{x,y,z}, normal:{x,y,z}, id, t }` or `null` | player (ballistics castWorld) |
 | | `aabbs()` | barrier blockers `[{ id, minx, minz, maxx, maxz }]` | sim (field), player (walker) |
@@ -51,7 +52,7 @@ register before the first frame), never at construction time. `get` of a missing
 
 ## Event bus (vocabulary is FROZEN — `docs/HOARD-CONTRACT.md §Event vocabulary`)
 Emit with a reused payload object in hot paths (no per-frame alloc, engine-invariants #7). Who emits what:
-- **sim**: `wave:start`/`wave:clear {n,count,night}` · `zombie:spawn`/`zombie:death {id,type,pos,drops?}` · `player:damage {amount,from,hp}` · `player:death {cause}` · `item:pickup {kind}`
+- **sim**: `wave:start`/`wave:clear {n,count,night}` · `zombie:spawn`/`zombie:death {id,type,pos,drops?}` · `infection:bite {id,pos,incubateS}` · `infection:turn {id,zid,type,pos}` · `player:damage {amount,from,hp}` · `player:death {cause}` · `item:pickup {kind}`
 - **player**: `weapon:fire {origin,dir,weapon,seed}` · `weapon:hit {point,normal,target?,damage}` · `weapon:reload {}` (A8-3: the mag emptied → the reload beat began; a named SFX hook, no listener required) · `melee:swing {origin,arc}` · `melee:hit {target,damage}` · `dive:enter`/`dive:exit {mode:'walk'}` (lead emits these via ctx.dive — you just call toggle)
 - **build**: `harvest:gain {material,amount,source}` · `barrier:place`/`barrier:damage`/`barrier:breach`/`barrier:repair {id,seg,hp}`
 - **ui**: `game:pause`/`game:resume {source}` (core executes) · `craft {recipe,cost}` · `item:consume {kind,effect}`
@@ -69,7 +70,7 @@ forks are decorrelated — proven in `src/core/core.test.mjs`). The world clock 
 `performance.now()` animation. sim advances its `runTime` by `ctx.time.simDt(dt)` each frame.
 
 ## Probe hooks (attach to `ctx.probe.<name>`; the harness drives them — no silent caps)
-- **sim**: `spawnWave(n)` (force-start wave n), `starve()` (hunger→0 fast), `hurt(amount)` (injury). Expose `px,pz` in `probe()`.
+- **sim**: `spawnWave(n)` (force-start wave n), `starve()` (hunger→0 fast), `hurt(amount)` (injury), `infect(n)` (force-bite n susceptible civilians through the REAL bite path — drives the incubation→turn cycle without waiting for contact). Expose `px,pz` in `probe()`.
 - **player**: `fire()` (one shot forward), `melee()` (one swing).
 - **build**: `placeBarrier()`, `breachNearest()`, `repairNearest()`, `harvestWood()`, `harvestScrap()`.
 - **world**: `setNight(nf)` (override the canonical nightFactor — drives BOTH sim difficulty and visuals).

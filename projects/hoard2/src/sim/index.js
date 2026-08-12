@@ -8,7 +8,7 @@
 
    PINNED FACADE (register('sim', …)), EXACTLY per INTEGRATION.md:
      state · queryTargets(seg) · trySpendStamina(cost) · damagePlayer(amount,from) · probe() · update(dt,t)
-   EMITS:   wave:start/clear · zombie:spawn/death · player:damage · player:death · item:pickup
+   EMITS:   wave:start/clear · zombie:spawn/death · infection:bite/turn · player:damage · player:death · item:pickup
    CONSUMES: weapon:hit / melee:hit (apply damage to the hit zombie) · barrier:place / barrier:breach
              (rebuild the flow field's obstacle set) · world.nightFactor() · player.player · build.aabbs()/hitBarrier()
    PROBE HOOKS: ctx.probe.spawnWave(n) · ctx.probe.starve() · ctx.probe.hurt(amount)
@@ -22,6 +22,7 @@ import { createCharacterRig, createCharacterHorde, createFlowField } from '@lgr/
 import { createSurvival } from './survival.js';
 import { createWaveDirector } from './wave-director.js';
 import { createZombiePool } from './zombies.js';
+import { createCivilianPool } from './civilians.js';
 
 const CONTACT_R = 0.6;  // player maul radius (v1 hoard.js:108 CONTACT_R 0.52 + horde body slack)
 const IFRAME = 0.5;     // seconds between contact-damage TICKS (so player:damage isn't emitted 60×/s)
@@ -29,13 +30,22 @@ const DROP_SLOTS = 32;  // active dropped-item pool (bounded; a drop past the ca
 const DROP_TTL = 30;    // seconds a dropped item lingers before it despawns
 
 export function createSim(ctx) {
-  const { config, rng, time, registry, events, probe, scene, rig } = ctx;
+  const { THREE, config, rng, time, registry, events, probe, scene, rig } = ctx;
   const srng = rng.fork('sim'); // the ONLY randomness source in the sim (determinism spine)
 
   // M1 MOBILE TRUTH: mobile caps the live horde near v1's class (config.MAXZ_MOBILE). pool.max flows into the
   // render horde size below, so this ONE number sizes both the sim pool and the skinned-rig count.
   const pool = createZombiePool(config, srng, ctx.mobile ? config.MAXZ_MOBILE : config.MAXZ);
   const survival = createSurvival(config);
+
+  // OUTBREAK Phase 1 — the civilian population (S/E of SEIR; the zombie pool is I, the corpse pool is R).
+  // Density is the DIRECTOR-OWNED dial: config.CIVS.count (mobile: countMobile — the same skinned-rig
+  // budget law as MAXZ_MOBILE). ?civs=<n> overrides for A/B; ?noflee=1 disables flee steering — the
+  // control arm for the "flee actually flees" measurement. sepCap sizes the SHARED separation list
+  // (civilians + zombies ride one spatial-hash build — see civilians.js header).
+  const _oq = ctx.flags && ctx.flags.q;
+  const _civCap = _oq && _oq.get('civs') != null ? Math.max(0, +_oq.get('civs') || 0) : (ctx.mobile ? config.CIVS.countMobile : config.CIVS.count);
+  const civs = createCivilianPool(config, srng, { cap: _civCap, sepCap: pool.max, flee: !(_oq && _oq.get('noflee') === '1') });
 
   let kills = 0, score = 0, _nf = 0;
   let field = null, _fieldDirty = false;
@@ -74,6 +84,7 @@ export function createSim(ctx) {
     wave: 0, kills: 0, score: 0, alive: 0,
     hp: config.SURVIVE.hpMax, hunger: config.SURVIVE.hungerMax, stamina: config.SURVIVE.staminaMax,
     dead: false, cause: null, runTime: 0,
+    civs: 0, exposed: 0, // OUTBREAK: live susceptibles / incubating victims (HUD + telemetry read these)
   };
 
   // ---- hoisted event payloads (no per-frame alloc; listeners consume synchronously in the same tick) ----
@@ -87,7 +98,7 @@ export function createSim(ctx) {
   // ---- hoisted step scratch ----
   const _player = { x: 0, z: 0 };
   const _cen = { x: 0, z: 0 };
-  const _stepS = { player: _player, field: null, contactR: CONTACT_R, nf: 0, aabbs: null, hitBarrier: null, damagePlayer: null };
+  const _stepS = { player: _player, field: null, contactR: CONTACT_R, nf: 0, aabbs: null, hitBarrier: null, damagePlayer: null, civs };
   let _build = null; // per-frame cached build facade (barrier hits / aabbs)
 
   // ---- dropped items (food/scrap/bandage from the dead) — a small fixed pool ----
@@ -165,10 +176,20 @@ export function createSim(ctx) {
     }
   }
 
-  /* ---- flow field (lazy: world + build register before frame 1, so first update is safe) ---- */
+  /* ---- flow fields (lazy: world + build register before frame 1, so first update is safe) ----
+     TWO fields over the same grid/obstacles: `field` (single-target, toward the survivor — the zombies'
+     hunt, unchanged) and `fleeField` (MULTI-SOURCE, seeded from every live zombie — cost = grid distance
+     to the nearest infectious; civilians ASCEND it). The flee field re-seeds on its own throttle
+     (CIVS.fleeResolveS) because its sources are the whole horde, not one point — update()'s
+     moved-a-cell epsilon has no meaning for it (see createFlowField's multi-source note). */
   function initField(world) {
     field = createFlowField({ center: { x: 0, z: 0 }, radius: config.ARENA_EXTENT, cellSize: 0.6, agentRadius: 0.3, maxAgents: pool.max });
+    fleeField = createFlowField({ center: { x: 0, z: 0 }, radius: config.ARENA_EXTENT, cellSize: 0.6, agentRadius: 0.3, maxAgents: pool.max + civs.max });
     rebuildField(world);
+    // The population arrives with the field (deterministic: same call order every boot; scatter rolls
+    // ride rng.fork('sim') before the first wave's spawn rolls).
+    civs.populate(fleeField);
+    reseedFlee(); // zero zombies at boot → an empty solve = every cell reads SAFE
   }
   function rebuildField(world) {
     if (!field) return;
@@ -176,7 +197,45 @@ export function createSim(ctx) {
     // build.aabbs() uses lowercase keys; createFlowField wants {minX,minZ,maxX,maxZ}. Adapter runs only on rebuild.
     const aabbs = _build && _build.aabbs ? _build.aabbs().map((a) => ({ minX: a.minx, minZ: a.minz, maxX: a.maxx, maxZ: a.maxz })) : [];
     field.rebuildObstacles(obs, aabbs);
+    fleeField.rebuildObstacles(obs, aabbs);
   }
+
+  /* ---- OUTBREAK: flee-field seeding + the SEIR event hooks ---- */
+  let fleeField = null, _fleeAcc = 0;
+  let bites = 0, turns = 0;
+  // Hoisted threat list: reused {x,z} records + a rebuilt array, but only on the throttle (≈2.5 Hz),
+  // never per frame — the push churn is off the hot path (events.js's one-shot-alloc precedent).
+  const _threatObjs = []; for (let i = 0; i < pool.max; i++) _threatObjs.push({ x: 0, z: 0 });
+  const _threatList = [];
+  function reseedFlee() {
+    _threatList.length = 0;
+    for (let i = 0; i < pool.max; i++) {
+      const z = pool.get(i);
+      if (z.alive) { const o = _threatObjs[_threatList.length]; o.x = z.x; o.z = z.z; _threatList.push(o); }
+    }
+    fleeField.solve(_threatList); // multi-source: cost = grid steps to the NEAREST live zombie
+  }
+  const _biteP = { id: 0, pos: { x: 0, y: 0, z: 0 }, incubateS: 0 };
+  const _turnP = { id: 0, zid: 0, type: 'walker', pos: { x: 0, y: 0, z: 0 } };
+  function onBite(c) {
+    bites++;
+    _biteP.id = c.id; _biteP.incubateS = c.incubDur;
+    _biteP.pos.x = c.x; _biteP.pos.y = config.GROUND_Y; _biteP.pos.z = c.z;
+    events.emit('infection:bite', _biteP);
+  }
+  function onTurn(c) {
+    const z = pool.spawnAt(c.x, c.z, director.wave, _nf); // the victim rises WHERE IT FELL
+    if (!z) return false; // pool saturated → civilians.js holds the victim at the threshold and retries
+    turns++;
+    _spawnP.id = z.id; _spawnP.type = z.type;
+    _spawnP.pos.x = z.x; _spawnP.pos.y = config.GROUND_Y; _spawnP.pos.z = z.z;
+    events.emit('zombie:spawn', _spawnP); // the new zombie is an ordinary pool member — every listener sees it
+    _turnP.id = c.id; _turnP.zid = z.id; _turnP.type = z.type;
+    _turnP.pos.x = c.x; _turnP.pos.y = config.GROUND_Y; _turnP.pos.z = c.z;
+    events.emit('infection:turn', _turnP);
+    return true;
+  }
+  const _civS = { field: null, zpool: pool, threatCount: 0, aabbs: null, onBite, onTurn };
 
   /* ---- render mirror: 1:1 sim → rigged horde (v1 main.js:364-381 pattern). Loads async; guarded. ---- */
   // A6-2 STRIDE-RATE — MEASURED NEGATIVE RESULT (slip probe, tools/hoard2-slip-probe.mjs): physically-correct
@@ -264,10 +323,83 @@ export function createSim(ctx) {
     if (Math.abs(_nf - _nfLastFill) > 0.004) { horde.setNightFill(_nf); _nfLastFill = _nf; }
   }
 
+  /* ---- OUTBREAK render mirror: civilians ride the SURVIVOR rig (human silhouette, CHAR scale 0.32 —
+     the same asset/scale the player renders at, so civilians read as PEOPLE against the zombie horde).
+     THE TELEGRAPH (spectator legibility is Phase 1's whole point): an exposed civilian's material color
+     LERPS from its street tint to sickly green across the incubation window, its gait drops to a
+     stagger (setLocomotion off the slowed sim speed), and a HitReact stumble one-shot fires on a beat
+     that TIGHTENS as the turn approaches — so a watcher can pick the next zombie out of the crowd
+     seconds early. Presentation only: reads incubT/incubDur, never rolls, never writes the sim. ---- */
+  const CIV_SCALE = 0.32; // survivor.glb world scale (player/index.js CHAR_SCALE — same asset)
+  // Street-clothes palette, cycled. DELIBERATELY NO GREENS: green is the infection's color axis (zombie
+  // types + the E-state ramp below), and the first capture pass proved a sage-tinted healthy civilian
+  // reads as mid-incubation from across the arena — the telegraph must own its hue outright.
+  const CIV_TINTS = [0xd9c8a6, 0x9db3d1, 0xc98f7d, 0x9a7f63, 0xcdb8c2, 0x8fa0a8];
+  const E_TINT = 0x7fae4e; // the sickly green every base tint ramps toward (matches the walker's family)
+  let cHorde = null;
+  const _civMats = [], _civBase = [];
+  const _civOn = new Uint8Array(civs.max);
+  const _civYaw = new Float32Array(civs.max).fill(999);
+  const _eColor = new THREE.Color(E_TINT);
+  let _nfLastFillC = -1;
+  if (civs.max > 0) {
+    const civRig = createCharacterRig({ url: 'models/survivor.glb', states: { idle: 'Idle', walk: 'Walk', run: 'Run', hit: 'HitReact', death: 'Death' } });
+    civRig.ready.then(() => {
+      cHorde = createCharacterHorde(civRig, { size: civs.max, lodDistance: 14, lodHz: 3, baseScale: CIV_SCALE, castShadow: !ctx.mobile, motionLayers: !ctx.mobile });
+      scene.add(cHorde.group);
+      buildCivMaterials();
+    }).catch(() => { /* asset missing → sim still runs headless-correct (the zombie-rig precedent) */ });
+  }
+  function buildCivMaterials() {
+    try {
+      let base = null; cHorde.get(0).object.traverse((n) => { if (n.isMesh && !base) base = n.material; });
+      if (!base) return;
+      // Per-SLOT material clones (one-time, pool-sized — not per-frame) so each civilian can tint-shift
+      // independently as it incubates. _civBase keeps the street color the lerp starts from.
+      for (let i = 0; i < civs.max; i++) {
+        const m = base.clone();
+        if (m.color) m.color.setHex(CIV_TINTS[i % CIV_TINTS.length]);
+        _civMats.push(m); _civBase.push(m.color ? m.color.clone() : null);
+        cHorde.setType(i, { material: m });
+      }
+    } catch (_e) { /* tint is cosmetic — untinted civilians still read via silhouette + gait */ }
+  }
+  function mirrorCivs(sdt) {
+    if (!cHorde) return;
+    for (let i = 0; i < civs.max; i++) {
+      const c = civs.get(i);
+      if (!c.alive) { if (_civOn[i]) { cHorde.setActive(i, false); _civOn[i] = 0; _civYaw[i] = 999; } continue; }
+      if (!_civOn[i]) { cHorde.setActive(i, true); _civOn[i] = 1; }
+      const sp = Math.hypot(c.vx, c.vz);
+      cHorde.setLocomotion(i, Math.min(1, sp / 2.2)); // amble / flee-run / stagger all read straight off sim speed
+      if (c.state === 'e' && _civMats[i] && _civBase[i]) {
+        const k = Math.min(1, c.incubT / (c.incubDur || 1)); // 0 = just bitten … 1 = turning now
+        _civMats[i].color.lerpColors(_civBase[i], _eColor, k);
+        // The stumble beat: fires roughly every 1.6 s at first, tightening toward ~0.7 s near the turn.
+        const period = 1.6 - 0.9 * k;
+        if (c.incubT % period < sdt) { cHorde.playAction(i, 'hit'); cHorde.hitReact(i, c.vx, c.vz); }
+      }
+      // Face the velocity with a capped slew (the zombies' A6-2 turn-in-place rule, same reason).
+      let yaw = _civYaw[i];
+      const tgt = sp > 0.15 ? Math.atan2(c.vx, c.vz) : (yaw === 999 ? 0 : yaw);
+      if (yaw === 999) yaw = tgt;
+      else {
+        let d = tgt - yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+        const stp = 6 * sdt; yaw += d > stp ? stp : d < -stp ? -stp : d;
+      }
+      _civYaw[i] = yaw;
+      cHorde.setTransform(i, c.x, config.GROUND_Y, c.z, yaw);
+    }
+    const cp = (rig && rig.camera && rig.camera.position) || null;
+    cHorde.update(sdt, cp ? cp.x : _player.x, cp ? cp.y : 2, cp ? cp.z : _player.z);
+    if (Math.abs(_nf - _nfLastFillC) > 0.004) { cHorde.setNightFill(_nf); _nfLastFillC = _nf; }
+  }
+
   function syncState() {
     state.wave = director.wave; state.kills = kills; state.score = score; state.alive = pool.alive;
     state.hp = survival.state.hp; state.hunger = survival.state.hunger; state.stamina = survival.state.stamina;
     state.dead = survival.state.dead; state.cause = survival.state.cause;
+    state.civs = civs.sCount; state.exposed = civs.eCount;
   }
 
   // ---- hoisted step callbacks (created once) ----
@@ -291,8 +423,11 @@ export function createSim(ctx) {
     probe: () => {
       let px = _player.x, pz = _player.z;
       if (pool.centroid(_cen)) { px = _cen.x; pz = _cen.z; }
-      return { rt: state.runTime, wave: director.wave, kills, score, alive: pool.alive, hp: survival.state.hp, hunger: survival.state.hunger, night: _nf, px, pz };
+      return { rt: state.runTime, wave: director.wave, kills, score, alive: pool.alive, hp: survival.state.hp, hunger: survival.state.hunger, night: _nf, px, pz, civs: civs.sCount, exposed: civs.eCount, bites, turns };
     },
+    // OUTBREAK: on-demand civilian snapshot for the flee measurement (read-only, like audioSample —
+    // never a sim roll). state 's' | 'e'.
+    civSample() { const out = []; for (let i = 0; i < civs.max; i++) { const c = civs.get(i); if (c.alive) out.push({ x: c.x, z: c.z, state: c.state }); } return out; },
     update(dt, _t) {
       const sdt = time.simDt(dt);                 // dilated sim clock (zombies crawl while dived)
       const world = registry.get('world');
@@ -308,6 +443,14 @@ export function createSim(ctx) {
       _stepS.field = field; _stepS.nf = _nf; _stepS.aabbs = _build ? _build.aabbs() : null;
       pool.step(sdt, _stepS);                     // crowd pathing + barrier/contact damage
 
+      // OUTBREAK: the flee field re-seeds from the LIVE zombie set on a throttle (staleness ≤ fleeResolveS
+      // — civilian panic tolerates imprecision; the bite prefilter's contactCells covers the drift), then
+      // the civilians step: wander → flee → bite → incubate → turn (events fire from the hooks above).
+      _fleeAcc += sdt;
+      if (_fleeAcc >= config.CIVS.fleeResolveS) { _fleeAcc = 0; reseedFlee(); }
+      _civS.field = fleeField; _civS.threatCount = pool.alive; _civS.aabbs = _stepS.aabbs;
+      civs.step(sdt, _civS);
+
       // Batch contact damage into one iframed tick so player:damage isn't spammed every frame.
       _contactTimer -= sdt;
       if (_contactAcc > 0 && _contactTimer <= 0) { applyPlayerDamage(_contactAcc, 'zombie'); _contactAcc = 0; _contactTimer = IFRAME; }
@@ -317,6 +460,7 @@ export function createSim(ctx) {
       state.runTime += sdt;
       syncState();
       mirror(sdt);
+      mirrorCivs(sdt);
     },
   };
 
@@ -329,6 +473,9 @@ export function createSim(ctx) {
     // infrastructure (like starve/hurt) — it lets tools/hoard2-sustained.mjs hold the survivor alive
     // for a full 15-min run so the probe measures a STEADY load, not a 3-min death. Never called in play.
     probe.topUp = () => survival.reset();
+    // OUTBREAK: force-bite n susceptible civilians THROUGH the real bite path (flag consumed by the
+    // next civs.step — the incubation roll + infection:bite fire exactly as a street bite would).
+    probe.infect = (n = 1) => civs.forceExpose(n, _player.x, _player.z); // nearest-to-survivor first (on-camera)
   }
 
   registry.register('sim', facade);

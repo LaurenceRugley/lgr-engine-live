@@ -52,9 +52,20 @@
      • `sample()` returning a shared scratch object ≈ returning a reference to a reused stack struct
        (the caller must copy if it wants to keep it) — matches the game's `_rc` push-out scratch pattern.
 
+   MULTI-SOURCE SEEDING (the outbreak arc's one core change): `solve(sources)` — an ARRAY of {x,z}
+   as the first argument — seeds the SAME BFS ring queue from EVERY source cell at cost 0 instead of
+   one target cell. The flood then computes cost = grid distance to the NEAREST source (the min over
+   per-source floods, an exact BFS identity), and the direction field points TOWARD that nearest
+   source. A flee-ing crowd ASCENDS this field (reads cost and walks uphill, or negates the arrows);
+   a hunting crowd descends it toward the nearest of many prey. The single-target `solve(tx,tz)` path
+   is byte-identical when the argument is not an array — existing callers are exact no-ops.
+   (Multi-source consumers own their re-solve throttle and call solve() directly; update()'s
+   moved-a-cell epsilon only makes sense for one target.)
+
    Contract: createFlowField(opts) -> {
      cols, rows, cellSize, cost, dir, blocked,        // grid + fields (exposed for tests/inspection)
-     solve(tx,tz), update(tx,tz,dt), sample(x,z,out), // per-frame API
+     solve(tx,tz) | solve([{x,z},…]),                 // single-target | multi-source (see above)
+     update(tx,tz,dt), sample(x,z,out),               // per-frame API
      isBlocked(x,z), costAt(x,z), worldToCell(x,z,out),
      separate(agents, count, outPush, opts),          // optional anti-overlap
      dispose(),
@@ -148,22 +159,37 @@ export function createFlowField(opts = {}) {
     return out;
   }
 
-  // ---- THE SOLVE: BFS integration flood from the target cell, then bake the direction field. ----
+  // ---- THE SOLVE: BFS integration flood from the target cell(s), then bake the direction field. ----
   let _tgx = -1, _tgz = -1, _sinceSolve = 0, _solves = 0;
   function solve(tx, tz) {
-    const t = worldToCell(tx, tz);
-    // If the target cell is itself blocked (survivor standing on/inside a trunk cell — shouldn't happen,
-    // but be robust), nudge the seed to the nearest open cell in a small ring so the field still forms.
-    let seed = idx(t.gx, t.gz);
-    if (blocked[seed]) seed = nearestOpen(t.gx, t.gz);
-    _tgx = t.gx; _tgz = t.gz; _sinceSolve = 0; _solves++;
-
     cost.fill(-1);
-    if (seed < 0) { dir.fill(0); return; }   // no open cell at all → everyone idles
+    let head = 0, tail = 0;
+    if (Array.isArray(tx)) {
+      // MULTI-SOURCE: seed the ring queue with EVERY source's cell at cost 0 (dupes collapse via the
+      // cost-0 guard). The flood then reads "grid distance to the NEAREST source" — see header.
+      _tgx = -1; _tgz = -1; _sinceSolve = 0; _solves++;   // no single target cell to remember
+      for (let i = 0; i < tx.length; i++) {
+        const s = tx[i];
+        const t = worldToCell(s.x, s.z);
+        let seed = idx(t.gx, t.gz);
+        if (blocked[seed]) seed = nearestOpen(t.gx, t.gz);   // same blocked-seed nudge as single-target
+        if (seed < 0 || cost[seed] === 0) continue;
+        cost[seed] = 0; queue[tail++] = seed;
+      }
+      if (tail === 0) { dir.fill(0); return; }   // no sources (or no open cells) → everyone idles
+    } else {
+      const t = worldToCell(tx, tz);
+      // If the target cell is itself blocked (survivor standing on/inside a trunk cell — shouldn't happen,
+      // but be robust), nudge the seed to the nearest open cell in a small ring so the field still forms.
+      let seed = idx(t.gx, t.gz);
+      if (blocked[seed]) seed = nearestOpen(t.gx, t.gz);
+      _tgx = t.gx; _tgz = t.gz; _sinceSolve = 0; _solves++;
+
+      if (seed < 0) { dir.fill(0); return; }   // no open cell at all → everyone idles
+      cost[seed] = 0; queue[tail++] = seed;
+    }
 
     // BFS: ring queue, each cell enqueued at most once (guarded by cost[c] === -1).
-    let head = 0, tail = 0;
-    cost[seed] = 0; queue[tail++] = seed;
     while (head < tail) {
       const c = queue[head++];
       const cgx = c % cols, cgz = (c - cgx) / cols, cc = cost[c];
