@@ -118,6 +118,9 @@
     <div class="row"><span class="k">level</span><span class="v" id="v-level">lab</span></div>
     <div class="row"><span class="k">swingable</span><span class="v" id="v-swingable">—</span></div>
     <div class="row"><span class="k">draw calls</span><span class="v" id="v-draws">—</span></div>
+    <!-- A-CITIZENS: THE OUTBREAK, ON THE HUD (city only — the row hides itself on the lab). S/E/I is
+         the sim's whole story in three integers, and rigs·capsules is what it costs to draw. -->
+    <div class="row" id="row-outbreak" style="display:none"><span class="k">outbreak</span><span class="v" id="v-outbreak">—</span></div>
   </div>
 
   <div id="dock">
@@ -131,6 +134,9 @@
       <label>vary<input id="p-vary" type="range" min="0" max="0.9" step="0.05" /><span class="n" id="n-vary"></span></label>
       <label>plaza<input id="p-plaza" type="range" min="0" max="4" step="1" /><span class="n" id="n-plaza"></span></label>
       <label>seed<input id="p-seed" type="range" min="1" max="40" step="1" /><span class="n" id="n-seed"></span></label>
+      <!-- A-CITIZENS: THE DENSITY DIAL (city only; the row hides itself on the lab). The DEFAULT is
+           bench-picked and sparse-theater-governed; this dial is the owner's — crank it here or ?civs=. -->
+      <label id="row-civs" style="display:none">civilians<input id="p-civs" type="range" min="0" max="600" step="10" /><span class="n" id="n-civs"></span></label>
       <div class="btns">
         <button id="b-preset-swing" type="button">SWING</button>
         <button id="b-preset-city" type="button">CITY</button>

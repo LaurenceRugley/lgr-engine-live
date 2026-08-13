@@ -124,6 +124,10 @@ export { createDecals } from './src/createDecals.js';
 export { createCharacterRig } from './src/createCharacterRig.js';
 export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/character-anim.js';
 export { createCharacterHorde } from './src/createCharacterHorde.js';
+// A-CITIZENS (2026-08-12): the SEIR agent population (THREE-free, node-tested) + the tier A/B crowd
+// renderer over it (rigs near, one instanced-capsule draw far). Lifted from hoard2 — engine-first.
+export { createAgentSim, createAgentRng } from './src/createAgentSim.js';
+export { createCrowdTiers } from './src/createCrowdTiers.js';
 // ─────────────────────────────────────────────────────────────────────────────
 // createCodePanel OMITTED — its shiki dynamic import emits 200+ grammar chunks that lib consumers never load.
 export { damp, clamp, angleDelta } from './src/math.js';

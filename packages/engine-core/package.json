@@ -12,6 +12,7 @@
     "./src/graph-layout.js": "./src/graph-layout.js",
     "./src/ingest-vault.js": "./src/ingest-vault.js",
     "./src/corpse-pool.js": "./src/corpse-pool.js",
+    "./src/createAgentSim.js": "./src/createAgentSim.js",
     "./src/reel-grammar.js": "./src/reel-grammar.js",
     "./assets/*": "./assets/*"
   },

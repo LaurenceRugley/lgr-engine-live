@@ -383,6 +383,18 @@ export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/c
 // Hoard swaps its instanced-capsule zombies for these, same sim).
 export { createCharacterHorde } from './src/createCharacterHorde.js';
 
+/* A-CITIZENS (2026-08-12, mass-agents Phase 2) — the SEIR agent population, LIFTED from hoard2's
+   civilians.js (84c0667) so every project inherits it: pooled S/E(/in-pool I) state machine, wander +
+   multi-source-field flee, contact×dt×p transmission, telegraphed turns, the nearest(state) target-set
+   seam. THREE-free, node-tested, byte-identical to the original for hoard2 (its adapter + trace tests
+   pin it). createAgentRng = mulberry32 + the helper vocabulary, for consumers without a fork infra.
+   Node-safe deep import: '@lgr/engine-core/src/createAgentSim.js' (barrel-free, the corpse-pool route). */
+export { createAgentSim, createAgentRng } from './src/createAgentSim.js';
+// The tier A/B crowd renderer over it: skinned rigs (createCharacterHorde) near the camera, one
+// instanced-capsule draw far, promote/demote by distance with hysteresis + colour continuity. The
+// infection telegraph (street→green ramp + tightening stumble beat) is worn by BOTH tiers.
+export { createCrowdTiers } from './src/createCrowdTiers.js';
+
 // Beauty B3 CHARACTERS ALIVE — the corpse pool as a core ability (the dead persist, never blink out): a
 // pure fixed-slot allocator (TTL floor + oldest-first cap eviction). Node-safe deep-import at
 // '@lgr/engine-core/src/corpse-pool.js' (barrel-free) for a project's node-tested fx orchestration.

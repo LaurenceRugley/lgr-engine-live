@@ -99,6 +99,10 @@ export { createDecals } from './src/createDecals.js';
 export { createCharacterRig } from './src/createCharacterRig.js';
 export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/character-anim.js';
 export { createCharacterHorde } from './src/createCharacterHorde.js';
+// A-CITIZENS (2026-08-12): the SEIR agent sim + tier A/B crowd renderer ride with the horde/flow-field
+// family — general capability, not city content (createAgentSim imports nothing; tiers import the horde).
+export { createAgentSim, createAgentRng } from './src/createAgentSim.js';
+export { createCrowdTiers } from './src/createCrowdTiers.js';
 export { detectLakes, buildLakeGroup, createWorldLakes } from './src/world-water.js';
 export { createWaterFlow } from './src/water-flow.js';
 export { reprojectScatter } from './src/scatter.js';

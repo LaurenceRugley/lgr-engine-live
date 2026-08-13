@@ -37,7 +37,11 @@ import {
   createCharacterController, createGrappleModel, GRAPPLE_PROFILE,
   resolveAimPoint, createAimReticle, createPointerLockAim,
   createTargetLock, createLockMarker, cameraNearRadius,
+  createFlowField, createAgentSim, createAgentRng, createCrowdTiers, createCharacterRig,
 } from '@lgr/engine-core';
+/* A-CITIZENS: the tier-A skin. The engine deliberately does NOT inline this GLB (pedestrians.js's
+   lib-size note) — the consumer that ships people pays for the model. */
+import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
 
 const $ = (id) => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
@@ -159,6 +163,148 @@ const _buildT0 = performance.now();
 const arena = createBoxArena(ARENA0);
 const LEVEL_BUILD_MS = performance.now() - _buildT0;
 scene.add(arena.group);
+
+/* ---------------------------------------------------------------------------------------------
+   2.6 — A-CITIZENS (2026-08-12, mass-agents Phase 2): THE CITY IS INHABITED, and the outbreak runs
+   in it. City only (`?level=city`); on the lab not one statement here executes and the 27-check
+   probe's room is untouched.
+
+   WHAT LIVES WHERE (engine-first): the SEIR agent sim is `createAgentSim` (engine-core — lifted from
+   hoard2, which now consumes the same module), the tier A/B renderer is `createCrowdTiers`
+   (engine-core). THIS block is wiring + configuration: the city's numbers at ITS OWN 6 m/u scale, the
+   two flow fields and their cadence, the fixed-step sim clock, and the probe handles.
+
+   THE SIM NEVER READS THE PLAYER — zombies hunt susceptibles (the phase-2 target set), civilians flee
+   zombies, and the player is a GHOST to the population (player-agent collision and friendly fire are
+   unratified owner calls, both OFF, stated). That is also what makes the outbreak DETERMINISTIC while
+   a human swings through it: the sim advances on a FIXED 1/60 tick off its own seeded stream, so the
+   same seed replays the same outbreak event-for-event regardless of fps or where you swing.
+
+   THE FIELD NUMBERS ARE MEASURED, not asserted (tools/city-field-bench.mjs on this machine):
+   340×340 = 115.6k cells at 0.25 u over the 84.7 u city solves in ~5.9 ms (median; flat vs source
+   count — BFS is O(cells)). So a re-solve is a real frame spike and the cadence is the design: each
+   field re-solves every 0.5 s of SIM time, STAGGERED by 0.25 s so the two never land on one frame.
+   Worst case is +~6 ms on one frame in thirty — inside a 60 fps budget beside this city's ~3 ms
+   render. The sim step itself is ~0.15 ms at 1000 agents (benched) — rendering, not simulation, is
+   the density constraint, which is what the tier bench measures.
+   --------------------------------------------------------------------------------------------- */
+/* THE DENSITY DIAL — bench-picked default (see the A-CITIZENS bench table), owner-owned. Sparse-
+   theater doctrine governs the DEFAULT; ?civs= and the dock slider are the owner's crank. */
+const CIVS_DEFAULT = 150;
+const TIERA_DEFAULT = 12;
+/* The city's civilian numbers AT THIS WORLD'S SCALE (≈6 m/u — the ledger's own figure). Times are
+   times (the incubation window is drama, not distance); speeds/radii are hoard2's ÷6 with two
+   measured exceptions, both from createAgentSim.test.mjs: chase.speed must CLEAR fleeSpeed (ratio
+   1.45, hoard2's runner/flee class) or the outbreak stalls, and biteRadius must CLEAR the separation
+   shell (0.12 > 0.10) or a slow chase orbits its prey forever. */
+const CIV = {
+  count: CIVS_DEFAULT,
+  walkSpeed: 0.23,        // ≈1.4 m/s amble
+  fleeSpeed: 0.55,        // ≈3.3 m/s panic jog — the PLAYER (0.55 walk / 0.95 sprint) can outrun everything
+  staggerSpeed: 0.12,     // the E-state telegraph gait
+  populateRadius: 38,     // the peopled disc (city extent 42.35; the square's corners stay quiet)
+  panicCells: 12,         // flee inside 3.0 u (~18 m) of the nearest infected
+  calmCells: 18,          // hysteresis: calm only past 4.5 u
+  biteRadius: 0.12,       // > sepRadius 0.10 (the separation-shell invariant, measured)
+  pTransmitPerSec: 0.9,   // ~1 s of contact infects (hoard2's number — a rate, not a distance)
+  contactCells: 4,        // bite prefilter: exact circle test only within 1.0 u of flee-field cost
+  incubationS: [7, 13],   // THE PACING LEVER — unchanged from hoard2 (time is time)
+  wanderIdleS: [2, 6],
+  wanderRadius: 2.2,      // ~13 m wander legs
+  playRadius: 41,         // rim clamp (circular, so the square city's far corners are outside the
+                          // peopled disc — a default-density choice, not a sim limit)
+  arriveR: 0.1, lookAhead: 0.3,
+  chase: { speed: 0.8, directR: 1.2 },  // ≈4.8 m/s — catches a fleeing civ, loses to a sprinting player
+};
+const CIV_HEIGHT = 0.26;      // a head under the hero's 0.28 eye
+const CIV_SCALE = 0.055;      // survivor.glb ≈ 4.7 raw units tall → ~0.26 u at this scale
+const SIM_DT = 1 / 60, SIM_MAX_SUB = 4;   // fixed tick; capped substeps (CI's 1 fps renderer must not spiral)
+const FLEE_EVERY = 30, HUNT_EVERY = 30, HUNT_OFFSET = 15; // re-solve cadence in ticks (0.5 s, staggered)
+
+let population = null;
+function bootPopulation(count) {
+  if (LEVEL !== 'city' || !(count > 0)) return null;
+  /* GROUND-LEVEL OBSTACLES — the field is 2D and the solids are 3D: a cornice, bridge deck, spire or
+     roof box is an ELEVATED AABB that must not seal the street under it. A box obstructs a street
+     agent iff its underside starts below head height. (Measured on this arena: 360 of 1753 boxes.) */
+  const GROUND_CLEAR = 0.4;
+  const solids = arena.solids, aabbs = [];
+  for (let k = 0; k < solids.length / 6; k++) {
+    const o = k * 6;
+    if (solids[o + 1] < GROUND_CLEAR) aabbs.push({ minX: solids[o], minZ: solids[o + 2], maxX: solids[o + 3], maxZ: solids[o + 5] });
+  }
+  const EXT = 42.4, fieldOpts = { bounds: { minX: -EXT, minZ: -EXT, maxX: EXT, maxZ: EXT }, cellSize: 0.25, agentRadius: 0.05, aabbs, maxAgents: Math.max(64, count) };
+  const flee = createFlowField(fieldOpts);   // multi-source from the I set — susceptibles ASCEND it
+  const hunt = createFlowField(fieldOpts);   // multi-source from the S set — the infected DESCEND it
+  const srng = createAgentRng((qNum('seed', 11) * 2654435761 ^ 0xC1717) >>> 0); // the sim's own stream, off the level seed
+  // ?noflee=1 is the flee-measurement CONTROL ARM (hoard2's lever, same name) — decided at
+  // construction, one sim either way, so both arms consume the stream identically.
+  const sim = createAgentSim({ ...CIV, count }, srng, { cap: count, sepRadius: 0.10, clampBlocked: true, flee: Q.get('noflee') !== '1' });
+  sim.populate(flee);
+
+  /* the outbreak's receipts: an event log the probes replay-compare (payload strings built AT emit
+     time — the record objects are reused). tick is SIM time; identical across machines and fps. */
+  const ob = { tick: 0, bites: 0, turns: 0, log: [] };
+  const stepS = {
+    field: flee, zpool: null, huntField: hunt, aabbs: null,
+    onBite: (c) => { ob.bites++; ob.log.push(`${ob.tick}:bite:${c.id}:inc${c.incubDur.toFixed(4)}@${c.x.toFixed(4)},${c.z.toFixed(4)}`); },
+    onTurned: (c) => { ob.turns++; ob.log.push(`${ob.tick}:turn:${c.id}@${c.x.toFixed(4)},${c.z.toFixed(4)}`); },
+  };
+
+  /* PATIENT ZEROS — seeded at a fixed tick, nearest a FIXED point (the plaza), so the outbreak's
+     origin is a property of the seed, never of where the player happens to stand. */
+  const ZEROS = Math.max(0, qNum('zeros', 2)), ZERO_TICK = 120;
+
+  const _threats = [], _prey = [];
+  function reseed(which) {
+    _threats.length = 0; _prey.length = 0;
+    sim.forEach((_i, c) => {
+      if (!c.alive) return;
+      if (c.state === 'i') _threats.push({ x: c.x, z: c.z });
+      else if (c.state === 's') _prey.push({ x: c.x, z: c.z });
+    });
+    if (which === 'flee') flee.solve(_threats);
+    else hunt.solve(_prey);
+  }
+  reseed('flee'); // zero infected at boot → an empty solve = every cell reads SAFE
+
+  /* the tier A/B renderer (engine-core): rigs near, one capsule draw far, the same colour ramp on
+     both sides of the seam. speedRef = the fastest thing in the crowd (a chaser at full tilt). */
+  const civRig = createCharacterRig({ url: survivorUrl, states: { idle: 'Idle', walk: 'Walk', run: 'Run', hit: 'HitReact', death: 'Death' } });
+  /* ?tiera/?tierr/?tierlod are BENCH levers (tools/city-population-bench.mjs): the rig-ceiling arm
+     widens tierRadius so enough agents are in promote range to FILL the slots, and raises lodDistance
+     to match so every rig mixes at FULL rate — the ceiling must measure rigs at their real cost, not
+     rigs the LOD throttle is already saving. Defaults are the shipped tuning. */
+  const tiers = createCrowdTiers({
+    rig: civRig, size: count, tierA: Math.max(0, qNum('tiera', TIERA_DEFAULT)),
+    tierRadius: qNum('tierr', 7), hysteresis: 1.5, baseScale: CIV_SCALE, groundY: 0,
+    capsule: { radius: 0.03, height: CIV_HEIGHT },
+    speedRef: CIV.chase.speed, lodDistance: qNum('tierlod', 6), lodHz: 3,
+    castShadow: true, motionLayers: true,
+  });
+  scene.add(tiers.group);
+
+  let acc = 0;
+  return {
+    sim, tiers, ob, flee, hunt,
+    update(dt, camX, camY, camZ) {
+      acc += dt;
+      let sub = 0;
+      while (acc >= SIM_DT && sub < SIM_MAX_SUB) {
+        acc -= SIM_DT; sub++;
+        ob.tick++;
+        if (ob.tick === ZERO_TICK && ZEROS > 0) sim.forceExpose(ZEROS, 0, 0);
+        if (ob.tick % FLEE_EVERY === 0) reseed('flee');
+        if (ob.tick % HUNT_EVERY === HUNT_OFFSET) reseed('hunt');
+        sim.step(SIM_DT, stepS);
+      }
+      if (acc > SIM_DT) acc = SIM_DT; // substep cap hit (a 1 fps CI renderer) → sim runs slow, never spirals
+      tiers.update(dt, camX, camY, camZ, sim);
+    },
+    dispose() { scene.remove(tiers.group); tiers.dispose(); },
+  };
+}
+population = bootPopulation(qNum('civs', CIVS_DEFAULT));
 
 /* ---------------------------------------------------------------------------------------------
    3. THE CHARACTER + THE WEB. The profile is a LOCAL COPY of GRAPPLE_PROFILE, never the shared
@@ -453,6 +599,11 @@ function updateHud(dt) {
     : `median roof ${ar.roofMedian.toFixed(2)} u`, ar.swingable ? 'on' : '');
   const ri = renderer.info.render;
   set('v-draws', `${ri.calls} · ${(ri.triangles / 1000).toFixed(0)}k tris · build ${LEVEL_BUILD_MS.toFixed(1)} ms`);
+  /* A-CITIZENS: S/E/I is the outbreak in three integers; rigs·capsules is what drawing it costs. */
+  if (population) {
+    const s = population.sim, t = population.tiers.counts;
+    set('v-outbreak', `S ${s.sCount} · E ${s.eCount} · I ${s.iCount} · ${t.a} rigs + ${t.b} caps`);
+  }
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -531,6 +682,25 @@ function wireDock() {
   $('b-preset-open').addEventListener('click', preset({ cols: 5, rows: 5, spacing: 8.0, width: 2.2, height: 9.0, heightVary: 0.3, plaza: 1 }, 'preset: OPEN (far towers)'));
   const dock = $('dock');
   $('dock-toggle').addEventListener('click', (e) => { e.stopPropagation(); dock.classList.toggle('min'); $('dock-toggle').textContent = dock.classList.contains('min') ? '+' : '–'; });
+
+  /* A-CITIZENS: the density dial, city only (the row unhides itself below). Rebooting the population
+     is the honest implementation of a density change — same seed ⇒ the new crowd is deterministic
+     too, it is simply a different (larger) draw sequence than the old one. */
+  if (LEVEL === 'city') {
+    const row = $('row-civs'), el = $('p-civs');
+    if (row && el) {
+      row.style.display = '';
+      el.value = String(qNum('civs', CIVS_DEFAULT));
+      $('n-civs').textContent = el.value;
+      el.addEventListener('input', () => {
+        const v = Number(el.value);
+        $('n-civs').textContent = String(v);
+        if (population) population.dispose();
+        population = bootPopulation(v);
+      });
+    }
+    const ob = $('row-outbreak'); if (ob) ob.style.display = '';
+  }
 }
 wireDock(); syncDock();
 
@@ -627,6 +797,15 @@ function frame() {
   if (Math.abs(rig.camera.fov - wantFov) > 0.01) { rig.camera.fov = wantFov; rig.camera.updateProjectionMatrix(); }
   rig.update(dt);
 
+  /* A-CITIZENS: the population, AFTER rig.update so the tier promote/demote reads the camera the
+     frame will actually render from. The sim inside advances on its own fixed 1/60 tick — dt here
+     only decides HOW MANY ticks fire — and it never reads the character: the player is a ghost to
+     the crowd (player-agent collision + friendly fire = unratified owner calls, both OFF). */
+  if (population) {
+    const cp = rig.camera.position;
+    population.update(dt, cp.x, cp.y, cp.z);
+  }
+
   renderer.setRenderTarget(null);
   renderer.render(scene, rig.camera);
   /* THE LOCK MARKER IS PLACED *AFTER* THE RENDER, and that is a real ordering requirement rather than
@@ -700,3 +879,18 @@ window.__level = {
   get stats() { return arena.stats; },
   get draws() { const r = renderer.info.render; return { calls: r.calls, triangles: r.triangles }; },
 };
+/* A-CITIZENS: THE OUTBREAK'S RECEIPTS. A probe reads the sim's OWN clock (tick — fixed 1/60, fps-
+   independent) and the emit-time event log, so two boots with one seed can be compared string-for-
+   string while a bot swings through the middle of the crowd. sample() is a read-only snapshot
+   (never a sim roll) — the hoard2 civSample precedent. */
+window.__outbreak = population ? {
+  get tick() { return population.ob.tick; },
+  get log() { return population.ob.log; },
+  get counts() {
+    const s = population.sim;
+    return { s: s.sCount, e: s.eCount, i: s.iCount, bites: population.ob.bites, turns: population.ob.turns };
+  },
+  get tiers() { return { ...population.tiers.counts }; },
+  sample() { const out = []; population.sim.forEach((_i, c) => { if (c.alive) out.push({ x: c.x, z: c.z, state: c.state }); }); return out; },
+  infect: (n = 1, x = 0, z = 0) => population.sim.forceExpose(n, x, z),
+} : null;
