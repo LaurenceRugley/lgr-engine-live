@@ -46,7 +46,7 @@ import {
   createCityLife, buildGraph,
   createWaterLife,
   createWeatherRig,
-  createFirstPersonWalker, createCharacterController,
+  createFirstPersonWalker, createCharacterController, createHeroBody,
   createPilotController, createGroundModel, createRoadModel, createGrappleModel, ATV_PROFILE, ROAD_PROFILE, CRAFT_PROFILE, BOAT_PROFILE, BIRD_PROFILE,
   FISH_PROFILE, GRAPPLE_PROFILE,
   carryMomentum,
@@ -523,13 +523,41 @@ const character = createCharacterController({
 });
 character.setPosition(0, null, -(city.extent * 0.55));
 
-/* The body you are looking at in third person, and the web you are hanging from. A placeholder capsule
-   is a KNOWN, accepted stand-in — the arc is the controller, not the art. */
-const charBody = new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.06, 0.16, 4, 10),
-  new THREE.MeshStandardMaterial({ color: '#2b3242', roughness: 0.7, flatShading: true }),
-);
-charBody.castShadow = true; charBody.visible = false;
+/* The body you are looking at in third person, and the web you are hanging from.
+   A-METRO-BODY (2026-08-13): this was a placeholder capsule, declared a KNOWN stand-in for three arcs
+   while swing-lab got the real rig. That is textbook wiring drift — the ability shipped to ONE consumer
+   — and this closes it. `createHeroBody` is engine-core's; the fifteen lines below are wiring.
+
+   EVERY NUMBER IS METROPOLIS'S OWN, not copied from the lab, and they happen to agree because both
+   levels derive from the same facts: the controller's eye is EYE (0.28) and a human's eye sits ~93%
+   up the body, so 0.30 puts the rendered eye where the controller already decided it goes; the walk
+   and sprint speeds are the SAME LITERALS handed to createCharacterController above, passed by
+   reference rather than retyped — a hand-copied constant is exactly how `aimReach` grew a stale 1.2.
+
+   THE COLLIDER IS UNTOUCHED: a costume on a capsule, not a new collision shape. `?hero=capsule` keeps
+   the old body as a control arm so the perf question stays answerable as two URLs of one build. */
+const HERO_H = 0.30;
+/* metropolis has no Q/qNum helper (it reads flags through readAppFlags) — one local reader, so the
+   hero's arms stay URL-addressable here exactly as they are in the lab, without importing that
+   project's conventions wholesale. */
+const _q = new URLSearchParams(window.location.search);
+const _qNum = (k, d) => (Number.isFinite(+_q.get(k)) && _q.get(k) !== null ? +_q.get(k) : d);
+const hero = createHeroBody({
+  url: survivorUrl,
+  skinned: _q.get('hero') !== 'capsule',
+  height: HERO_H, walkSpeed: 0.55, sprintSpeed: 0.95,
+  /* a capsule of the OLD dimensions carries the frame until the GLB lands, so no capture and no probe
+     phase ever sees a bodiless player — the exact frame a screenshot is likeliest to catch. */
+  fallback: { radius: 0.06, length: 0.16, color: '#2b3242' },
+  /* First person is a NEAR-PLANE problem at this scale, and swing-lab measured it across six arms:
+     the eye sits inside the head, so the neck lands 0.0048 u from a 0.02 near plane and the frame
+     fills with shards. `nohead` alone does not fix it (hiding a bone does not move the neck's verts);
+     nohead + a 0.05 back-off along the look axis buys ~2.7x the near plane. Same eye height here, so
+     the same answer applies — re-judgeable via ?fpbody= / ?fpback= rather than taken on faith. */
+  firstPerson: { mode: ({ body: 'body', nohead: 'nohead', off: 'off' })[_q.get('fpbody')] || 'nohead',
+                 backOff: _qNum('fpback', 0.05) },
+});
+const charBody = hero.group;
 scene.add(charBody);
 const charRopeGeo = new THREE.BufferGeometry();
 charRopeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
@@ -554,6 +582,7 @@ const CHAR_AIM_REACH = Number((CHAR_SWING_PROFILE.ropeMax + CHAR_THIRD.dist + LA
 const _charAim = { x: 0, y: 0, z: 0 };
 let charAimHit = null;
 const _camPos = { x: 0, y: 0, z: 0 }, _camDir = { x: 0, y: 0, z: 0 };
+const _hand = new THREE.Vector3();   // A-METRO-BODY: reused every frame — the rope's origin, no hot alloc
 
 /* THE OLD `createFirstPersonWalker` INSTANCE IS GONE FROM THIS FILE, and its deletion is the arc.
    It documented its own fatal gap right here — "walking off a roof edge steps you DOWN to the street
@@ -1384,12 +1413,19 @@ function frame(dt, t) {
     reticle.setInRange(!!character.state.aimInRange);
     lockMark.setInRange(!!character.state.aimInRange);
     targetLock.tick(dt);
-    charBody.position.set(character.x, character.y + EYE * 0.5, character.z);
-    charBody.quaternion.copy(character.state.quat);
+    /* the rig owns its own placement, gait and pose now — position/quaternion are set INSIDE
+       createHeroBody from the controller state, which is why this is one call and not three. */
+    hero.update(dt, character.state, { view: character.view, lookYaw: character.lookYaw, anchor: character.state.anchor });
     charBody.visible = character.view === 'third';    // in first person you are inside your own head
     if (character.state.anchor) {
       const a = charRopeGeo.attributes.position;
-      a.setXYZ(0, character.x, character.y + EYE * 0.6, character.z);
+      /* THE WEB LEAVES THE HAND, not the sternum. The arm is genuinely extended at the anchor now
+         (the rig's aim-IK layer), so a rope from chest height reads as a line that missed the arm it
+         is supposed to come out of. webAnchorPoint falls back to this same chest point before the GLB
+         lands, so no frame has a rope with no origin. */
+      _hand.set(character.x, character.y + EYE * 0.6, character.z);
+      hero.webAnchorPoint(_hand);
+      a.setXYZ(0, _hand.x, _hand.y, _hand.z);
       a.setXYZ(1, character.state.anchor.x, character.state.anchor.y, character.state.anchor.z);
       a.needsUpdate = true;
       charRope.visible = true;
