@@ -38,6 +38,8 @@ import {
   resolveAimPoint, createAimReticle, createPointerLockAim,
   createTargetLock, createLockMarker, cameraNearRadius,
   createFlowField, createAgentSim, createAgentRng, createCrowdTiers, createCharacterRig,
+  createHeroBody,
+  createTextureForge, CITY_SURFACES, createTriplanarForgeMaterial, tilesPerUnit, applyGroundMacro,
 } from '@lgr/engine-core';
 /* A-CITIZENS: the tier-A skin. The engine deliberately does NOT inline this GLB (pedestrians.js's
    lib-size note) — the consumer that ships people pays for the model. */
@@ -142,7 +144,8 @@ const CITY_ARENA = {
     cores: qNum('cores', 3), coreSigma: 0.30, mix: 0.45,
   },
   silhouette: Q.get('plain') === '1' ? null : {},
-  groundMaterial: new THREE.MeshStandardMaterial({ color: '#3d4453', roughness: 0.95, metalness: 0 }),
+  // material/groundMaterial are filled in below by cityMaterials() — the forge needs the renderer,
+  // and it does not exist until createEngineCore has run.
 };
 const LAB_ARENA = {
   cols: qNum('cols', 9), rows: qNum('rows', 9),
@@ -154,6 +157,87 @@ const LAB_ARENA = {
   seed: qNum('seed', 7),
   groundY: 0,
 };
+/* ---- A-AERIAL (2026-08-13): THE CITY STOPS BEING FLAT-COLOURED BOXES. ---------------------------
+   `docs/design/research-aaa-environments.md` §3 item 3 of its top-5: close flat-colour → textured with
+   ZERO texture downloads, on `createTextureForge`, beauty-gated. This is the WIRING half; the ability
+   is `createTriplanarForgeMaterial` in engine-core, and the recipes (`CITY_SURFACES.facade`, `.roof`,
+   `.asphalt`, `.concrete`) already shipped with A-ART and had no consumer in this project.
+
+   WHY TRIPLANAR AND NOT `forge.makeMaterial` + a repeat. box-arena renders the WHOLE skyline as one
+   InstancedMesh of one unit BoxGeometry — a 0.22 u cornice and a 12.7 u tower share the same 0..1 UVs,
+   so a UV-mapped tile would be fifty times denser on one than the other inside a single draw call, and
+   there is no per-instance UV transform to fix it with. Sampling by WORLD POSITION makes texel density
+   a property of the world, so every box in the buffer is textured at the same scale and the draw-call
+   count does not move. See triplanar-forge.js's header for the full argument.
+
+   THE SCALES ARE DERIVED, not typed. `tilesPerUnit` converts a recipe's `worldSize` (METRES per tile —
+   forge-recipes.js's convention) through this world's ~6 m/u into tiles per unit, so the numbers below
+   say what they mean:
+     · facade `worldSize` 8 m holds FIVE storeys, so one tile is 1.33 u and a storey is 0.27 u ≈ 1.6 m
+       at this scale. `tilesPerTile` 0.55 stretches it so a storey lands near 2.9 m — a real floor
+       height — which is the one place an art number overrides the arithmetic, and it is named.
+     · the roof tile is small on purpose: a roof is seen from directly above at swing height, and it is
+       the ONE surface this level's camera looks straight down at.
+   THE GROUND KEEPS ITS UVs (a PlaneGeometry has real ones) so it needs no triplanar — it gets the
+   asphalt recipe plus `applyGroundMacro`, the engine's existing world-scale de-tiler, because a
+   105 u plane at a 1 m tile is 105 repeats and the eye finds that grid instantly from the air.
+
+   `?forge=0` IS THE A/B ARM AND THE FALLBACK IS THE OLD LOOK EXACTLY: with the forge off (or
+   unsupported — iOS p0 has no high-precision fragment float, so `bake()` returns null) every factory
+   here returns the same flat MeshStandardMaterial the city shipped with. Nothing else in the repo
+   calls any of this, so `npm run tier-guard`'s byte-identical stylized baselines are untouched. */
+const M_PER_U = 6.0;                        // this world's scale — the swing ledger's own figure
+function cityMaterials() {
+  if (LEVEL !== 'city' || Q.get('forge') === '0') return null;
+  const forge = createTextureForge({ renderer, size: 1024 });
+  const bake = (k, over) => forge.bake({ ...CITY_SURFACES[k], ...(over || {}) });
+  const wall = bake('facade');
+  /* THE ROOF IS CONCRETE, NOT THE `roof` RECIPE, and that is a measured swap rather than taste. The
+     shipped `roof` surface is forge-gunmetal at metalness 0.8 and a 2 m tile; this level has NO
+     environment map (createEngineCore ships the renderer, not an IBL — see the lights block above),
+     and a metal with nothing to reflect is black. The first capture had roofs of dark aliasing
+     speckle, at 0.33 u per tile, seen from directly overhead — which is the ONE surface this level's
+     camera looks straight down at. The second try, `concrete` (forge-stone), was worse in a more
+     interesting way: stone's voronoi crack network at any tile big enough to READ came back as
+     crazy-paving, i.e. a fantasy plaza, on the one surface a swinging player spends the most time
+     looking at. Asphalt is the right subject — a city roof IS a tar membrane — its grain is fine
+     rather than cellular so it survives being seen from 13 u up, and it ties the roofs to the street
+     they are made of. Re-seeded off the retired `roof` recipe's seed so it is not the same tile the
+     ground is wearing. */
+  const roof = bake('asphalt', { size: 512, seed: 0x63 });
+  const road = CITY_SURFACES.asphalt;
+  const tower = createTriplanarForgeMaterial({
+    side: wall, top: roof,
+    scale: tilesPerUnit({ worldSize: CITY_SURFACES.facade.worldSize, metresPerUnit: M_PER_U, tilesPerTile: 0.55 }),
+    topScale: tilesPerUnit({ worldSize: CITY_SURFACES.asphalt.worldSize, metresPerUnit: M_PER_U, tilesPerTile: 1.2 }),
+    sharpness: 6.0,
+    /* THE DETAIL OCTAVE (research doc §3 gap 3: "a single 6 m forge tile is soft up close"). The
+       concrete recipe re-read eight times finer, faded out past 16 u so it is only paid for where a
+       player's eye is actually close to a wall — which on a swing is the moment before a cling. */
+    detail: { set: bake('concrete', { size: 512 }), scale: tilesPerUnit({ worldSize: CITY_SURFACES.concrete.worldSize, metresPerUnit: M_PER_U }) * 8, amount: 0.30, near: 4, far: 16 },
+    roughness: CITY_SURFACES.facade.roughness, metalness: 0,
+    /* THE GRADE, AND IT IS THE WHOLE "DON'T ABANDON THE STYLIZED READ" HALF OF THIS PASS. The forge
+       facade is WARM PLASTER at a linear albedo of 0.46–0.74; box-arena's flat grey is #7d8496, linear
+       (0.206, 0.231, 0.305). Wiring the texture in with a white base multiplies the city's brightness
+       by about 2.5x and warms it — the first capture came back as a near-WHITE city over a black
+       street, which is a different game's art direction, not a textured version of this one. This
+       colour is that ratio, per channel: base_linear / albedo_mean, back through sRGB. So the tower
+       lands at the SAME luminance and the SAME cool cast it had, and everything the texture adds is
+       DETAIL rather than exposure. The per-instance height ramp still composes on top of it. */
+    color: '#a8b4d2',
+    fallbackColor: 0x7d8496,          // box-arena's own flat grey — the exact no-forge look
+  });
+  const ground = forge.makeMaterial(road, {
+    repeat: Math.max(1, (Math.max(CITY_ARENA.cols, CITY_ARENA.rows) * CITY_ARENA.spacing + CITY_ARENA.spacing * 4) / (road.worldSize / M_PER_U) / 24),
+  });
+  ground.color = new THREE.Color('#8e97a8');   // the asphalt bake is near-black; the street has to stay readable
+  if (forge.supported) applyGroundMacro(ground, { scale: 0.10, brightness: 0.18, tintAmt: 0.20, tint: [0.20, 0.22, 0.26] });
+  return { forge, tower, ground };
+}
+const CITY_MATS = cityMaterials();
+if (CITY_MATS) { CITY_ARENA.material = CITY_MATS.tower; CITY_ARENA.groundMaterial = CITY_MATS.ground; }
+else if (LEVEL === 'city') CITY_ARENA.groundMaterial = new THREE.MeshStandardMaterial({ color: '#3d4453', roughness: 0.95, metalness: 0 });
+
 const ARENA0 = LEVEL === 'city' ? CITY_ARENA : LAB_ARENA;
 /* THE PERCENTILE THE ROPE IS DERIVED AT IS THE LEVEL'S OWN. The lab's 0.35 is A-CLIMB's; the city's is
    `1 - frac`, i.e. exactly the break the generator built its distribution around. Two rooms, one
@@ -191,6 +275,9 @@ scene.add(arena.group);
 /* THE DENSITY DIAL — bench-picked default (see the A-CITIZENS bench table), owner-owned. Sparse-
    theater doctrine governs the DEFAULT; ?civs= and the dock slider are the owner's crank. */
 const CIVS_DEFAULT = 150;
+/* A-AERIAL — which arm of the OPEN #25 cure is running. 'on' is the shipped default; the other two
+   exist so the ablation in the ledger can be re-run by anyone, not just believed. */
+const MARK_MODE = Q.get('mark') === '0' ? 'off' : Q.get('mark') === 'flat' ? 'flat' : 'on';
 const TIERA_DEFAULT = 12;
 /* The city's civilian numbers AT THIS WORLD'S SCALE (≈6 m/u — the ledger's own figure). Times are
    times (the incubation window is drama, not distance); speeds/radii are hoard2's ÷6 with two
@@ -281,6 +368,18 @@ function bootPopulation(count) {
     capsule: { radius: 0.03, height: CIV_HEIGHT },
     speedRef: CIV.chase.speed, lodDistance: qNum('tierlod', 6), lodHz: 3,
     castShadow: true, motionLayers: true,
+    /* A-AERIAL — swing-ledger OPEN #25's cure, and the three arms are a URL param because the whole
+       point is that the choice was MEASURED (see the ledger's A-AERIAL ablation table):
+         ?mark=0      off — the A-CITIZENS baseline, exactly
+         ?mark=flat   unlit but NOT distance-scaled (the "emissive tint on the far tier" arm)
+         (default)    unlit AND constant apparent size — the shipped cure
+       `angular` 0.0075 world-radii per unit of distance is ~10 device px across at this viewport and
+       fov, which is the size a marker stops being a speck; `minSize` 0.05 is what it is worth up close,
+       where the BODY already carries the read and the mark must not shout over it. */
+    mark: MARK_MODE === 'off' ? null : {
+      angular: MARK_MODE === 'flat' ? 0 : 0.0075,
+      minSize: 0.05,
+    },
   });
   scene.add(tiers.group);
 
@@ -370,6 +469,12 @@ for (const k of ['ropeMax', 'ropeMin', 'assist', 'launchUp', 'launchFwd', 'relea
   if (Q.has(k)) SWING[k] = qNum(k, SWING[k]);
 }
 const EYE = 0.28;
+/* A-BODY: the three numbers the CONTROLLER and the BODY must agree about, declared once and read by
+   both. Two copies of "how fast is a walk" is how the legs end up at a cadence the physics is not
+   travelling at — the same class of drift as the stale 1.2 in `aimReach` (A-CLIMB note below), which
+   sat wrong for an arc because nobody had to look at two places to change one fact.
+   HERO_H 0.30: a human eye sits ~93% up the body, and this controller's eye is 0.28. */
+const HERO_H = 0.30, WALK_V = 0.55, SPRINT_V = 0.95;
 /* THE CHASE BLOCK IS A NAMED OBJECT because TWO things need `distMax` and the second one silently had
    a copy of it (A-CLIMB). `aimReach` below measures the aim ray from the EYE, so it has to add back the
    arm the eye sits behind — and it was adding a literal 1.2 that had been correct until A-LAB raised
@@ -385,7 +490,7 @@ const character = createCharacterController({
      body back and forth mid-flight, so a mismatch reads as the character getting heavier when a web
      cuts (character.js's own seam note). */
   eyeHeight: EYE, radius: 0.09, footR: 0.12, collideYOff: 0.14,
-  moveSpeed: 0.55, sprintSpeed: 0.95, accel: 14,
+  moveSpeed: WALK_V, sprintSpeed: SPRINT_V, accel: 14,
   jumpSpeed: 1.2, gravity: SWING.gravity,
   /* THE CHASE IS SIZED TO THIS LEVEL'S STREETS, and that is the kind of thing a lab exists to find.
      metropolis uses 0.9 u because its street canyon is 0.55 u wide and anything longer spends the
@@ -412,14 +517,57 @@ const character = createCharacterController({
   cling: { enabled: true },
 });
 
-/* The body you look at in third person, and the line you hang from. Placeholder geometry is an
-   accepted stand-in — the arc is the controller, not the art (same ruling as metropolis's capsule). */
-const body = new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.06, 0.16, 4, 10),
-  new THREE.MeshStandardMaterial({ color: '#d8482f', roughness: 0.55, flatShading: true }),
-);
-body.castShadow = true;
-scene.add(body);
+/* ---- A-BODY (2026-08-13): THE PLACEHOLDER CAPSULE IS GONE. -------------------------------------
+   For the whole of this arc the thing you were looking at while tuning a swing was a red capsule, and
+   the file said so in as many words ("placeholder geometry is an accepted stand-in — the arc is the
+   controller, not the art"). That ruling was right while the question was whether the pendulum worked;
+   it stops being right the moment the ledger's own technique #4 — LOOK AT THE CAPTURE — is the method,
+   because a capsule has no legs to tell you the walk is a half-run, no arm to tell you the web left
+   from the wrong place, and no silhouette to judge a release by.
+   THE ABILITY IS ENGINE-CORE'S (`createHeroBody`) and the wiring is these fifteen lines. Every number
+   here is a fact about THIS level and nothing else:
+     · height 0.30 — the controller's eye is 0.28 and a human's eye sits ~93% up the body, so 0.30 puts
+       this eye where the controller already decided it goes. It also lands a head above the 0.26 u
+       civilians (CIV_HEIGHT above), which is the read A-CITIZENS chose deliberately.
+     · walk/sprint 0.55/0.95 — the SAME two constants passed to the controller below, so the legs and
+       the physics cannot drift apart. Passed by reference to the same literals, not copied by hand:
+       that copy is exactly how `aimReach` grew a stale 1.2 (see the A-CLIMB note further down).
+   THE COLLIDER IS UNTOUCHED — this is a costume on a capsule, not a new collision shape. */
+const hero = createHeroBody({
+  url: survivorUrl,
+  /* `?hero=capsule` IS THE CONTROL ARM for the perf question, and it is why the perf table in the
+     ledger is trustworthy: the two rows are two URLs of ONE build, so the only thing that differs
+     between them is whether the player is a skinned rig or the capsule that was here before. */
+  skinned: Q.get('hero') !== 'capsule',
+  height: HERO_H, walkSpeed: WALK_V, sprintSpeed: SPRINT_V,
+  /* A capsule of the OLD dimensions carries the frame until the GLB lands (~1 s cold), so no capture
+     and no probe phase ever sees a bodiless player — the exact frame a screenshot is likeliest to
+     catch. It removes itself; nothing here has to know when. */
+  fallback: { radius: 0.06, length: 0.16, color: '#d8482f' },
+  /* ---- FIRST PERSON, AND THE NUMBER THAT DECIDED IT (tools/hero-fp-ab.mjs, six arms, one pose) -----
+     A first-person body at THIS scale is a near-plane problem, not an art problem, and the numbers say
+     so exactly. The eye is at 0.28 on a 0.30 u body — 93% up, i.e. inside the head — so with the body
+     rendered at the collider's own position the NECK bone's minimum distance to the camera over a
+     second of idle animation is 0.0048 u against a near plane of 0.02. The near plane is four times
+     further away than the neck, so it slices the neck and shoulders and the frame fills with shards.
+     Measured, all six arms, min-over-a-second (the first pass of this A/B read a single frame and got
+     the OPPOSITE answer, because the idle clip breathes the neck toward and away from the eye — a
+     clearance that is true on the frame you looked is not a clearance):
+        body   back 0     → Neck 0.0048  ✗ inside near   · shards
+        nohead back 0     → Neck 0.0102  ✗ inside near   · shards (hiding a BONE does not move the neck)
+        nohead back 0.05  → Neck ~0.055  ✓ 2.7x near     · reads as a torso, an arm and legs
+     So the fix is `backOff`: slide the body back along the look axis in first person only. It buys
+     real clearance, and its price is stated — the rendered body is 0.05 u behind its collider in a view
+     where the only thing that can show the difference is your own shadow. `nohead` on top, because at
+     back-off you would otherwise be looking at the top of your own head.
+     Every arm stays URL-addressable (`?fpbody=body|nohead|off&fpback=<u>`) so the next person re-judges
+     this by looking rather than by believing this comment. */
+  firstPerson: {
+    mode: ({ body: 'body', nohead: 'nohead', off: 'off' })[Q.get('fpbody')] || 'nohead',
+    backOff: qNum('fpback', 0.05),
+  },
+});
+scene.add(hero.group);
 const ropeGeo = new THREE.BufferGeometry();
 ropeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
 const rope = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: '#f2f4f8' }));
@@ -579,6 +727,11 @@ function updateHud(dt) {
      to be answerable without guessing which one the dim crosshair meant (A-CLIMB). */
   set('v-range', `web ${SWING.ropeMax.toFixed(2)} u · lock ${aimReach().toFixed(2)} u`);
   set('v-cling', character.clinging ? 'STUCK — W up, S down' : 'no', character.clinging ? 'on' : 'off');
+  /* A-BODY: the body's own verdict, next to the physics'. `rigged` is the honest half — before the GLB
+     lands this says so rather than reporting a pose the capsule cannot be in. */
+  set('v-pose', hero.rigged
+    ? `${hero.pose} · ${hero.gaitLabel} (${hero.gait.toFixed(2)}) · ${(hero.bodyHeight).toFixed(2)} u`
+    : 'placeholder capsule — GLB loading', hero.rigged ? 'on' : 'off');
   set('v-climb', `${character.climbs} · ${character.mantles} roofs`);
   set('v-latch', character.latched ? 'HELD — space to launch' : 'no', character.latched ? 'on' : 'off');
   set('v-webs', `${stats.webs} fired · ${character.releases} launched`);
@@ -708,6 +861,7 @@ wireDock(); syncDock();
    8. THE FRAME.
    --------------------------------------------------------------------------------------------- */
 const _camPos = { x: 0, y: 0, z: 0 }, _camDir = { x: 0, y: 0, z: 0 };
+const _hand = new THREE.Vector3();   // A-BODY: the rope's origin, refilled each frame (never re-alloc)
 spawn();
 let last = performance.now(), fpsAcc = 0, fpsN = 0;
 
@@ -770,13 +924,20 @@ function frame() {
   stats.travel += Math.hypot(character.x - stats.lastX, character.z - stats.lastZ);
   stats.lastX = character.x; stats.lastZ = character.z;
 
-  /* --- the visible body --- */
-  body.position.set(character.x, character.y + EYE * 0.5, character.z);
-  body.quaternion.copy(s.quat);
-  body.visible = character.view === 'third';
+  /* --- the visible body (A-BODY). One call: the ability reads the controller state and poses itself.
+     `lookYaw` is handed over because `state.yaw` only tracks the look while MOVING — stand still in
+     first person without it and you look down at a body facing whichever way you last walked. --- */
+  hero.update(dt, s, { view: character.view, lookYaw: character.lookYaw, anchor: s.anchor });
   if (s.anchor) {
     const p = ropeGeo.attributes.position;
-    p.setXYZ(0, character.x, character.y + EYE * 0.6, character.z);
+    /* THE WEB LEAVES THE HAND, not the sternum. The body's arm is now genuinely extended at the anchor
+       (the rig's aim-IK layer, driven by createHeroBody), so a rope starting at chest height reads as a
+       line that missed the arm it is supposed to be coming out of — the animation and the mechanic
+       visibly disagreeing. `webAnchorPoint` returns the throwing hand's world position and falls back
+       to this same chest point before the GLB lands, so there is never a frame with no rope origin. */
+    _hand.set(character.x, character.y + EYE * 0.6, character.z);
+    hero.webAnchorPoint(_hand);
+    p.setXYZ(0, _hand.x, _hand.y, _hand.z);
     p.setXYZ(1, s.anchor.x, s.anchor.y, s.anchor.z);
     p.needsUpdate = true;
     rope.visible = true;
@@ -863,6 +1024,38 @@ window.__lock = {
   get age() { return targetLock.age; },
   get marker() { return { visible: lockMark.visible, onScreen: lockMark.onScreen, screen: lockMark.screen }; },
   clear: () => targetLock.clear(),
+};
+/* A-BODY: THE BODY, AS A READABLE FACT. Same rule as `__input` and `__level` — a capture can show that
+   a body is there and cannot show which pose it believes it is in, what scale the GLB was measured
+   into, or whether the rope is actually leaving the hand. All four are checkable numbers, so they are
+   exposed as numbers rather than left to a screenshot to imply. */
+window.__hero = {
+  get rigged() { return hero.rigged; },
+  get pose() { return hero.pose; },
+  get gait() { return hero.gait; },
+  get gaitLabel() { return hero.gaitLabel; },
+  get scale() { return hero.scale; },
+  get height() { return hero.bodyHeight; },
+  get visible() { return !!(hero.object && hero.object.visible); },
+  get hasHand() { return hero.hasHand; },
+  /* the rope's ACTUAL origin this frame, so "does the web leave the hand" is a distance and not an
+     impression. Allocates one Vector3 per CALL — a probe read, never a frame path. */
+  handPoint() { const v = new THREE.Vector3(); hero.webAnchorPoint(v); return { x: v.x, y: v.y, z: v.z }; },
+  /* THE FIRST-PERSON NEAR-PLANE CHECK, as a number. A-CLIMB's finding was that the EYE was clear on
+     260/260 frames while the near plane's CORNERS were inside geometry on 52 of them — the same class
+     of miss is available here, with the player's own torso as the geometry. So: how far is each named
+     bone from the rendered camera, against `camera.near`. A bone nearer than `near` is a body part the
+     frustum is cutting through. Probe-only (it allocates). */
+  boneDist(names = ['Head', 'Neck', 'Spine2', 'Spine', 'Hips', 'LeftShoulder', 'RightShoulder', 'LeftArm', 'RightArm']) {
+    const v = new THREE.Vector3(), cam = rig.camera, out = {};
+    for (const n of names) {
+      v.set(NaN, NaN, NaN); hero.bonePoint(n, v);
+      out[n] = Number.isFinite(v.x) ? +cam.position.distanceTo(v).toFixed(4) : null;
+    }
+    out.near = cam.near;
+    return out;
+  },
+  ready: hero.ready,
 };
 window.__spawn = spawn;
 window.__setAimMode = (m) => { SWING.aimMode = m === 'auto' ? 'auto' : 'point'; return SWING.aimMode; };

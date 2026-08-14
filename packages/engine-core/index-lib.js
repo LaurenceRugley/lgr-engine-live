@@ -81,6 +81,7 @@ export { createDebugOverlay } from './src/debug-overlay.js';
 export { HOARD_SURFACES, WEAPON_SKINS, forgeHoardMaterials, CITY_SURFACES, forgeCityMaterials, CITY_LOOKS } from './src/forge-recipes.js';
 export { SIM_DEFAULTS } from './src/graph-sim.js';
 export { applyGroundMacro } from './src/ground-macro.js';
+export { createTriplanarForgeMaterial, tilesPerUnit } from './src/triplanar-forge.js';
 export { DECREPIT_TOWERS, buildDecrepitProfile, buildIntactProfile } from './src/world-profiles.js';
 export { deriveHarvest, placeCoverBuildings, scatterProps, scatterRuins, citySolidsToObstacles } from './src/world-scatter.js';
 export { cityProfileFromUrban, URBAN_ERAS } from './src/urban-profile.js';
@@ -128,6 +129,10 @@ export { createCharacterHorde } from './src/createCharacterHorde.js';
 // renderer over it (rigs near, one instanced-capsule draw far). Lifted from hoard2 — engine-first.
 export { createAgentSim, createAgentRng } from './src/createAgentSim.js';
 export { createCrowdTiers } from './src/createCrowdTiers.js';
+// A-BODY (2026-08-13): the player's own skinned body over the same rig — idle/walk/sprint gait blend,
+// held jump/fall/swing/cling poses, first- and third-person. The pure gait/pose math rides with it.
+export { createHeroBody } from './src/createHeroBody.js';
+export { gaitBlend, gaitName, heroPose } from './src/hero-body-pose.js';
 // ─────────────────────────────────────────────────────────────────────────────
 // createCodePanel OMITTED — its shiki dynamic import emits 200+ grammar chunks that lib consumers never load.
 export { damp, clamp, angleDelta } from './src/math.js';

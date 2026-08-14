@@ -103,6 +103,12 @@ export { createCharacterHorde } from './src/createCharacterHorde.js';
 // family — general capability, not city content (createAgentSim imports nothing; tiers import the horde).
 export { createAgentSim, createAgentRng } from './src/createAgentSim.js';
 export { createCrowdTiers } from './src/createCrowdTiers.js';
+// A-BODY (2026-08-13): the PLAYER's body — same family, same argument as the line above (general
+// capability, no city content: it composes the rig and reads a controller state). It belongs in the
+// slim barrel because the thing it replaces — a hand-rolled CapsuleGeometry beside every character
+// controller — is exactly what a no-build consumer ends up writing without it.
+export { createHeroBody } from './src/createHeroBody.js';
+export { gaitBlend, gaitName, heroPose } from './src/hero-body-pose.js';
 export { detectLakes, buildLakeGroup, createWorldLakes } from './src/world-water.js';
 export { createWaterFlow } from './src/water-flow.js';
 export { reprojectScatter } from './src/scatter.js';

@@ -303,6 +303,10 @@ export { HOARD_SURFACES, forgeHoardMaterials, WEAPON_SKINS, CITY_SURFACES, forge
 // Arc A7-1 — world-scale macro de-tiling for a tiled floor (breaks the iso-distance repeat grid a single
 // tile can't, since a tile holds no feature bigger than itself). Opt-in via onBeforeCompile → byte-safe.
 export { applyGroundMacro } from './src/ground-macro.js';
+// Arc A-AERIAL — the research doc's `triplanarForge`: a forge-baked map set sampled by WORLD POSITION
+// (three axis projections blended by normal, side set on X/Z + top set on Y) so UV-less, wildly
+// differently-sized instanced boxes can share ONE textured material at ONE draw call. Opt-in.
+export { createTriplanarForgeMaterial, tilesPerUnit } from './src/triplanar-forge.js';
 
 // Arc A14 GLINT — constant-time glinty-NDF specular (own implementation from the SIGGRAPH-Asia-2025
 // paper; no textures/RTs/half-float). applyGlint decorates a lit MeshStandardMaterial (composes with
@@ -382,6 +386,22 @@ export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/c
 // Lesson M1b — character horde: a pooled, index-addressed, distance-LOD scale-up of the rig (the
 // Hoard swaps its instanced-capsule zombies for these, same sim).
 export { createCharacterHorde } from './src/createCharacterHorde.js';
+
+/* ARC A-BODY (2026-08-13) — THE PLAYER GETS A BODY. The engine could render a CROWD of skinned humans
+   (rig → horde → tiers) but not the ONE human the player is, so every project hung a CapsuleGeometry
+   off createCharacterController and called it a stand-in. createHeroBody reads a controller state and
+   poses a rigged character from it: idle/walk/sprint off a continuous gait blend, held poses for
+   jump/fall/swing/cling, the aim-IK arm extended at the swing anchor, and a first-person mode that
+   collapses the head bone so the eye never renders the inside of its own skull. Presentation only —
+   the collider stays a capsule, the sim is untouched. The pure decision math (gaitBlend / heroPose) is
+   node-tested in hero-body-pose.js; the piecewise gait map exists because the rig's blend is piecewise
+   at 0.5 and a naive speed ratio walks with 16% of a run mixed in.
+   NOTE ON WHAT IS *NOT* EXPORTED HERE: `SURVIVOR_STATES` / `HERO_AIR_POSE` / `HERO_POSES` are real
+   exports of their own modules (the node test reads them) but stay OFF this barrel until something
+   consumes them — the capability index counts a barrel export with no consumers as ORPHANED, and
+   growing that list to look generous is how a public API becomes furniture. */
+export { createHeroBody } from './src/createHeroBody.js';
+export { gaitBlend, gaitName, heroPose } from './src/hero-body-pose.js';
 
 /* A-CITIZENS (2026-08-12, mass-agents Phase 2) — the SEIR agent population, LIFTED from hoard2's
    civilians.js (84c0667) so every project inherits it: pooled S/E(/in-pool I) state machine, wander +

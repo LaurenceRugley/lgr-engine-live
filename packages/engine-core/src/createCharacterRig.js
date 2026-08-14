@@ -239,6 +239,8 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
     const locoActions = {};            // 'idle'/'walk'/'run' → AnimationAction (built lazily on first setLocomotion)
     let _locoOn = false, _locoSpeed = 0, _locoShown = 0, _worldSpeed = null;   // speed01 ∈ [0,1]; _locoShown = the A8-1 EASED scalar the weights read; _worldSpeed = real m/s (A6-2 stride-rate) or null
     let _actAction = null, _actClip = null, _actActive = false, _actW = 0;   // the one-shot overlay
+    // ── A-BODY POSE HOLD (2026-08-13) — a clip FROZEN at one time, used as a pose. See poseHold().
+    let _poseAction = null, _poseClip = null, _poseWant = 0, _poseW = 0;
     let _headingTarget = null;         // A1: smoothed body yaw (rad) or null (caller sets the yaw directly)
     const boneArmForeR = B.foreArmR;          // A1 aim-IK: the forearm (gun end of the chain; canonical foreArmR)
     let aimTarget = null, aimW = 0, _aimActive = false;       // A1 aim-IK: {x,y,z} to track + a blend weight
@@ -328,6 +330,38 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
         a.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(_actW).play();
         _actAction = a; _actClip = clip; _actActive = true;
       },
+      // ── A-BODY POSE HOLD — freeze a clip at a FIXED normalised time and BLEND it over the locomotion
+      // blend, as a POSE rather than a motion. This is the seam that lets a rig express states its GLB has
+      // no clip for, without faking a clip: the shipped survivor.glb ships Idle/Walk/Run/Jump/Punch/Death/
+      // Working and NOTHING for falling, swinging or clinging to a wall — but its Jump clip passes through
+      // a genuine airborne pose on the way, so holding that one frame is a real airborne body rather than a
+      // walk cycle playing in mid-air. (Stated plainly, per Rule 12: this is a POSE, not an animation. A
+      // held frame does not breathe. An authored clip is strictly better and is the follow-up work.)
+      //   name   — a key of STATES (resolved through the same findClip path as every other state)
+      //   t01    — WHERE in the clip to freeze, 0..1 of its duration
+      //   weight — 0..1; 0 releases the hold and the locomotion blend fades back in
+      // The action is `paused`, so the mixer evaluates it at its pinned time and never advances it; setting
+      // .time each call means the pose is a pure function of the argument (no drift, no accumulated state).
+      // C++ anchor: sampling one keyframe out of a track and blending it in as a static pose — a lerp
+      // target, not a playhead.
+      poseHold(name, t01 = 0, weight = 1) {
+        if (!name || !(weight > 0)) { _poseWant = 0; return; }
+        const clipName = STATES[name]; if (!clipName) { _poseWant = 0; return; }
+        const clip = findClip(clipName); if (!clip) { _poseWant = 0; return; }   // absent clip → no-op, never a throw
+        if (_poseClip !== clip) {
+          if (_poseAction) _poseAction.stop();
+          _poseAction = mixer.clipAction(clip);
+          _poseAction.setLoop(THREE.LoopRepeat, Infinity);
+          _poseAction.enabled = true; _poseAction.clampWhenFinished = false;
+          _poseAction.reset().setEffectiveTimeScale(1).setEffectiveWeight(_poseW).play();
+          _poseClip = clip;
+        }
+        _poseAction.paused = true;
+        const u = t01 < 0 ? 0 : t01 > 1 ? 1 : t01;
+        _poseAction.time = clip.duration * u;
+        _poseWant = weight > 1 ? 1 : weight;
+      },
+      get poseWeight() { return _poseW; },   // the EASED weight actually in force (probe/HUD receipt)
       // A1: a SMOOTHED body heading (slerped in _applyLayers) — the caller passes the target yaw instead of
       // snapping object.rotation.y, so turns read smooth. Pass null to go back to caller-driven yaw.
       setHeading(yaw) { _headingTarget = yaw; },
@@ -356,7 +390,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // mixer.stopAllAction() (stops the loco actions) but the handle is reused — without this reset _locoOn
       // stays true and the next setLocomotion just sets weights on STOPPED actions → the respawn freezes in
       // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
-      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; aimW = 0; _aimActive = false; _headingTarget = null; if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
+      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
@@ -377,6 +411,15 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // Run AFTER a mixer step (the mixer reset the bones to the clip pose, so we multiply ONE fresh offset
       // — never accumulating). The caller (rig.update / horde.update) only calls this when the mixer stepped.
       _applyLayers(dt) {
+        // ── A-BODY POSE HOLD — eased OUTSIDE the _locoOn guard, because a consumer may hold a pose on a rig
+        // that never drives locomotion at all (and because a release must keep easing after the last
+        // poseHold call). 14/s in, 9/s out: a body enters an air pose fast (the leave-the-ground moment is
+        // a beat) and returns to its legs a little softer, so a landing settles instead of snapping.
+        if (_poseAction) {
+          _poseW = damp(_poseW, _poseWant, _poseWant > 0 ? 14 : 9, dt);
+          _poseAction.setEffectiveWeight(_poseW);
+          if (_poseW < 0.01 && _poseWant === 0) { _poseAction.stop(); _poseAction = null; _poseClip = null; _poseW = 0; }
+        }
         // ── A1 LOCOMOTION BLEND — set the idle/walk/run weights from speed, dimmed by any one-shot action.
         if (_locoOn) {
           if (_actActive && _actClip && _actAction.time >= _actClip.duration - 0.02) _actActive = false;  // clip clamped → release
@@ -387,7 +430,9 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
           // states instead of popping. One low-pass covers every state-pair transition (the weight fn is
           // continuous in s), so idle↔walk, walk↔run and the reverse all ease with no per-pair bookkeeping.
           _locoShown = damp(_locoShown, _locoSpeed, _locoEase, dt);
-          const s = _locoShown, base = 1 - _actW;                 // the action steals weight from the legs' blend
+          // A-BODY: a HELD POSE steals weight from the legs on the same seam a one-shot does, so an air
+          // pose at full weight leaves no walk cycle running underneath it (the "running in mid-air" read).
+          const s = _locoShown, base = Math.max(0, 1 - _actW - _poseW);
           let wi = 0, ww = 0, wr = 0;
           if (s < 0.5) { wi = 1 - s * 2; ww = s * 2; } else { ww = 2 - s * 2; wr = s * 2 - 1; }
           // A6-2 STRIDE RATE — scale the leg playback so the planted foot GRIPS instead of skating. When a
