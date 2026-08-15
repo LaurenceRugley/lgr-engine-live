@@ -25,20 +25,30 @@
    ── THE POSES, AND WHICH ONE IS AN HONEST ANIMATION vs A HELD FRAME (Rule 12) ────────────────────
    The shipped survivor.glb (CC0, Quaternius "Animated Human") carries EXACTLY these clips:
        Idle · Walk · Run · Jump · Punch · Death · Working · ArmatureAction.002
-   So:
-     · idle / walk / sprint  — REAL animation. Three looping clips cross-blended by `gaitBlend`, with
-       optional stride-rate scaling so the planted foot grips instead of skating.
-     · jump / fall           — a HELD FRAME of the Jump clip (see createCharacterRig.poseHold). The
-       clip passes through a genuine airborne pose; freezing it at two different times gives a rising
-       body and a falling body that are recognisably different, and neither is a walk cycle playing in
-       mid-air. It does not breathe. An authored fall clip would be better and is follow-up work.
-     · swing                 — a held air frame PLUS the rig's existing aim-IK layer pointed at the
-       anchor, so the arm genuinely extends toward the thing the rope is tied to and tracks it through
-       the arc. The arm is real IK; the rest of the body is a held frame.
-     · cling                 — a held frame plus the arm reaching at the wall. THE HONEST GAP: there is
-       no splayed-against-a-wall clip and no second aimable arm in the rig's layer set, so a cling
-       reads as "reaching at the wall", not as "spread-eagled on it". Named here rather than papered
-       over; the fix is an authored clip (tools/blender, the build_reload.py precedent), not more code.
+   Nothing for falling, swinging or clinging — so those four modes are a HELD FRAME of the Jump clip
+   (`createCharacterRig.poseHold`) with a live procedural layer composed on top of it (A-AIR, `airMotion`
+   above; the curves are `hero-air.js`). The base is a still; the motion is real and is a function of the
+   physics, not of a playhead:
+     · idle / walk / sprint  — REAL animation, and no air layer at all. Three looping clips cross-blended
+       by `gaitBlend`, with optional stride-rate scaling so the planted foot grips instead of skating.
+     · jump                  — held frame + a crunch that FOLLOWS THE LAUNCH: arms drive overhead, knees
+       tuck, chest closes, all scaled by how fast the body is actually rising, so the shape relaxes on
+       the way to the apex instead of being equally-jumped at every height.
+     · fall                  — held frame + the opposite silhouette, scaled by fall speed: arms up and
+       wide, chest arched back, legs trailing and split, with a flutter that never lets the limbs settle.
+       A short hop reads almost neutral; a rooftop drop is fully spread.
+     · swing                 — held frame + the rig's aim-IK arm pointed at the anchor (real IK, the arm
+       tracks the rope through the arc) + a LEG PUMP driven by the pendulum itself: knees come up through
+       the rise, legs extend through the bottom. That pump is the thing the eye reads as a swing, and it
+       is the clearest case for a procedural layer over a baked clip — a clip cannot know which way the
+       body is currently travelling.
+     · cling                 — held frame + a genuine four-limb splay: both arms high and wide, knees out,
+       chest pressed in, and a climb cycle whose amplitude is the player's own climb rate. THIS WAS THE
+       WEAKEST POSE and its blocker was structural, not artistic: the rig has exactly ONE aimable arm, so
+       before this layer the only available move was to point that arm at the wall, and the body read as
+       reaching rather than clinging. An additive layer is not limited to one arm.
+   With `airMotion:false` every one of those four reverts to the bare held frame — kept deliberately as
+   the A/B control arm, so "the layer is better" is settled by looking at two captures of one build.
 
    ── FIRST PERSON: THE BODY STAYS ON, THE HEAD COMES OFF ─────────────────────────────────────────
    The eye sits INSIDE the head at `state.y + eyeHeight`, so a first-person camera on a full body
@@ -61,6 +71,7 @@
      webAnchorPoint(out),                    // the throwing hand in world space (rope origin)
      setVisible(on), dispose(),
      get object(), get pose(), get gait(), get gaitLabel(), get scale(), get bodyHeight(), get rigged(),
+     get airMotion(), get airWeight(), get airMode(),   // A-AIR receipts
    }
    ============================================================ */
 import * as THREE from 'three';
@@ -93,6 +104,28 @@ export function createHeroBody({
   footIK = null,                // pass a cfg to enable plant-and-hold (scale-aware: caller's numbers)
   walkStride = 0, runStride = 0, // A6-2 stride-rate reference speeds (0 = the speed01 heuristic)
   riseEps = 0.05,
+  /* ── A-AIR (2026-08-15): THE HELD FRAMES START BREATHING. ────────────────────────────────────────
+     A-BODY shipped jump/fall/swing/cling as one FROZEN frame of the Jump clip each, and said so in its
+     own header two paragraphs up ("It does not breathe"). This is the follow-up that arc named. The
+     ability is the rig's (`handle.setAirMotion`, curves in `hero-air.js`); this is the wiring, and the
+     only thing it adds is the translation from a controller state to that call.
+       false / null  — OFF, and then this module behaves EXACTLY as it did before: still poses, cling
+                       still reaches at the wall with the aim arm. Kept as the A/B control arm, because
+                       "is the new layer actually better" is a question a capture should answer by
+                       showing both, not a claim this comment gets to make.
+       true or {…}   — ON. Options, both with defaults that work but that a level should override:
+         vRef      — the vertical speed at which the air shape is FULLY expressed. The right value is
+                     the level's own `jumpSpeed`: at launch the body is fully crunched, and anything
+                     faster (a rooftop drop) is fully spread, which is exactly right. Defaulted off
+                     sprintSpeed only because that is the sole vertical-ish scale this module is handed
+                     — pass the real literal by reference rather than retyping it (the `aimReach`
+                     lesson: a hand-copied constant is how a number goes stale without erroring).
+         climbRate — the controller's own `cling.climbRate` (character.js default 1.15). While clinging
+                     the controller writes `state.vy = lift * climbRate`, so |vy|/climbRate IS how hard
+                     the player is climbing, 0..1 — the signal that drives the wall cycle's amplitude.
+     THE COLLIDER IS STILL UNTOUCHED. This layer rotates bones and nothing else; a determinism trace is
+     unmoved by turning it on, exactly as it was unmoved by giving the player a body at all. */
+  airMotion = true,
   /* FIRST PERSON — three honest options, because THERE IS NO FREE ONE and the repo should be able to
      A/B them rather than argue. Measured on the shipped survivor at 0.30 u with near 0.02 (see
      docs/captures/swing-lab/a-body/):
@@ -127,6 +160,12 @@ export function createHeroBody({
   skinned = true,
 } = {}) {
   const AIR = airPose ? { ...HERO_AIR_POSE, ...airPose } : HERO_AIR_POSE;
+  // A-AIR: normalise `airMotion` once, at construction, so the per-frame path is two field reads and
+  // never a truthiness test on a union type. null = the layer is never armed (the control arm).
+  const MOTION = airMotion
+    ? { vRef: (airMotion.vRef != null ? airMotion.vRef : sprintSpeed * 1.25),
+        climbRate: (airMotion.climbRate != null ? airMotion.climbRate : 1.15) }
+    : null;
   const fpMode = (firstPerson && firstPerson.mode) || 'body';
   const hideBones = fpMode === 'nohead' ? ((firstPerson && firstPerson.hideBones) || ['Head']) : [];
   const fpBackOff = (firstPerson && firstPerson.backOff) || 0;
@@ -209,6 +248,17 @@ export function createHeroBody({
     get pose() { return pose; },
     get gait() { return gait; },
     get gaitLabel() { return gaitName(gait); },
+    // A-AIR receipts, so a probe or a HUD can state whether the layer is armed and how far it has eased
+    // in — "the pose is animated" must be checkable, not believed (Rule 15). 0 on the ground, by design.
+    get airMotion() { return !!MOTION; },
+    get airWeight() { return handle ? handle.airWeight : 0; },
+    get airMode() { return handle ? handle.airMode : null; },
+    /* THE HELD POSE'S OWN EASED WEIGHT, exposed for one specific reason: it is the CONFOUND in any
+       measurement of whether a pose is moving. While `poseHold` is easing in (14/s) the limbs travel a
+       long way purely because the body is crossfading from its walk into the air pose — so a limb-travel
+       reading taken during the ease is large on a completely frozen pose, and a harness that did not
+       print this number would report a still as an animation. Measure when this has settled at 1. */
+    get poseWeight() { return handle ? handle.poseWeight : 0; },
     get handle() { return handle; },      // escape hatch: the raw rig handle for consumer-specific beats
 
     setVisible(on) {
@@ -263,10 +313,28 @@ export function createHeroBody({
       /* THE ARM. The rig's aim-IK layer already knows how to point the right arm at a world point and
          track it — the same layer the survivor aims a gun with — so a swing costs one call rather than
          a new layer: the arm extends toward the ANCHOR and follows it round the arc. Cleared the moment
-         the rope cuts, so the arm eases back into the clip pose instead of staying stuck out. */
+         the rope cuts, so the arm eases back into the clip pose instead of staying stuck out.
+         A-AIR CHANGED WHO OWNS THE ARM ON A CLING, and that IS the fix for the previous arc's weakest
+         pose. Aiming one arm at the wall was all a single-aimable-arm rig could do, and the ledger
+         called the result exactly what it was: "reaching at the wall, not spread-eagled on it". The air
+         layer writes BOTH arms, both legs and the spine, so with it armed the aim is dropped on a cling
+         and the splay is unopposed. With `airMotion:false` the old reach comes straight back — the two
+         readings stay comparable in one build, which is how the capture strip can settle it. */
+      const clingSplay = pose === 'cling' && MOTION;
       if (pose === 'swing' && (anchor || s.anchor)) handle.setAim(anchor || s.anchor);
-      else if (pose === 'cling') { _v.set(s.x + Math.sin(s.yaw || 0), s.y + (height * 0.9), s.z + Math.cos(s.yaw || 0)); handle.setAim(_v); }
+      else if (pose === 'cling' && !clingSplay) { _v.set(s.x + Math.sin(s.yaw || 0), s.y + (height * 0.9), s.z + Math.cos(s.yaw || 0)); handle.setAim(_v); }
       else handle.setAim(null);
+
+      /* THE AIRBORNE MOTION LAYER — one call, every frame, releasing itself on the ground. `vy` carries
+         both meanings the layer needs and the controller already separates them for us: airborne it is
+         gravity's own number (so the shape follows the arc), and on a wall `character.js` writes
+         `state.vy = lift * climbRate`, so its magnitude over climbRate is the climb effort 0..1. */
+      if (MOTION) {
+        handle.setAirMotion(pose === 'ground' ? null : pose, {
+          vy: s.vy || 0, vRef: MOTION.vRef,
+          climb: pose === 'cling' ? Math.min(1, Math.abs(s.vy || 0) / (MOTION.climbRate || 1)) : 0,
+        });
+      }
 
       rig.update(dt);          // steps the mixer + the procedural layers for this one body
       applyHide(first);        // …then take the head off, so no clip can put it back

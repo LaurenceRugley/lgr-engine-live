@@ -82,6 +82,11 @@ export { HOARD_SURFACES, WEAPON_SKINS, forgeHoardMaterials, CITY_SURFACES, forge
 export { SIM_DEFAULTS } from './src/graph-sim.js';
 export { applyGroundMacro } from './src/ground-macro.js';
 export { createTriplanarForgeMaterial, tilesPerUnit } from './src/triplanar-forge.js';
+// Arc A-DRESS — the street rather than the buildings: road markings as a world-XZ material patch
+// (zero draw calls, chains onto an existing onBeforeCompile) + instanced street furniture whose mesh
+// count does not grow with the city. Both opt-in.
+export { applyStreetGrid } from './src/street-grid.js';
+export { createStreetKit } from './src/street-kit.js';
 export { DECREPIT_TOWERS, buildDecrepitProfile, buildIntactProfile } from './src/world-profiles.js';
 export { deriveHarvest, placeCoverBuildings, scatterProps, scatterRuins, citySolidsToObstacles } from './src/world-scatter.js';
 export { cityProfileFromUrban, URBAN_ERAS } from './src/urban-profile.js';

@@ -476,6 +476,10 @@ CHAR_SWING_PROFILE.maxHangLatched = Number(
 /* THE CHASE BLOCK IS A NAMED OBJECT because two things read `dist` and the second one had a literal
    copy of it (the lab paid for this exact bug in A-CLIMB: `aimReach` was adding a stale 1.2). */
 const CHAR_THIRD = { dist: 0.9, height: 0.34, side: 0.14, springR: 0.06, minDist: 0.12 };
+/* A-AIR: the jump speed is now read TWICE — by the controller, which uses it to leave the ground, and
+   by the hero body's airborne motion layer, which uses it as the vertical speed at which the airborne
+   SHAPE is fully expressed. Named once for exactly the reason the comment above gives about `dist`. */
+const CHAR_JUMP_V = 1.2;
 
 const character = createCharacterController({
   world: charWorld,
@@ -489,7 +493,7 @@ const character = createCharacterController({
   /* JUMP, sized against the body rather than against taste: 1.2 u/s under gravity 5.4 tops out 0.133 u
      ≈ 0.48 eye-heights ≈ 0.81 m at this city's 6 m/unit — a human hop that clears a kerb and cannot
      reach a roof. Gravity MATCHES the grapple's own 5.4 exactly so the swing hand-off is weightless. */
-  jumpSpeed: 1.2, gravity: 5.4,
+  jumpSpeed: CHAR_JUMP_V, gravity: 5.4,
   /* THIRD PERSON IS THE DEFAULT (the arc reads best from outside the body) and carries its own tuning;
      first person has its own block inside the module. 0.9 u back ≈ 3.2 body-heights — close enough to
      stay in a 0.55 u street canyon, far enough to see the rope. */
@@ -556,6 +560,15 @@ const hero = createHeroBody({
      the same answer applies — re-judgeable via ?fpbody= / ?fpback= rather than taken on faith. */
   firstPerson: { mode: ({ body: 'body', nohead: 'nohead', off: 'off' })[_q.get('fpbody')] || 'nohead',
                  backOff: _qNum('fpback', 0.05) },
+  /* ---- A-AIR (2026-08-15): THE CITY GETS THE BREATHING BODY TOO, IN THE SAME COMMIT. --------------
+     A-BODY shipped the rigged hero to swing-lab only and declared the drift in its own ledger entry
+     ("metropolis still hangs a capsule") — it then took a second arc to close. That is the failure this
+     repo names by name, so the airborne layer is wired to BOTH consumers here rather than to the lab
+     and a promise. Nothing below is copied from the lab: `CHAR_JUMP_V` is the literal this file hands
+     its own controller, and `climbRate` is read off THIS city's grapple profile, which is where its
+     cling numbers already live. `?heroair=0` is the control arm, same as the lab's. */
+  airMotion: _q.get('heroair') === '0' ? false
+    : { vRef: CHAR_JUMP_V, climbRate: CHAR_SWING_PROFILE.climbRate },
 });
 const charBody = hero.group;
 scene.add(charBody);
@@ -1557,6 +1570,76 @@ window.__swing = swingState;   // A-SWING probe handle (house convention — see
    setter goes through the same three steps the Q key does, because a probe that flipped only the
    profile field would leave the crosshair in whatever state the other mode left it — and then it would
    be testing a HUD state no player can reach. */
+/* A-AIR: THE BODY, AS A READABLE FACT — the same surface swing-lab has exposed since A-BODY, wired here
+   in the same commit rather than left for a later arc. The lab having a measurable hero and the city not
+   is the SAME wiring drift as the city having a capsule while the lab had a body: the ability is shared,
+   the receipt was not, and a capture tool pointed at the city would have failed on `window.__hero` being
+   undefined and been read as "the city has no body". Identical shape to the lab's, deliberately, so ONE
+   harness drives both (`node tools/hero-air-captures.mjs --project metropolis`).
+   `bonePos` reports a bone in the RIG ROOT'S own frame (through its inverse world matrix, rescaled back
+   to world units). That frame is what makes "did the limb move" answerable at all: a world-space bone
+   position moves when the player falls, and a yaw-only derotation still carries the grapple's pitch and
+   bank — both of which read a completely frozen pose as a moving one. See the lab's copy for the full
+   note; the two are identical on purpose so one harness can drive either. */
+window.__hero = {
+  get rigged() { return hero.rigged; },
+  get pose() { return hero.pose; },
+  get gait() { return hero.gait; },
+  get gaitLabel() { return hero.gaitLabel; },
+  get scale() { return hero.scale; },
+  get height() { return hero.bodyHeight; },
+  get visible() { return !!(hero.object && hero.object.visible); },
+  get hasHand() { return hero.hasHand; },
+  get airMotion() { return hero.airMotion; },
+  get airMode() { return hero.airMode; },
+  get airWeight() { return +hero.airWeight.toFixed(4); },
+  get poseWeight() { return +hero.poseWeight.toFixed(4); },
+  handPoint() { const v = new THREE.Vector3(); hero.webAnchorPoint(v); return { x: v.x, y: v.y, z: v.z }; },
+  bonePos(name) {
+    const v = new THREE.Vector3();
+    v.set(NaN, NaN, NaN); hero.bonePoint(name, v);
+    const o = hero.object;
+    if (!Number.isFinite(v.x) || !o) return null;
+    o.updateMatrixWorld(true);
+    o.worldToLocal(v).multiplyScalar(hero.scale || 1);
+    return { x: +v.x.toFixed(4), y: +v.y.toFixed(4), z: +v.z.toFixed(4) };
+  },
+  /* WHERE THE BODY IS ON SCREEN, in CSS pixels, so a capture can CROP to it. The chase camera here is
+     0.9 u behind a 0.30 u body in a 0.55 u street canyon — the player is a few dozen pixels, and a
+     strip of un-cropped 1280x800 frames cannot show whether a pose is a spread-eagle or a shrug. The
+     lab's copy carries the full note; identical here so one harness reads either project. */
+  screenBox(pad = 1.9) {
+    const o = hero.object, cam = rig.camera; if (!o) return null;
+    // Two points (feet, crown) rather than the rig's bbox corners — a corner behind the near plane
+    // projects with a flipped sign and blows the crop up. See the lab's copy for the full note.
+    const s = character.state, h = hero.bodyHeight;
+    const W = renderer.domElement.clientWidth, H = renderer.domElement.clientHeight;
+    const foot = new THREE.Vector3(s.x, s.y, s.z), head = new THREE.Vector3(s.x, s.y + h, s.z);
+    cam.updateMatrixWorld();
+    for (const p of [foot, head]) {
+      const vz = -p.clone().applyMatrix4(cam.matrixWorldInverse).z;
+      if (!(vz > cam.near)) return null;
+      p.project(cam);
+    }
+    const fx = (foot.x * 0.5 + 0.5) * W, fy = (-foot.y * 0.5 + 0.5) * H;
+    const hx = (head.x * 0.5 + 0.5) * W, hy = (-head.y * 0.5 + 0.5) * H;
+    const cx = (fx + hx) / 2, cy = (fy + hy) / 2;
+    const r = Math.max(40, Math.hypot(hx - fx, hy - fy) * 0.5 * pad);
+    return { x: Math.round(cx - r), y: Math.round(cy - r), w: Math.round(r * 2), h: Math.round(r * 2), vw: W, vh: H };
+  },
+  ready: hero.ready,
+};
+/* THE CHARACTER'S OWN AIM, which is NOT `window.__aim`. That one is the FLY mode's grapple ray
+   (`_aim`/`aimHit`); the walking hero casts its own (`_charAim`/`charAimHit`) against a different world
+   with a different reach. A harness hunting for a web anchor in walk mode and reading `__aim` is reading
+   the aircraft's crosshair — it would report "nothing in range" from a street corner surrounded by
+   webbable towers, and the failure would look like the mechanic rather than the instrument (ledger
+   technique #5: log the input the HARNESS believes it is sending). Published so the two cannot be
+   confused, and named for the mode it belongs to. */
+window.__charAim = {
+  pt: _charAim, get hit() { return !!charAimHit; }, get inRange() { return !!character.state.aimInRange; },
+  get reach() { return CHAR_AIM_REACH; },
+};
 window.__swingProfile = SWING_PROFILE;
 window.__setAimMode = (m) => {
   SWING_PROFILE.aimMode = m === 'point' ? 'point' : 'auto';

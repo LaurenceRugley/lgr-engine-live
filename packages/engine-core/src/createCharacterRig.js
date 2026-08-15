@@ -39,6 +39,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE, strideTimeScale } from './character-anim.js';
 import { flinchEnvelope, headYawDelta, wrapPi, swingEnvelope, dipEnvelope } from './character-layers.js';
+import { makeAirPose, airPose, riseFall, AIR_POSE_KEYS } from './hero-air.js';
 import { resolveRig } from './character-rig-profiles.js';
 import { applyNightFill, collectMaterials } from './character-night-fill.js';
 import { damp } from './math.js';
@@ -268,6 +269,19 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
     const _ikLegR = _legChain(B.footR);   // canonical footR
     // both feet must resolve (+ have a parent to convert against) or the rig isn't one we can plant → no-op.
     const _ikLegs = (_ikLegL.foot && _ikLegL.foot.parent && _ikLegR.foot && _ikLegR.foot.parent) ? [_ikLegL, _ikLegR] : null;
+    /* ── A-AIR (2026-08-15) AIRBORNE MOTION LAYER state. See hero-air.js for the curves and for the
+       measurement that chose a procedural layer over an authored clip on this rig.
+       THE LEGS COME FROM THE FOOT-IK CHAIN, deliberately, rather than from two new canonical roles:
+       `_legChain` already walks foot → knee → upper-leg and already flags `articulated`, and it already
+       degrades correctly on the FLAT Quaternius skeleton (Foot→Root, no thigh to rotate) — which is the
+       exact graceful-no-op the rig-profile adapter exists to guarantee. Adding roles a shipped rig
+       cannot provide would make `resolveRig` warn on every zombie spawn for a layer zombies never run.
+       `_airCur` is the EASED pose actually in force and `_airWant` the target: easing the ANGLES as well
+       as the weight means a jump→fall switch (which happens in one frame, at the apex) melts instead of
+       snapping, with no per-transition bookkeeping — the same trick A8-1 used on the gait scalar. */
+    let _airMode = null, _airW = 0, _airWant01 = 0, _airT = 0, _airVy = 0, _airVRef = 1, _airClimb = 0;
+    const _airCur = makeAirPose(), _airWant = makeAirPose();
+    const _airLegL = _ikLegL, _airLegR = _ikLegR;   // same chains; the air layer only ROTATES them
     const lp = {
       headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact },
       recoil: { ...LAYER_DEFAULTS.recoil }, swing: { ...LAYER_DEFAULTS.swing }, lunge: { ...LAYER_DEFAULTS.lunge },
@@ -362,6 +376,26 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
         _poseWant = weight > 1 ? 1 : weight;
       },
       get poseWeight() { return _poseW; },   // the EASED weight actually in force (probe/HUD receipt)
+      /* ── A-AIR AIRBORNE MOTION — make a held air pose BREATHE, and give a cling a second arm.
+         `poseHold` above can only ever hand you a STILL, because survivor.glb has no fall/swing/cling
+         clip to play; this composes live motion on top of that still, driven by the physics the body is
+         actually in. One call per frame, exactly like setLocomotion:
+           mode  — 'jump' | 'fall' | 'swing' | 'cling', or null to release (the layer eases out to zero)
+           vy    — the body's vertical world speed; the sign and magnitude ARE the animation (tuck on the
+                   way up, spread on the way down, legs pumping the pendulum on a swing)
+           vRef  — the speed at which that shape is fully expressed, in the caller's world units/second
+           climb — 0..1, how hard a clinging body is climbing; scales the four-limb wall cycle
+         DEFAULT OFF AND EXACTLY NO-OP: a consumer that never calls this leaves `_airMode` null, `_airW`
+         at 0, and the whole block below is one `if` that fails. The horde, the city crowd and hoard2 are
+         byte-identical (`npm run tier-guard` is the check that says so, not this comment). */
+      setAirMotion(mode, { vy = 0, vRef = 1, climb = 0 } = {}) {
+        _airMode = mode || null;
+        _airWant01 = _airMode ? 1 : 0;
+        _airVy = vy; _airVRef = vRef;
+        _airClimb = climb < 0 ? 0 : climb > 1 ? 1 : climb;
+      },
+      get airWeight() { return _airW; },      // the EASED weight in force — a probe/HUD receipt, not a flag
+      get airMode() { return _airMode; },
       // A1: a SMOOTHED body heading (slerped in _applyLayers) — the caller passes the target yaw instead of
       // snapping object.rotation.y, so turns read smooth. Pass null to go back to caller-driven yaw.
       setHeading(yaw) { _headingTarget = yaw; },
@@ -390,7 +424,9 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // mixer.stopAllAction() (stops the loco actions) but the handle is reused — without this reset _locoOn
       // stays true and the next setLocomotion just sets weights on STOPPED actions → the respawn freezes in
       // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
-      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
+      // A-AIR: the air layer is reset here too. A pooled slot that recycled mid-fall would otherwise
+      // re-arm carrying the previous occupant's spread-eagle in `_airCur` and ease OUT of it on frame one.
+      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
@@ -453,7 +489,13 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
         // as a person standing, not bracing. Opt-in (survivor only). Composes before aim/recoil, which override
         // the gun arm when they engage; here they don't (idle gate). Offsets never accumulate (mixer resets).
         if (_idleRelax) {
-          const wantRelax = (!_aimActive && !_actActive && _locoSpeed < 0.08) ? 1 : 0;
+          /* `!_airMode` IS LOAD-BEARING, and it is a real bug caught before it shipped rather than a
+             defensive `&&`. Idle-relax fires on "not aiming, no one-shot, and barely moving" — and an
+             airborne body has a HORIZONTAL speed of nearly zero while hanging on a wall or dropping
+             straight down, so without this gate the relax layer would lower both arms to the hips at
+             the exact moment the air layer is raising them overhead. The two would fight every frame
+             and the cling would collapse back into the reaching pose this arc exists to fix. */
+          const wantRelax = (!_aimActive && !_actActive && !_airMode && _locoSpeed < 0.08) ? 1 : 0;
           _relaxW = damp(_relaxW, wantRelax, wantRelax ? 2.4 : 6, dt);
           if (_relaxW > 0.01) {
             _relaxClock += dt;
@@ -464,6 +506,52 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
               _q.setFromAxisAngle(_AX_Z, sway * 0.04 * w); boneSpine.quaternion.multiply(_q);             // side weight-shift sway
               _q.setFromAxisAngle(_AX_X, -0.14 * w); boneSpine.quaternion.multiply(_q);                   // ease the braced forward lean upright
             }
+          }
+        }
+        /* ── A-AIR AIRBORNE MOTION LAYER — the one that turns four held frames into four animations.
+           Runs HERE on purpose: after the clip weights and idle-relax (it shapes the BASE pose, like
+           they do) and BEFORE aim-IK, so on a swing the aim layer's `slerp` still wins the rope arm
+           outright — the arm keeps pointing at the anchor and only the free half of the body is ours.
+           Everything is a `.multiply` onto the bone the mixer just posed, so nothing accumulates: the
+           next frame starts from a fresh clip pose, exactly as every layer above does. */
+        if (_airMode || _airW > 0.001) {
+          // Weight in fast, out slower — same 14/9 asymmetry as poseHold, and for the same reason: the
+          // moment you leave the ground is a beat, the moment you land should settle rather than snap.
+          _airW = damp(_airW, _airWant01, _airWant01 > 0 ? 14 : 9, dt);
+          _airT += dt;
+          airPose(_airWant, _airMode, riseFall(_airVy, _airVRef), _airT, _airClimb);
+          // Ease the ANGLES too (see the state block above) — 12/s, so a jump→fall flip at the apex is
+          // a fast melt rather than a pop, and a mode released mid-arc drifts home instead of cutting.
+          const k = _airW;
+          for (let i = 0; i < AIR_POSE_KEYS.length; i++) { const key = AIR_POSE_KEYS[i]; _airCur[key] = damp(_airCur[key], _airWant[key], 12, dt); }
+          if (k > 0.004) {
+            if (boneSpine) {
+              _q.setFromAxisAngle(_AX_X, _airCur.spineX * k); boneSpine.quaternion.multiply(_q);
+              _q.setFromAxisAngle(_AX_Z, _airCur.spineZ * k); boneSpine.quaternion.multiply(_q);
+            }
+            if (boneHead) { _q.setFromAxisAngle(_AX_X, _airCur.headX * k); boneHead.quaternion.multiply(_q); }
+            if (boneArmL2) {
+              _q.setFromAxisAngle(_AX_X, _airCur.armLX * k); boneArmL2.quaternion.multiply(_q);
+              _q.setFromAxisAngle(_AX_Z, _airCur.armLZ * k); boneArmL2.quaternion.multiply(_q);
+            }
+            if (boneArmR) {
+              _q.setFromAxisAngle(_AX_X, _airCur.armRX * k); boneArmR.quaternion.multiply(_q);
+              _q.setFromAxisAngle(_AX_Z, _airCur.armRZ * k); boneArmR.quaternion.multiply(_q);
+            }
+            if (boneArmForeR) { _q.setFromAxisAngle(_AX_X, _airCur.foreRX * k); boneArmForeR.quaternion.multiply(_q); }
+            /* THE LEGS — the half no shipped layer had ever moved, and the half that carries a tuck, a
+               splay and a climb. `upleg`/`knee` are null on a flat rig (the Quaternius zombie), so this
+               is a no-op there rather than a throw: the same graceful degradation every layer above has. */
+            if (_airLegL.upleg) {
+              _q.setFromAxisAngle(_AX_X, _airCur.upLegLX * k); _airLegL.upleg.quaternion.multiply(_q);
+              _q.setFromAxisAngle(_AX_Z, _airCur.upLegLZ * k); _airLegL.upleg.quaternion.multiply(_q);
+            }
+            if (_airLegR.upleg) {
+              _q.setFromAxisAngle(_AX_X, _airCur.upLegRX * k); _airLegR.upleg.quaternion.multiply(_q);
+              _q.setFromAxisAngle(_AX_Z, _airCur.upLegRZ * k); _airLegR.upleg.quaternion.multiply(_q);
+            }
+            if (_airLegL.knee) { _q.setFromAxisAngle(_AX_X, _airCur.kneeLX * k); _airLegL.knee.quaternion.multiply(_q); }
+            if (_airLegR.knee) { _q.setFromAxisAngle(_AX_X, _airCur.kneeRX * k); _airLegR.knee.quaternion.multiply(_q); }
           }
         }
         // ── A1 HEADING — slerp the body toward the target yaw (smooth turns instead of snapping).

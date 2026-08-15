@@ -85,6 +85,13 @@ export const LAYER_BONES = {
   reload:   ['armR'],                       // reload dip — gun-arm lowers (armL/spine enrich)
   idleRelax:['armL', 'armR', 'spine'],      // settle a braced idle (survivor)
   footIK:   ['footL', 'footR', 'hips'],     // plant-and-hold foot lock
+  // A-AIR airborne motion (jump crunch / fall spread / swing leg-pump / cling splay). The MOVERS are the
+  // spine and both arms — the splay that fixes the cling is those three. The LEGS are enriching and are
+  // deliberately NOT listed: the rig reaches them through the foot-IK chain (foot→knee→upper-leg) rather
+  // than through a canonical role, precisely because the Quaternius skeleton is FLAT (Foot→Root) and has
+  // no thigh to rotate. Listing a role that rig cannot provide would warn on every zombie spawn for a
+  // layer zombies never run — the cure being worse than the disease this file exists to cure.
+  air:      ['spine', 'armL', 'armR'],
 };
 
 // The layers each shipped CONSUMER actually drives — so the test validates the RIGHT set against each rig
@@ -95,6 +102,11 @@ export const CONSUMER_LAYERS = {
   zombieHorde: ['headLook', 'hitReact', 'lunge', 'footIK'],
   // hoard2 survivor (player): idle-relax, aim-IK, fire recoil, melee swing, reload dip, hit-react, foot lock.
   survivor: ['idleRelax', 'aim', 'recoil', 'swing', 'reload', 'hitReact', 'footIK'],
+  // createHeroBody's player (swing-lab + metropolis): the same rig, driven for traversal rather than
+  // gunplay — idle-relax on the ground, the aim arm for the rope, and the A-AIR layer for every mode the
+  // GLB has no clip for. Listed so the node red-test proves the survivor can actually run 'air' before a
+  // capture has to notice it silently doing nothing (the A5→A8 failure class, on a new layer).
+  heroBody: ['idleRelax', 'aim', 'air'],
 };
 
 // Detect which profile a skeleton uses, given a predicate `has(name)` (true if that bone name is present).

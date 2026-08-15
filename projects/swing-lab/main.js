@@ -40,6 +40,7 @@ import {
   createFlowField, createAgentSim, createAgentRng, createCrowdTiers, createCharacterRig,
   createHeroBody,
   createTextureForge, CITY_SURFACES, createTriplanarForgeMaterial, tilesPerUnit, applyGroundMacro,
+  createStreetKit, applyStreetGrid,
 } from '@lgr/engine-core';
 /* A-CITIZENS: the tier-A skin. The engine deliberately does NOT inline this GLB (pedestrians.js's
    lib-size note) — the consumer that ships people pays for the model. */
@@ -52,6 +53,23 @@ const qNum = (k, d) => { const v = Number(Q.get(k)); return Number.isFinite(v) &
    the arena is built — see the fog note below. `?level=city` is the A-SKYLINE city; anything else is
    the original lab, unchanged. */
 const LEVEL = Q.get('level') === 'city' ? 'city' : 'lab';
+/* ---- A-DRESS (2026-08-15): THE FOUR ARMS OF THE CITY-VARIETY PASS, and they are URL params for the
+   reason every ablation in this repo is one — before and after have to be two URLs of ONE build, or
+   the comparison has a rebuild in it (A-AERIAL's `?mark=`, A-BODY's `?hero=capsule`, the ledger's own
+   rule). Each defaults OFF, and with all four off not one statement of the new code runs: the arena is
+   built from the same `silhouette: {}` A-SKYLINE measured, the ground material is the A-AERIAL one, and
+   nothing is added to the scene. That is what keeps the ledger's tables, `swing-lab-probe`'s 27 checks
+   and `npm run tier-guard` all still true of the default page.
+     ?variety=1  the rooftop kit + district palette + per-instance facade rhythm (0 extra draw calls)
+     ?street=1   lamps, trees, benches, hydrants, shelters (3 instanced meshes + 1 glow Points)
+     ?roads=1    asphalt/sidewalk/kerb/lane-dashes/crossings painted into the ground (0 draw calls)
+     ?night=1    the light rig at night, so the lamps can be judged on the frames they exist for */
+const DRESS = {
+  variety: Q.get('variety') === '1',
+  street: Q.get('street') === '1',
+  roads: Q.get('roads') === '1',
+  night: Q.get('night') === '1',
+};
 
 /* ---------------------------------------------------------------------------------------------
    1. THE ENGINE CORE — renderer, scene, camera rig, resize + context-restore backbone. No city.
@@ -71,14 +89,23 @@ rig.camera.near = 0.02; rig.camera.far = 400; rig.camera.updateProjectionMatrix(
    So the fog far plane is pushed past the arena's own extent, and the horizon is lifted off pure black
    so a silhouette has something to be a silhouette AGAINST. Gated on LEVEL: the lab keeps its numbers
    exactly, because 27 probe checks and every A-LAB/A-CLIMB capture were taken under them. */
-const SKY = LEVEL === 'city' ? '#1d2634' : '#141821';
+/* A-DRESS: `?night=1` is a LIGHT RIG, not a new scene. A streetlight is a night feature — a lamp that
+   has only ever been judged at noon has not been judged — and this lab has no SunRig (createEngineCore
+   ships the renderer, not a sky), so the honest minimum is one alternative set of the same four numbers
+   the day rig already states. Deliberately NOT a day/night CYCLE: that ability exists in the engine
+   (`createSunRig`, the day-night standard) and wiring it here would be a second arc riding on this one.
+   Recorded as the follow-up rather than half-built. */
+const SKY = DRESS.night ? '#0a0e18' : LEVEL === 'city' ? '#1d2634' : '#141821';
 renderer.setClearColor(new THREE.Color(SKY), 1);
-scene.fog = LEVEL === 'city' ? new THREE.Fog(SKY, 45, 230) : new THREE.Fog(SKY, 26, 120);
+scene.fog = LEVEL === 'city' ? new THREE.Fog(SKY, DRESS.night ? 30 : 45, DRESS.night ? 150 : 230) : new THREE.Fog(SKY, 26, 120);
 
 /* Lights. `createEngineCore` ships NO lights (it owns the renderer, not the look), so the arena
    supplies its own: one key with shadows, a hemisphere fill so the north faces are not black, and a
    low bounce so a body in a street canyon still reads. */
-const key = new THREE.DirectionalLight('#fff0dd', 2.3);
+/* AT NIGHT THE KEY IS THE MOON: same rig, a twentieth of the intensity and a cold cast. It stays a
+   directional light with shadows on because a night city with no shadows reads as fog, and because a
+   lamp's pool of light only means anything against something darker. */
+const key = new THREE.DirectionalLight(DRESS.night ? '#9fb6e8' : '#fff0dd', DRESS.night ? 0.55 : 2.3);
 key.position.set(9, 16, 7);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
@@ -92,9 +119,16 @@ scene.add(key); scene.add(key.target);
    are twice as deep and the shadowed floor came back BLACK in the first street capture — a player who
    cannot see the pavement cannot judge the height a zip just bought them, which is the one thing this
    level exists to give them. Bounce up, ground colour up, key untouched (the contrast is the look). */
-scene.add(LEVEL === 'city'
-  ? new THREE.HemisphereLight('#a8bcdc', '#414755', 1.5)
-  : new THREE.HemisphereLight('#9fb4d8', '#2a2b30', 1.15));
+/* THE NIGHT BOUNCE IS THE SAME LESSON THIS FILE ALREADY LEARNED ONCE, one rung darker. The A-SKYLINE
+   note above records that the city's first street capture came back BLACK and the cure was to raise the
+   bounce, not the key; the first NIGHT capture came back black for exactly the same reason, and 0.42
+   was the number that did it. A night city is not an unlit city — the sky itself is a large dim source,
+   and without it the buildings have no silhouette for a streetlight to be bright against. */
+scene.add(DRESS.night
+  ? new THREE.HemisphereLight('#4a5f8c', '#181e2c', 0.95)
+  : LEVEL === 'city'
+    ? new THREE.HemisphereLight('#a8bcdc', '#414755', 1.5)
+    : new THREE.HemisphereLight('#9fb4d8', '#2a2b30', 1.15));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -142,8 +176,39 @@ const CITY_ARENA = {
     arcClear: GRAPPLE_PROFILE.arcClear, skim: GRAPPLE_PROFILE.skim,
     tall: qNum('tall', 2.1), low: 0.22, gamma: 1.0,
     cores: qNum('cores', 3), coreSigma: 0.30, mix: 0.45,
+    /* ---- A-DRESS: THE DISTRICT PALETTE. Three families, one per Gaussian downtown, so the argmax of
+       the SAME field that ranks a tower also decides what it is made of. The hues are deliberately
+       close together — this is a city at dusk, not a paint chart — and the value ranges overlap, so
+       the height ramp inside each family still carries depth. The whole thing is a per-instance colour
+       on one InstancedMesh: three districts, zero extra draw calls.
+         0.58 cool glass  · a downtown of blue-grey towers (the A-SKYLINE city's own hue, kept)
+         0.09 warm stone  · a masonry district, the warmest thing in the frame
+         0.47 pale green-grey · the concrete/office band that sits between them */
+    palette: DRESS.variety ? [
+      { hue: 0.585, hueVary: 0.020, sat: 0.13, satVary: 0.07, valMin: 0.38, valMax: 0.74 },
+      { hue: 0.075, hueVary: 0.025, sat: 0.16, satVary: 0.08, valMin: 0.36, valMax: 0.68 },
+      { hue: 0.465, hueVary: 0.022, sat: 0.07, satVary: 0.05, valMin: 0.40, valMax: 0.72 },
+    ] : null,
+    /* The per-instance facade rhythm (triplanar-forge's `perInstance`). +/-22% on the storey height,
+       which is the band where buildings stop sharing a floor plan and stay the same CITY — at +/-50%
+       the tall stock grows storeys a person could not stand up in. */
+    facadeVary: DRESS.variety ? 0.22 : 0,
   },
-  silhouette: Q.get('plain') === '1' ? null : {},
+  /* ---- A-DRESS: THE ROOFTOP KIT. Rates are per tower and DISTRICT-WEIGHTED inside box-arena (the
+     downtown band gets masts, the middle water towers and bulkheads, the low-rise signage), so the
+     numbers here are the city-wide budget rather than the per-building look. Every part is an AABB in
+     the same packed buffer as the towers, so each is simultaneously an anchor, a ledge and a collider —
+     which is what earned the silhouette its measured +63% net ground in A-SKYLINE, and the reason to
+     add MORE of them rather than to add scenery.
+     `emissiveKinds: ['sign']` moves the signs onto an unlit InstancedMesh: exactly one extra draw call,
+     and the only thing above street level still emitting at night. */
+  silhouette: Q.get('plain') === '1' ? null : (DRESS.variety ? {
+    /* `sign` came down from 0.30 after the first wide capture: 86 lit boards over 360 towers is a
+       fairground, not a city. 0.16 lands nearer 45 — enough that a swing across the skyline always has
+       one in frame, few enough that each one is a landmark. */
+    parapet: 0.55, penthouse: 0.42, waterTower: 0.26, mast: 0.30, sign: 0.16,
+    emissiveKinds: ['sign'],
+  } : {}),
   // material/groundMaterial are filled in below by cityMaterials() — the forge needs the renderer,
   // and it does not exist until createEngineCore has run.
 };
@@ -226,17 +291,48 @@ function cityMaterials() {
        DETAIL rather than exposure. The per-instance height ramp still composes on top of it. */
     color: '#a8b4d2',
     fallbackColor: 0x7d8496,          // box-arena's own flat grey — the exact no-forge look
+    /* A-DRESS: read the per-instance `aLgrVar` box-arena writes when `skyline.facadeVary > 0`, so the
+       storey bands land at a different height on every building. OFF unless `?variety=1`, and off means
+       the A-AERIAL program compiles byte-for-byte — the fallback discipline this material was built on. */
+    perInstance: DRESS.variety ? { phase: 7.31 } : false,
   });
   const ground = forge.makeMaterial(road, {
     repeat: Math.max(1, (Math.max(CITY_ARENA.cols, CITY_ARENA.rows) * CITY_ARENA.spacing + CITY_ARENA.spacing * 4) / (road.worldSize / M_PER_U) / 24),
   });
   ground.color = new THREE.Color('#8e97a8');   // the asphalt bake is near-black; the street has to stay readable
   if (forge.supported) applyGroundMacro(ground, { scale: 0.10, brightness: 0.18, tintAmt: 0.20, tint: [0.20, 0.22, 0.26] });
+  /* A-DRESS: THE ROAD, PAINTED ONTO THE FLOOR THAT WAS ALREADY BEING DRAWN. `applyStreetGrid` CHAINS
+     onto the macro patch above rather than replacing it (that is the whole reason it captures the
+     previous `onBeforeCompile`), so the de-tiling still runs and the markings go on top of its result.
+     THE PITCH MUST BE THE ARENA'S OWN `spacing` — the street kit's lamp posts stand on the same
+     expression, and a road painted on a different lattice from the props standing on it is a bug you
+     can see from the pavement. One number, read by both. */
+  if (DRESS.roads) {
+    applyStreetGrid(ground, {
+      spacing: CITY_ARENA.spacing,
+      /* THE CARRIAGEWAY IS SIZED OFF THE BUILDINGS, not chosen: the street is the gap between two
+         footprints (spacing 4.6 less a ~2.4 u widened footprint ⇒ ~2.2 u of clear street), and the
+         asphalt takes the middle 60% of it with the sidewalk either side. */
+      roadHalf: CITY_ARENA.spacing * 0.235,
+      walkHalf: CITY_ARENA.spacing * 0.375,
+      /* Markings are wider here than a real road's, in the same spirit as the fog and the bounce being
+         sized to this room: at 6 m/u a real 10 cm lane line is 0.017 u and vanishes from swing height,
+         which is where this level is actually looked at from. */
+      lane: 0.026, dash: 1.0, kerb: 0.05, crossW: 0.5, bar: 0.24,
+      sidewalk: 1.9, kerbTone: 0.5, lot: 1.3, marking: 3.6,
+    });
+  }
   return { forge, tower, ground };
 }
 const CITY_MATS = cityMaterials();
 if (CITY_MATS) { CITY_ARENA.material = CITY_MATS.tower; CITY_ARENA.groundMaterial = CITY_MATS.ground; }
-else if (LEVEL === 'city') CITY_ARENA.groundMaterial = new THREE.MeshStandardMaterial({ color: '#3d4453', roughness: 0.95, metalness: 0 });
+else if (LEVEL === 'city') {
+  const g = new THREE.MeshStandardMaterial({ color: '#3d4453', roughness: 0.95, metalness: 0 });
+  /* THE ROADS SURVIVE `?forge=0` AND iOS-p0, because they are geometry-free arithmetic and not a
+     texture — the one part of this pass that costs the flat-colour fallback nothing to keep. */
+  if (DRESS.roads) applyStreetGrid(g, { spacing: CITY_ARENA.spacing, roadHalf: CITY_ARENA.spacing * 0.235, walkHalf: CITY_ARENA.spacing * 0.375, lane: 0.026, dash: 1.0, sidewalk: 1.5, lot: 1.2, marking: 2.2 });
+  CITY_ARENA.groundMaterial = g;
+}
 
 const ARENA0 = LEVEL === 'city' ? CITY_ARENA : LAB_ARENA;
 /* THE PERCENTILE THE ROPE IS DERIVED AT IS THE LEVEL'S OWN. The lab's 0.35 is A-CLIMB's; the city's is
@@ -247,6 +343,37 @@ const _buildT0 = performance.now();
 const arena = createBoxArena(ARENA0);
 const LEVEL_BUILD_MS = performance.now() - _buildT0;
 scene.add(arena.group);
+
+/* ---- A-DRESS: THE STREET FURNITURE. The ABILITY is `createStreetKit` (engine-core); this is wiring
+   and the numbers that belong to THIS room.
+   `blocked` IS THE ONE ARGUMENT THAT MATTERS and it is why the kit takes a predicate instead of a
+   footprint list: the skyline path JITTERS towers off their cell centres and grows the footprint with
+   the height, so where a building actually is, is a question only the collider can answer. Asking it
+   through `segmentHit` (a zero-radius vertical stab, the same test every probe in this repo uses for
+   "am I inside something") is the difference between a bench on the pavement and a bench inside a
+   lobby. The stab is at 0.20 u — above the road, below a cornice — so an OVERHANG does not delete the
+   pavement underneath it, which is exactly where a real street puts its furniture. */
+const streetKit = (LEVEL === 'city' && DRESS.street) ? createStreetKit({
+  extent: arena.stats.extent,
+  spacing: arena.params.spacing,
+  groundY: arena.params.groundY,
+  seed: arena.params.seed,
+  roadHalf: arena.params.spacing * 0.235,      // the same carriageway `applyStreetGrid` paints
+  step: 1.15,
+  /* ONE LAMP PER BLOCK PER STREET LINE, alternating sides — at this city's 4.6 u pitch and ~6 m/u that
+     is a lamp roughly every 28 m, which is real streetlight spacing. Two per block came out as a
+     runway. */
+  lampsPerBlock: 1,
+  blocked: (x, z) => arena.world.segmentHit(x, 0.20, z, x, 0.21, z, 0) === 0,
+  castShadow: Q.get('propshadow') !== '0',     // the ablation arm for the shadow-pass half of the cost
+}) : null;
+if (streetKit) {
+  scene.add(streetKit.group);
+  /* The night amount is a CONSTANT here because this lab has no sun to interpolate against — see the
+     `?night=1` note on the light rig. When a SunRig is wired, this becomes `sunRig.windowGlow` and
+     nothing else changes: that is the signal `createStreetLights` was already written to take. */
+  streetKit.update(DRESS.night ? 1 : 0);
+}
 
 /* ---------------------------------------------------------------------------------------------
    2.6 — A-CITIZENS (2026-08-12, mass-agents Phase 2): THE CITY IS INHABITED, and the outbreak runs
@@ -474,7 +601,11 @@ const EYE = 0.28;
    travelling at — the same class of drift as the stale 1.2 in `aimReach` (A-CLIMB note below), which
    sat wrong for an arc because nobody had to look at two places to change one fact.
    HERO_H 0.30: a human eye sits ~93% up the body, and this controller's eye is 0.28. */
-const HERO_H = 0.30, WALK_V = 0.55, SPRINT_V = 0.95;
+/* A-AIR adds JUMP_V to that list for the same reason the other three are on it. The airborne motion
+   layer needs the vertical speed at which its shape is fully expressed, and the honest answer is this
+   level's own jump speed — at launch the body is fully crunched, and anything faster (a rooftop drop)
+   is fully spread. Declared once, handed to BOTH the controller and the body. */
+const HERO_H = 0.30, WALK_V = 0.55, SPRINT_V = 0.95, JUMP_V = 1.2;
 /* THE CHASE BLOCK IS A NAMED OBJECT because TWO things need `distMax` and the second one silently had
    a copy of it (A-CLIMB). `aimReach` below measures the aim ray from the EYE, so it has to add back the
    arm the eye sits behind — and it was adding a literal 1.2 that had been correct until A-LAB raised
@@ -491,7 +622,7 @@ const character = createCharacterController({
      cuts (character.js's own seam note). */
   eyeHeight: EYE, radius: 0.09, footR: 0.12, collideYOff: 0.14,
   moveSpeed: WALK_V, sprintSpeed: SPRINT_V, accel: 14,
-  jumpSpeed: 1.2, gravity: SWING.gravity,
+  jumpSpeed: JUMP_V, gravity: SWING.gravity,
   /* THE CHASE IS SIZED TO THIS LEVEL'S STREETS, and that is the kind of thing a lab exists to find.
      metropolis uses 0.9 u because its street canyon is 0.55 u wide and anything longer spends the
      whole game clipped against a facade. Here the street is 2.5 u, so the arm has room — and it needs
@@ -566,6 +697,20 @@ const hero = createHeroBody({
     mode: ({ body: 'body', nohead: 'nohead', off: 'off' })[Q.get('fpbody')] || 'nohead',
     backOff: qNum('fpback', 0.05),
   },
+  /* ---- A-AIR (2026-08-15): THE AIR POSES STOP BEING PHOTOGRAPHS. --------------------------------
+     A-BODY left this exact item open in the ledger and in its own header: jump/fall/swing/cling are a
+     single frozen frame of the Jump clip, and "a held frame does not breathe". The ability is engine-
+     core's (`hero-air.js` + the rig's `setAirMotion`); this is the two numbers that are facts about
+     THIS level and nothing else:
+       · vRef = JUMP_V — the same literal handed to the controller above, by reference. It is the
+         vertical speed at which the shape is fully expressed, and jump speed is what that means here.
+       · climbRate 1.15 — `SWING.climbRate`, i.e. the number the CONTROLLER climbs a wall at. While
+         clinging, character.js writes `state.vy = lift * climbRate`, so |vy|/climbRate is exactly how
+         hard the player is climbing and it drives the wall cycle. Read off the profile, never retyped.
+     `?heroair=0` is the CONTROL ARM, and it exists so the question "is the layer actually better" is
+     answered by two URLs of ONE build — the same discipline `?hero=capsule` brought to the perf table.
+     With it off, cling goes back to reaching at the wall with one arm and every air pose is a still. */
+  airMotion: Q.get('heroair') === '0' ? false : { vRef: JUMP_V, climbRate: SWING.climbRate },
 });
 scene.add(hero.group);
 const ropeGeo = new THREE.BufferGeometry();
@@ -729,8 +874,12 @@ function updateHud(dt) {
   set('v-cling', character.clinging ? 'STUCK — W up, S down' : 'no', character.clinging ? 'on' : 'off');
   /* A-BODY: the body's own verdict, next to the physics'. `rigged` is the honest half — before the GLB
      lands this says so rather than reporting a pose the capsule cannot be in. */
+  /* A-AIR appends the airborne layer's own weight, and it earns the space: it is the one number that
+     distinguishes "this pose is a still" from "this pose is being driven", and on the ground it reads
+     0.00 — so the row also proves the layer releases instead of quietly leaning on a walk. */
   set('v-pose', hero.rigged
     ? `${hero.pose} · ${hero.gaitLabel} (${hero.gait.toFixed(2)}) · ${(hero.bodyHeight).toFixed(2)} u`
+      + (hero.airMotion ? ` · air ${hero.airWeight.toFixed(2)}` : ' · air off')
     : 'placeholder capsule — GLB loading', hero.rigged ? 'on' : 'off');
   set('v-climb', `${character.climbs} · ${character.mantles} roofs`);
   set('v-latch', character.latched ? 'HELD — space to launch' : 'no', character.latched ? 'on' : 'off');
@@ -1038,9 +1187,73 @@ window.__hero = {
   get height() { return hero.bodyHeight; },
   get visible() { return !!(hero.object && hero.object.visible); },
   get hasHand() { return hero.hasHand; },
+  /* A-AIR RECEIPTS. "The pose is animated now" is a CLAIM, and a screenshot of one frame cannot settle
+     it — a still and a moving body photograph identically. `airMode`/`airWeight` say the layer is armed
+     and how far it has eased in; `bonePos` lets a harness measure the same bone across frames, which is
+     what actually distinguishes an animation from a photograph. */
+  get airMotion() { return hero.airMotion; },
+  get airMode() { return hero.airMode; },
+  get airWeight() { return +hero.airWeight.toFixed(4); },
+  get poseWeight() { return +hero.poseWeight.toFixed(4); },
   /* the rope's ACTUAL origin this frame, so "does the web leave the hand" is a distance and not an
      impression. Allocates one Vector3 per CALL — a probe read, never a frame path. */
   handPoint() { const v = new THREE.Vector3(); hero.webAnchorPoint(v); return { x: v.x, y: v.y, z: v.z }; },
+  /* A NAMED BONE IN THE RIG ROOT'S OWN FRAME — the ONLY frame in which "did the limb move" is a question
+     about the POSE rather than about the body. The first version of this derotated by the controller's
+     YAW about its origin, and was wrong on exactly the mode it mattered most for: while roped,
+     `state.quat` carries the grapple's pitch and BANK (the body leans into its arc, deliberately), and a
+     yaw-only derotation leaves all of that lean in the reading — a completely FROZEN pose on a banking
+     body measured 0.17 u of "limb travel", which is the size of a real animation. Going through the rig
+     root's inverse world matrix removes translation, yaw, pitch and bank in one step, so a held frame
+     reads ~0 whatever the physics is doing. (Ledger technique #3, on this arc's own instrument.)
+     Rescaled by the measured GLB scale so the numbers are WORLD units — 0.01 u is 3% of a 0.30 u body —
+     rather than raw model units, which are ~17x larger and would flatter every reading.
+     Probe-only (it allocates a Vector3 per call; never a frame path). */
+  bonePos(name) {
+    const v = new THREE.Vector3();
+    v.set(NaN, NaN, NaN); hero.bonePoint(name, v);
+    const o = hero.object;
+    if (!Number.isFinite(v.x) || !o) return null;
+    o.updateMatrixWorld(true);
+    o.worldToLocal(v).multiplyScalar(hero.scale || 1);
+    return { x: +v.x.toFixed(4), y: +v.y.toFixed(4), z: +v.z.toFixed(4) };
+  },
+  /* WHERE THE BODY IS ON SCREEN, in CSS pixels — and this is not a nicety, it is what makes a capture
+     readable at all. The chase camera sits 1.9–3.0 u behind a 0.30 u body, so in a 1280x800 frame the
+     player is roughly 40x60 px: the first A-AIR strip came back with a figure too small to tell a
+     spread-eagle from a shrug, which would have made the whole visual acceptance test worthless. A
+     harness that can ask for this can CROP to the body and upscale, and then a pose is judgeable.
+     Projected from the rig's own world bounding box through the live camera, so it tracks whatever the
+     spring arm is currently doing. Probe-only (it allocates). */
+  screenBox(pad = 1.9) {
+    const o = hero.object, cam = rig.camera; if (!o) return null;
+    /* PROJECT TWO POINTS, NOT A BOUNDING BOX, and the reason is a bug this already produced. The first
+       version projected the rig's 8 world-bbox corners — but `project()` on a corner BEHIND the camera
+       flips its sign and returns a wildly out-of-range coordinate, so a single corner passing the near
+       plane (routine when a spring arm is compressed against a wall, which is exactly what a CLING is)
+       blew the box up, and the "tight crop on the body" came back centred on empty ground with the
+       figure sliced off at the edge. The feet and the crown of the head are enough to frame a body and
+       are both derivable from numbers we already trust: the controller's own position and the height
+       this module measured the GLB into. Bail to null (→ the caller keeps the full frame) rather than
+       return a crop from a point behind the lens. */
+    const s = character.state, h = hero.bodyHeight;
+    const W = renderer.domElement.clientWidth, H = renderer.domElement.clientHeight;
+    const foot = new THREE.Vector3(s.x, s.y, s.z), head = new THREE.Vector3(s.x, s.y + h, s.z);
+    cam.updateMatrixWorld();
+    for (const p of [foot, head]) {
+      // reject anything at or behind the near plane in VIEW space, where the test is unambiguous.
+      const vz = -p.clone().applyMatrix4(cam.matrixWorldInverse).z;
+      if (!(vz > cam.near)) return null;
+      p.project(cam);
+    }
+    const fx = (foot.x * 0.5 + 0.5) * W, fy = (-foot.y * 0.5 + 0.5) * H;
+    const hx = (head.x * 0.5 + 0.5) * W, hy = (-head.y * 0.5 + 0.5) * H;
+    const cx = (fx + hx) / 2, cy = (fy + hy) / 2;
+    // the body's apparent height sets the crop; `pad` buys room for limbs thrown wide (a spread-eagle
+    // is far wider than the standing silhouette this height measures).
+    const r = Math.max(40, Math.hypot(hx - fx, hy - fy) * 0.5 * pad);
+    return { x: Math.round(cx - r), y: Math.round(cy - r), w: Math.round(r * 2), h: Math.round(r * 2), vw: W, vh: H };
+  },
   /* THE FIRST-PERSON NEAR-PLANE CHECK, as a number. A-CLIMB's finding was that the EYE was clear on
      260/260 frames while the near plane's CORNERS were inside geometry on 52 of them — the same class
      of miss is available here, with the player's own torso as the geometry. So: how far is each named
@@ -1056,6 +1269,24 @@ window.__hero = {
     return out;
   },
   ready: hero.ready,
+};
+/* A-DRESS: THE DRESSING, AS READABLE FACTS. Same rule as `__input` and `__hero`: a capture can show
+   that a street looks dressed and cannot show how many lamps were placed, whether the glow layer is
+   actually being drawn, or what the whole pass costs in meshes. All of those are numbers, so they are
+   exposed as numbers — the night captures of the first cut showed no lamps at all, and the question
+   "are they missing or are they dark" is not one a screenshot can answer. */
+window.__dress = {
+  arms: { ...DRESS },
+  get street() {
+    if (!streetKit) return null;
+    const g = streetKit.group;
+    return {
+      ...streetKit.stats,
+      /* what the RENDERER thinks, not what the generator intended — the two disagreeing is the bug. */
+      visible: g.visible,
+      layers: g.children.map((c) => ({ type: c.type, visible: c.visible, count: c.count ?? null, opacity: c.material?.opacity ?? null })),
+    };
+  },
 };
 window.__spawn = spawn;
 window.__setAimMode = (m) => { SWING.aimMode = m === 'auto' ? 'auto' : 'point'; return SWING.aimMode; };

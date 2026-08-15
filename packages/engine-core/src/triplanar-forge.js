@@ -84,6 +84,33 @@ varying vec3 vLgrPos;
 varying vec3 vLgrNrm;
 `;
 
+/* ---- A-DRESS (2026-08-15): THE PER-INSTANCE FACADE VARIATION. ------------------------------------
+   THE PROBLEM IT SOLVES, stated as the thing you can see rather than as a feature. Sampling by world
+   position already guarantees no two buildings wear the SAME PATCH of texture. What it cannot vary is
+   the RHYTHM: `uLgrScale` is a uniform, so the storey bands `forge-facade.frag` draws land at exactly
+   the same height on every tower in the city, and a skyline of two hundred buildings with one storey
+   height reads as one building stamped two hundred times. That is the "varied window/facade treatment"
+   gap, and it is a uniform's fault, not a texture's.
+
+   THE FIX IS ONE FLOAT PER INSTANCE. `aLgrVar` is a signed variation the vertex stage hands to the
+   fragment stage; the side projections then read at `uLgrScale * (1 + vLgrVar)` and from a world
+   position pushed along by a multiple of it, so each building gets its own storey height AND its own
+   phase. Cost: 4 bytes per instance and one multiply per fragment. Draw calls: unchanged, which is the
+   entire reason this route was taken instead of a material per building family.
+
+   AN ABSENT ATTRIBUTE IS A ZERO, which is what makes this safe rather than a coupling: WebGL supplies
+   the generic default (0,0,0,1) for an attribute the geometry does not define, so a consumer that
+   enables `perInstance` and forgets to write `aLgrVar` gets `vLgrVar = 0` — i.e. the un-varied look —
+   rather than a link error or garbage. Off by default, so the A-AERIAL program is compiled unchanged
+   for every existing consumer. */
+const PARS_VERT_INST = `
+attribute float aLgrVar;
+varying float vLgrVar;
+`;
+const MAIN_VERT_INST = `
+  vLgrVar = aLgrVar;
+`;
+
 /* WHY THE WORLD TRANSFORM IS RE-DERIVED HERE rather than read off `worldPosition`: three's
    `<worldpos_vertex>` chunk is wrapped in `#if defined(USE_ENVMAP) || defined(USE_SHADOWMAP) || …`,
    so whether that variable exists depends on lights and environment the material does not control.
@@ -122,17 +149,27 @@ uniform float uLgrDetNear;
 uniform float uLgrDetFar;
 uniform float uLgrAOInt;
 
+/* THE IDENTITY PAIR — replaced wholesale by the per-instance versions when perInstance is on. Two
+   spellings of one seam beats an ifdef sprinkled through lgrTri. (No backticks in this string: it is
+   a JS template literal, and a backtick in a GLSL comment ends it — this repo's own logged gotcha.) */
+float lgrSideScale() { return uLgrScale; }
+vec3 lgrSidePos() { return vLgrPos; }
+
 vec3 lgrWeights() {
   vec3 n = abs( normalize( vLgrNrm ) );
   n = pow( n, vec3( uLgrSharp ) );
   return n / max( 1e-4, n.x + n.y + n.z );
 }
 /* THE THREE PROJECTIONS. X reads the ZY plane, Y the XZ plane, Z the XY plane — the standard
-   assignment, so a wall's texture runs UP the wall whichever way the wall faces. */
+   assignment, so a wall's texture runs UP the wall whichever way the wall faces.
+   lgrSideScale() / lgrSidePos() are the seam the per-instance variation plugs into; with it off they
+   are the identity and the compiler folds them away, so the generated code is what it was. */
 vec4 lgrTri( sampler2D side, sampler2D top, vec3 w ) {
-  return texture2D( side, vLgrPos.zy * uLgrScale ) * w.x
+  float ss = lgrSideScale();
+  vec3 sp = lgrSidePos();
+  return texture2D( side, sp.zy * ss ) * w.x
        + texture2D( top,  vLgrPos.xz * uLgrTopScale ) * w.y
-       + texture2D( side, vLgrPos.xy * uLgrScale ) * w.z;
+       + texture2D( side, sp.xy * ss ) * w.z;
 }
 /* THE DETAIL OCTAVE, as a luminance contrast around 1.0 (see the header). The distance fade makes
    the early-out below coherent across most of a warp, and costs nothing on the far half of the frame
@@ -157,6 +194,11 @@ export function createTriplanarForgeMaterial({
   sharpness = 4.0,
   detail = null,
   aoIntensity = 1.0,       // how hard the baked AO channel bites the indirect term
+  /* A-DRESS: read a per-instance `aLgrVar` float and let it vary the SIDE tile scale + phase.
+     `false` (the default) compiles the A-AERIAL program byte-for-byte. `{ phase }` sets how far the
+     world position is pushed per unit of variation — big enough that two neighbours never line up,
+     small enough that a building's own faces stay one building. */
+  perInstance = false,
   fallbackColor = 0x808080,
   ...matOpts
 } = {}) {
@@ -194,14 +236,28 @@ export function createTriplanarForgeMaterial({
     uLgrAOInt: { value: aoIntensity },
   };
 
+  const inst = perInstance ? { phase: (perInstance.phase != null ? perInstance.phase : 7.31) } : null;
+
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n${PARS_VERT}`)
-      .replace('#include <project_vertex>', `#include <project_vertex>\n${MAIN_VERT}`);
+      .replace('#include <common>', `#include <common>\n${PARS_VERT}${inst ? PARS_VERT_INST : ''}`)
+      .replace('#include <project_vertex>', `#include <project_vertex>\n${MAIN_VERT}${inst ? MAIN_VERT_INST : ''}`);
 
+    let frag = PARS_FRAG;
+    if (inst) {
+      /* THE SEAM, SWAPPED. `vLgrVar` is the signed per-instance variation; it scales the side tile and
+         slides the sampling origin, so a neighbouring tower is a different building rather than the
+         same building at a different address. The TOP projection is deliberately left alone — roofs
+         are asphalt, and asphalt has no rhythm to vary. */
+      frag = `varying float vLgrVar;\n` + frag
+        .replace('float lgrSideScale() { return uLgrScale; }',
+          'float lgrSideScale() { return uLgrScale * ( 1.0 + vLgrVar ); }')
+        .replace('vec3 lgrSidePos() { return vLgrPos; }',
+          `vec3 lgrSidePos() { return vLgrPos + vec3( vLgrVar * ${inst.phase.toFixed(3)} ); }`);
+    }
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${PARS_FRAG}`)
+      .replace('#include <common>', `#include <common>\n${frag}`)
       /* ALBEDO + the shared weights and ORM read. `lgrW` / `lgrORM` are declared here and consumed by
          the roughness/metalness/AO replacements further down the SAME main() — one triplanar fetch of
          each map per fragment, not one per channel. */
@@ -229,8 +285,8 @@ export function createTriplanarForgeMaterial({
   /* WITHOUT THIS, two triplanar materials with different scales share one compiled program and the
      second silently renders with the first's uniforms — three keys its shader cache on the material
      TYPE plus this string. */
-  mat.customProgramCacheKey = () => `lgr-triplanar|${scale}|${tScale}|${sharpness}|${det ? `${det.scale}:${det.amount}:${det.near}:${det.far}` : 'nodetail'}`;
-  mat.userData.triplanar = { scale, topScale: tScale, sharpness, detail: det, uniforms: u };
+  mat.customProgramCacheKey = () => `lgr-triplanar|${scale}|${tScale}|${sharpness}|${det ? `${det.scale}:${det.amount}:${det.near}:${det.far}` : 'nodetail'}|${inst ? `inst${inst.phase}` : 'noinst'}`;
+  mat.userData.triplanar = { scale, topScale: tScale, sharpness, detail: det, perInstance: inst, uniforms: u };
   return mat;
 }
 

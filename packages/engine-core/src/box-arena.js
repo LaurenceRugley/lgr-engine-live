@@ -105,8 +105,33 @@
      gamma,               // >1 pushes the tall stock down toward the line; 1 = a linear spread
      cores, coreSigma, mix,     // the district field: how many downtowns, how wide, how much noise
      footVary, jitter,    // taller towers get wider footprints; towers sit slightly off their cell centre
+     palette,             // A-DRESS: per-DISTRICT colour families. null (default) = the A-SKYLINE tint, exactly
+     facadeVary,          // A-DRESS: per-instance facade variation written as the `aLgrVar` attribute. 0 = none
    }
-   silhouette: { minTiered, tier3, corniceH, corniceOut, roofBox, spire, bridge, bridgeSpan }
+   silhouette: { minTiered, tier3, corniceH, corniceOut, roofBox, spire, bridge, bridgeSpan,
+                 parapet, penthouse, waterTower, mast, sign, emissiveKinds }   // A-DRESS, all default 0/null
+
+   ---- A-DRESS (2026-08-15): MORE VOCABULARY, SAME DRAW CALL. -------------------------------------
+   A-SKYLINE measured the thing that justifies this whole file: with the silhouette on, **77% of web
+   attaches land on setbacks/cornices/spires** against 100% flat-face without it, and the chain's net
+   ground went 10.30 → 16.78 u (+63%). Silhouette variety is therefore not decoration — it is the
+   resource the traversal spends. So the honest next move is MORE of the same kind of thing, and the
+   constraint that makes it cheap is the one this file already established: **a part is an AABB in the
+   packed buffer and an instance in the one InstancedMesh, so vocabulary costs INSTANCES, never draw
+   calls.** Parapets, penthouses, water towers and antenna masts are five more box shapes; the whole
+   city stays one draw call, and every one of them is simultaneously an anchor, a ledge and a collider
+   because there is no second representation for it to drift from.
+
+   EVERY NEW RATE DEFAULTS TO 0 AND EVERY NEW FIELD TO null, so a consumer that passes the A-SKYLINE
+   `silhouette: {}` gets the A-SKYLINE city box-for-box — which is what keeps `swing-lab-probe`'s
+   27 checks, the ledger's measured tables and `npm run tier-guard` all still true of the default path.
+
+   THE ONE THING THAT IS NOT A BOX IN THE MAIN MESH: `emissiveKinds`. A sign that is lit only by the
+   sun is a sign that disappears at night, which is the half of a city a streetlight arc is about. Kinds
+   named there are drawn into a SECOND InstancedMesh with an UNLIT material instead of the main one
+   (never both — they are partitioned, not duplicated), which costs exactly one extra draw call and only
+   when a consumer asks for it. Their AABBs stay in the same packed buffer, so an emissive sign is still
+   something you can web.
    ============================================================ */
 import * as THREE from 'three';
 import { createColliderWorld } from './collide.js';
@@ -250,6 +275,16 @@ export function createBoxArena(opts = {}) {
   let solids = new Float32Array(0);
   let towers = null;        // THREE.InstancedMesh — one draw call for the whole skyline
   let ground = null;
+  /* A-DRESS: the emissive PARTITION. `mainIdx`/`emIdx` are box indices, not a second box list — the
+     packed solids buffer and `boxes` stay one set, so the collider, `roofAt` and every probe see the
+     city exactly as before whichever mesh a box is drawn by. With `emissiveKinds` null, `emIdx` is
+     empty and `mainIdx` is 0..n-1 in order, i.e. the old loop with an indirection that resolves to
+     itself. */
+  let mainIdx = [], emIdx = [];
+  let emMesh = null, ownedEmMat = null;
+  /* A-DRESS: the per-tower DISTRICT id, keyed the same way `buildBridges` keys its neighbour lookup.
+     Filled only on the skyline path; read only by the palette. */
+  const districtOf = new Map();
   let ownedMat = null, ownedGroundMat = null, ownedGeo = null, ownedGroundGeo = null;
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
   const _col = new THREE.Color();
@@ -288,6 +323,14 @@ export function createBoxArena(opts = {}) {
       const b = boxes[k], o = k * 6;
       solids[o] = b.x - b.w / 2; solids[o + 1] = b.y; solids[o + 2] = b.z - b.d / 2;
       solids[o + 3] = b.x + b.w / 2; solids[o + 4] = b.top; solids[o + 5] = b.z + b.d / 2;
+    }
+    /* A-DRESS: partition for the UNLIT mesh. The solids buffer above is already built and is NOT
+       partitioned — that is the point: which mesh draws a box is a rendering fact, and the collider
+       must never learn about rendering facts. */
+    const em = (P.silhouette && P.silhouette.emissiveKinds) || null;
+    mainIdx = []; emIdx = [];
+    for (let k = 0; k < boxes.length; k++) {
+      if (em && em.indexOf(boxes[k].kind) >= 0) emIdx.push(k); else mainIdx.push(k);
     }
     collider.rebuild(solids);
   }
@@ -347,15 +390,24 @@ export function createBoxArena(opts = {}) {
         if (P.plaza > 0 && Math.max(Math.abs(i - cx), Math.abs(j - cz)) < P.plaza) continue;
         const u = (i - cx) / halfC, v = (j - cz) / halfR;
         let g = 0;
-        for (const c of cores) {
+        /* A-DRESS: WHICH downtown this cell belongs to, decided by the biggest single contribution
+           rather than by the sum. The sum is what ranks the cell (unchanged, and it must stay
+           unchanged or the guarantee's input moves); the ARGMAX is a second, free reading of the same
+           field, and it is what lets two downtowns wear different palettes instead of one gradient. */
+        let bestG = -1, dist = 0;
+        for (let k = 0; k < cores.length; k++) {
+          const c = cores[k];
           const dx = u - c.x, dz = v - c.z;
-          g += c.w * Math.exp(-(dx * dx + dz * dz) / (2 * S.coreSigma * S.coreSigma));
+          const contrib = c.w * Math.exp(-(dx * dx + dz * dz) / (2 * S.coreSigma * S.coreSigma));
+          g += contrib;
+          if (contrib > bestG) { bestG = contrib; dist = k; }
         }
         /* `mix` is the ONLY randomness in the ranking, and it is deliberately not zero: a pure field
            makes concentric height rings, which reads as a contour map rather than a city. */
-        cells.push({ i, j, score: g + S.mix * hash3(i, j, (P.seed ^ 0x51ed) >>> 0) });
+        cells.push({ i, j, dist, score: g + S.mix * hash3(i, j, (P.seed ^ 0x51ed) >>> 0) });
       }
     }
+    districtOf.clear();
     /* RANK, then map. Sorting is what decouples "where the tall stock is" (the field) from "how many
        towers clear the line" (the quantile map) — see the header. Ties broken by cell index so the sort
        is deterministic regardless of the engine's sort stability. */
@@ -379,7 +431,12 @@ export function createBoxArena(opts = {}) {
       const jx = (hash3(c.i, c.j, (P.seed ^ 0x1a7) >>> 0) * 2 - 1) * slack;
       const jz = (hash3(c.j, c.i, (P.seed ^ 0x2b8) >>> 0) * 2 - 1) * slack;
       const x = (c.i - cx) * P.spacing + jx, z = (c.j - cz) * P.spacing + jz;
-      towerRecs.push(buildTower(x, z, w, d, top, c.i, c.j, S, need));
+      districtOf.set(c.i * 4096 + c.j, c.dist);
+      /* `t` GOES DOWN WITH THE TOWER, because the rooftop vocabulary is a function of WHERE IN THE
+         SKYLINE a building sits, not of how tall it happens to be in units. Rank is the level's own
+         normalised coordinate (0 = the shortest tower, 1 = the tallest) and it survives a spacing or
+         a rope change, which a raw height threshold would not. */
+      towerRecs.push(buildTower(x, z, w, d, top, c.i, c.j, S, need, t, c.dist));
     }
     if (P.silhouette) buildBridges(towerRecs, S, need);
   }
@@ -396,10 +453,10 @@ export function createBoxArena(opts = {}) {
      topmost tier still ends at the height the quantile map asked for and the swingability guarantee
      survives the silhouette. Roof plant and spires sit ABOVE it and are deliberately NOT counted as the
      tower's roof — `roofAt` must answer "what can I stand on", not "what is the highest object". */
-  function buildTower(x, z, w, d, top, i, j, S, need) {
+  function buildTower(x, z, w, d, top, i, j, S, need, t = 0.5, dist = 0) {
     const SIL = P.silhouette;
     const H = top - P.groundY;
-    const rec = { x, z, w, d, h: H, y: P.groundY, top, kind: 'tower', i, j, parts: 0 };
+    const rec = { x, z, w, d, h: H, y: P.groundY, top, kind: 'tower', i, j, parts: 0, rank: t, district: dist };
     if (!SIL || H < (SIL.minTiered ?? 2.2)) {
       push(x, P.groundY, z, w, d, H, 'tower', i, j);
       return rec;
@@ -456,6 +513,90 @@ export function createBoxArena(opts = {}) {
       push(x, capTop, z, sw, sw, sh, 'spire', i, j);
       rec.parts++;
     }
+    /* ===== A-DRESS: THE ROOFTOP KIT. Every rate defaults to 0, so with the A-SKYLINE profile not one
+       statement below emits a box and the city is the one the ledger measured. =====================
+       DISTRICT WEIGHTING, and it is what turns "five more shapes" into "a skyline with structure".
+       The same rate is read through a per-band multiplier off the tower's RANK: the downtown stock
+       (rank high) wears masts and clean parapets, the middle wears water towers and stair bulkheads,
+       the low-rise wears signage. A uniform rate would sprinkle water towers on the tallest tower in
+       the city, which is precisely the "uniform towers" read this arc exists to break.
+       `band` is 0 low-rise / 1 mid / 2 downtown, split at the rank thirds. */
+    const band = t > 0.72 ? 2 : t > 0.34 ? 1 : 0;
+    const wt = (v, lo, mid, hi) => (v || 0) * (band === 0 ? lo : band === 1 ? mid : hi);
+    const roll = (salt) => hash3(i + salt, j + salt * 3, (P.seed ^ (0xd1e5 + salt * 977)) >>> 0);
+    const rw = w * scale[nTier - 1], rd = d * scale[nTier - 1];   // the TOP tier's footprint — the roof
+
+    /* PARAPET — a thin rim around the roof edge, four boxes. It is the cheapest thing on this list and
+       the one that changes the street read most: a flat-topped box reads as a box, a box with a lip
+       reads as a building. It is also a real mantle edge — `resolveSphere` can see it because it is
+       floored at the same `minThick` the cornice is (a slab thinner than the body's sphere DIAMETER is
+       a slab the resolver cannot see — this file's own measured invariant). */
+    if (roll(1) < wt(SIL.parapet, 1.0, 0.9, 0.7)) {
+      const pt = Math.max(SIL.minThick ?? 0.22, SIL.parapetH ?? 0.22), pw2 = SIL.parapetW ?? 0.16;
+      push(x, top, z - rd / 2 + pw2 / 2, rw, pw2, pt, 'parapet', i, j);
+      push(x, top, z + rd / 2 - pw2 / 2, rw, pw2, pt, 'parapet', i, j);
+      push(x - rw / 2 + pw2 / 2, top, z, pw2, rd - pw2 * 2, pt, 'parapet', i, j);
+      push(x + rw / 2 - pw2 / 2, top, z, pw2, rd - pw2 * 2, pt, 'parapet', i, j);
+      capTop = Math.max(capTop, top + pt);
+      rec.parts += 4;
+    }
+    /* PENTHOUSE / STAIR BULKHEAD — the box the roof door is in. Distinct from `roofBox` (plant) in
+       being TALLER and squarer, and deliberately parked at a roof CORNER rather than near the middle,
+       so a roof that has both does not read as two lumps of the same thing. */
+    if (roll(2) < wt(SIL.penthouse, 0.7, 1.0, 0.9)) {
+      const bw = rw * (0.26 + 0.14 * roll(12)), bd = rd * (0.26 + 0.14 * roll(13));
+      const bh = 0.34 + 0.42 * roll(14);
+      const sx = roll(15) < 0.5 ? -1 : 1, sz = roll(16) < 0.5 ? -1 : 1;
+      push(x + sx * (rw - bw) * 0.42, top, z + sz * (rd - bd) * 0.42, bw, bd, bh, 'penthouse', i, j);
+      capTop = Math.max(capTop, top + bh);
+      rec.parts++;
+    }
+    /* WATER TOWER — a tank on four legs, five boxes, and the single most "this is a city" silhouette
+       in the vocabulary. The legs matter mechanically as well as visually: the tank has AIR UNDER IT,
+       which is the ledger's OPEN #6 lever ("score anchors for arcs with air beneath") arriving on a
+       rooftop instead of on a skybridge. Legs are floored at `minThick` for the same resolver reason
+       as everything else here. */
+    if (roll(3) < wt(SIL.waterTower, 0.5, 1.0, 0.35)) {
+      const lt = Math.max(SIL.minThick ?? 0.22, 0.22);
+      const tw = Math.min(rw * 0.5, 0.55 + 0.35 * roll(17));
+      const lh = 0.26 + 0.24 * roll(18), th = 0.42 + 0.34 * roll(19);
+      const ox = (roll(20) * 2 - 1) * (rw - tw) * 0.3, oz = (roll(21) * 2 - 1) * (rd - tw) * 0.3;
+      for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        push(x + ox + dx * (tw / 2 - lt / 2), top, z + oz + dz * (tw / 2 - lt / 2), lt, lt, lh, 'watertower', i, j);
+      }
+      push(x + ox, top + lh, z + oz, tw, tw, th, 'watertower', i, j);
+      capTop = Math.max(capTop, top + lh + th);
+      rec.parts += 5;
+    }
+    /* ANTENNA MAST — a spire that has been told what it is for. The spire above is one thin box; a mast
+       is the same box plus two crossarms, which costs two instances and buys the one rooftop shape a
+       player can read as a SHAPE from a block away rather than as a scratch on the sky. Downtown only
+       by weighting, because a broadcast mast on a two-storey building is a joke the eye gets. */
+    if (roll(4) < wt(SIL.mast, 0.15, 0.6, 1.0)) {
+      const mh = 1.1 + 2.2 * roll(22), mw = 0.09 + 0.05 * roll(23);
+      const ox = (roll(24) * 2 - 1) * rw * 0.24, oz = (roll(25) * 2 - 1) * rd * 0.24;
+      push(x + ox, capTop, z + oz, mw, mw, mh, 'mast', i, j);
+      for (const f of [0.42, 0.68]) {
+        const aw = mw * (5.5 - f * 3.0);
+        push(x + ox, capTop + mh * f, z + oz, aw, mw * 0.8, mw * 0.8, 'mast', i, j);
+      }
+      capTop += mh;                        // the mast stands ON the current cap, so the cap rises by its height
+      rec.parts += 3;
+    }
+    /* ROOFTOP SIGNAGE — a thin panel standing on the roof edge, facing along whichever axis it sits on.
+       This is the kind `emissiveKinds` exists for: by day it is a painted board, and at night it is the
+       only thing above street level that is still emitting. Low-rise weighted, because that is where a
+       real city puts its signs — at the height people read them from. */
+    if (roll(5) < wt(SIL.sign, 1.0, 0.8, 0.45)) {
+      const sh = 0.30 + 0.55 * roll(26), st = SIL.signThick ?? 0.09;
+      const alongX = roll(27) < 0.5;
+      const sl = (alongX ? rw : rd) * (0.55 + 0.35 * roll(28));
+      const edge = roll(29) < 0.5 ? -1 : 1;
+      if (alongX) push(x, top, z + edge * (rd / 2 - st / 2), sl, st, sh, 'sign', i, j);
+      else push(x + edge * (rw / 2 - st / 2), top, z, st, sl, sh, 'sign', i, j);
+      capTop = Math.max(capTop, top + sh);
+      rec.parts++;
+    }
     return rec;
   }
 
@@ -505,23 +646,46 @@ export function createBoxArena(opts = {}) {
       ownedMat = new THREE.MeshStandardMaterial({ color: '#7d8496', roughness: 0.82, metalness: 0.02, flatShading: true });
     }
     const mat = P.material || ownedMat;
-    if (!towers || towers.count !== boxes.length) {
+    if (!towers || towers.count !== mainIdx.length) {
       if (towers) { group.remove(towers); towers.dispose(); }
       if (!ownedGeo) ownedGeo = new THREE.BoxGeometry(1, 1, 1);
-      towers = new THREE.InstancedMesh(ownedGeo, mat, Math.max(1, boxes.length));
+      towers = new THREE.InstancedMesh(ownedGeo, mat, Math.max(1, mainIdx.length));
       towers.castShadow = true; towers.receiveShadow = true;
       towers.frustumCulled = false;                 // one instanced draw; the arena is the whole scene
       group.add(towers);
     }
-    towers.count = boxes.length;
-    for (let k = 0; k < boxes.length; k++) {
-      const b = boxes[k];
+    towers.count = mainIdx.length;
+    for (let n = 0; n < mainIdx.length; n++) {
+      const b = boxes[mainIdx[n]];
       _p.set(b.x, b.y + b.h / 2, b.z); _s.set(b.w, b.h, b.d);
       _m.compose(_p, _q, _s);
-      towers.setMatrixAt(k, _m);
+      towers.setMatrixAt(n, _m);
     }
     towers.instanceMatrix.needsUpdate = true;
     towers.computeBoundingSphere();
+    /* ---- A-DRESS: THE PER-INSTANCE FACADE VARIATION, and it is the one thing on this list that needs
+       a shader to receive it. Every tower is textured by `createTriplanarForgeMaterial`, which samples
+       by WORLD POSITION — so two buildings never repeat the same patch of texture, but they DO wear the
+       same storey rhythm, because the tile scale is a uniform. `aLgrVar` is a per-instance float the
+       triplanar material can multiply that scale by (see triplanar-forge.js `perInstance`), so window
+       bands land at a different height on every building for the cost of one float per instance and
+       ZERO extra draw calls. Written only when asked for: with `facadeVary` 0 the attribute is not
+       created, the material is not patched, and the program is the one A-AERIAL compiled. */
+    const fv = sky && sky.facadeVary > 0 ? sky.facadeVary : 0;
+    if (fv > 0) {
+      if (!towers.geometry.getAttribute('aLgrVar') || towers.geometry.getAttribute('aLgrVar').count !== mainIdx.length) {
+        towers.geometry.setAttribute('aLgrVar', new THREE.InstancedBufferAttribute(new Float32Array(mainIdx.length), 1));
+      }
+      const at = towers.geometry.getAttribute('aLgrVar');
+      for (let n = 0; n < mainIdx.length; n++) {
+        const b = boxes[mainIdx[n]];
+        /* KEYED ON THE TOWER CELL, NOT ON THE BOX, so a setback wears the same facade rhythm as the
+           body under it — a building whose third storey band jumps at the setback is a building that
+           reads as two buildings. */
+        at.array[n] = (hash3(b.i, b.j, (P.seed ^ 0xfacd) >>> 0) * 2 - 1) * fv;
+      }
+      at.needsUpdate = true;
+    }
     /* ---- PER-INSTANCE TINT, and it is opt-in for the same reason everything else here is: touching
        `instanceColor` flips Three's USE_INSTANCING_COLOR define, i.e. a DIFFERENT SHADER, and the lab's
        27-check probe runs on the grey grid. With `skyline` null this block never executes and the mesh
@@ -532,21 +696,85 @@ export function createBoxArena(opts = {}) {
        and bridges darker, cornices lighter — the silhouette has to be legible as silhouette). */
     if (P.skyline) {
       const hi = Math.max(1e-6, stats().maxTop - P.groundY);
-      for (let k = 0; k < boxes.length; k++) {
+      /* ---- A-DRESS: THE DISTRICT PALETTE. `null` (the default) keeps the A-SKYLINE formula below
+         EXACTLY — one hue band at 0.55, luminance ramped by height — which is what makes this whole
+         addition an opt-in no-op. With a palette supplied, the hue/sat/value FAMILY comes from the
+         tower's district (the argmax of the same Gaussian core field that ranks it), so two downtowns
+         are two colours of city rather than two bumps in one gradient. The height ramp still runs
+         inside the family, so depth still reads. */
+      const pal = sky && Array.isArray(sky.palette) && sky.palette.length ? sky.palette : null;
+      for (let n = 0; n < mainIdx.length; n++) {
+        const k = mainIdx[n];
         const b = boxes[k];
         const t = Math.min(1, (b.top - P.groundY) / hi);
         const kind = b.kind || 'tower';
+        if (pal) {
+          const fam = pal[(districtOf.get(b.i * 4096 + b.j) ?? 0) % pal.length];
+          const shadeP = kind === 'cornice' ? 1.16 : kind === 'spire' || kind === 'mast' ? 1.26
+            : kind === 'parapet' ? 1.10 : kind === 'roofbox' || kind === 'penthouse' ? 0.84
+            : kind === 'watertower' ? 0.72 : kind === 'bridge' ? 0.78 : 1;
+          const hu = fam.hue + (fam.hueVary ?? 0.03) * (hash3(b.i, b.j, (P.seed ^ 0xc010) >>> 0) * 2 - 1);
+          const sa = (fam.sat ?? 0.08) + (fam.satVary ?? 0.05) * hash3(b.j, b.i, (P.seed ^ 0xc011) >>> 0);
+          const lo = fam.valMin ?? 0.40, hiV = fam.valMax ?? 0.70;
+          _col.setHSL(hu, sa, Math.min(0.90, (lo + (hiV - lo) * t) * shadeP));
+          towers.setColorAt(n, _col);
+          continue;
+        }
         /* THE VALUES ARE WHERE THEY ARE BECAUSE THE FIRST TRY WAS UNREADABLE. A ramp from L 0.26 put the
            low-rise 30% — the district you spawn IN — below the ambient, and the first capture of the
            city was a black frame. The floor is now near the old flat grey (#7d8496 is L 0.54) and the
            ramp runs UP from it, so height reads as value without anything reading as unlit. */
-        const shade = kind === 'cornice' ? 1.16 : kind === 'spire' ? 1.26 : kind === 'roofbox' ? 0.84 : kind === 'bridge' ? 0.78 : 1;
+        /* A-DRESS: the four new kinds join this ladder rather than getting a second one. A water tower
+           and a penthouse are PLANT — darker than the wall they sit on, which is what keeps a roof
+           reading as a roof with things on it instead of as a lumpy roof. A mast reads like a spire
+           because it is one. */
+        const shade = kind === 'cornice' ? 1.16 : kind === 'spire' || kind === 'mast' ? 1.26
+          : kind === 'parapet' ? 1.10 : kind === 'roofbox' || kind === 'penthouse' ? 0.84
+          : kind === 'watertower' ? 0.72 : kind === 'bridge' ? 0.78 : 1;
         const hue = 0.55 + 0.11 * hash3(b.i, b.j, (P.seed ^ 0xc010) >>> 0);
         _col.setHSL(hue, 0.05 + 0.09 * hash3(b.j, b.i, (P.seed ^ 0xc011) >>> 0), Math.min(0.88, (0.40 + 0.30 * t) * shade));
-        towers.setColorAt(k, _col);
+        towers.setColorAt(n, _col);
       }
       if (towers.instanceColor) towers.instanceColor.needsUpdate = true;
     }
+
+    /* ---- A-DRESS: THE UNLIT MESH. One extra draw call, and only when a consumer names an emissive
+       kind. `MeshBasicMaterial` is the honest choice over an emissive Standard: this is a sign face,
+       it is not lit BY anything and it does not want to be — a night city's signage is the light. Its
+       instances are the SAME boxes, drawn once, in the same buffer the collider reads. ---- */
+    if (emIdx.length) {
+      if (!ownedEmMat) ownedEmMat = new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false });
+      if (!emMesh || emMesh.count !== emIdx.length) {
+        if (emMesh) { group.remove(emMesh); emMesh.dispose(); }
+        if (!ownedGeo) ownedGeo = new THREE.BoxGeometry(1, 1, 1);
+        emMesh = new THREE.InstancedMesh(ownedGeo, ownedEmMat, Math.max(1, emIdx.length));
+        emMesh.frustumCulled = false;
+        emMesh.castShadow = false; emMesh.receiveShadow = false;   // a light source does not shadow itself
+        group.add(emMesh);
+      }
+      emMesh.count = emIdx.length;
+      const pal = sky && Array.isArray(sky.palette) && sky.palette.length ? sky.palette : null;
+      for (let n = 0; n < emIdx.length; n++) {
+        const b = boxes[emIdx[n]];
+        _p.set(b.x, b.y + b.h / 2, b.z); _s.set(b.w, b.h, b.d);
+        _m.compose(_p, _q, _s);
+        emMesh.setMatrixAt(n, _m);
+        /* THE SIGN'S HUE IS THE DISTRICT'S, ROTATED — a sign that matches its building is invisible,
+           and a sign of a random hue is a fairground. A quarter-turn round the wheel from the local
+           facade family reads as "a different material, same city". */
+        const fam = pal ? pal[(districtOf.get(b.i * 4096 + b.j) ?? 0) % pal.length] : null;
+        const base = (fam ? fam.hue : 0.55) + 0.42 + 0.16 * hash3(b.i + 3, b.j + 5, (P.seed ^ 0x516e) >>> 0);
+        /* THE VALUES CAME DOWN FROM (0.62, 0.60) AFTER LOOKING AT THE WIDE SHOT — the ledger's own
+           technique #4. Unlit geometry in a scene whose lit surfaces sit around 0.3 does not read as
+           "a sign", it reads as a hole punched in the city, and forty of them across a skyline read as
+           a fairground. Dropping the lightness under the facade's own top end puts the signs back
+           INSIDE the picture, where they still win at night because everything else has gone dark. */
+        _col.setHSL(base % 1, 0.48, 0.42);
+        emMesh.setColorAt(n, _col);
+      }
+      emMesh.instanceMatrix.needsUpdate = true;
+      if (emMesh.instanceColor) emMesh.instanceColor.needsUpdate = true;
+    } else if (emMesh) { group.remove(emMesh); emMesh.dispose(); emMesh = null; }
 
     const gs = P.groundSize != null ? P.groundSize : Math.max(P.cols, P.rows) * P.spacing + P.spacing * 4;
     if (!ground) {
@@ -669,12 +897,14 @@ export function createBoxArena(opts = {}) {
     },
     dispose() {
       if (towers) { group.remove(towers); towers.dispose(); }
+      if (emMesh) { group.remove(emMesh); emMesh.dispose(); }
       if (ground) group.remove(ground);
       if (ownedGeo) ownedGeo.dispose();
       if (ownedGroundGeo) ownedGroundGeo.dispose();
       if (ownedMat) ownedMat.dispose();
+      if (ownedEmMat) ownedEmMat.dispose();
       if (ownedGroundMat) ownedGroundMat.dispose();
-      towers = null; ground = null;
+      towers = null; emMesh = null; ground = null;
     },
   };
 }

@@ -172,3 +172,103 @@ test('percentileOf is ONE implementation, and topAtPercentile is its caller', ()
   assert.equal(topAtPercentile(solids, 1), 3);
   assert.equal(percentileOf(new Float64Array([3, 1, 2]), 0.5), 2, 'TypedArray.sort is numeric — the JS trap this guards');
 });
+
+/* ================================================================================================
+   A-DRESS (2026-08-15) — the rooftop kit, the districts and the emissive partition.
+   WHY THESE (Rule 9 — a test says WHY the behaviour matters):
+
+   6. THE KIT IS AN EXACT NO-OP AT ITS DEFAULTS. Every rate defaults to 0, so a consumer passing the
+      A-SKYLINE `silhouette: {}` must get the A-SKYLINE city box-for-box. If it did not, the ledger's
+      measured tables (70.0% swingable, 77% of attaches on silhouette geometry, 1753 boxes, 3-5 draw
+      calls) would silently become claims about a different city — the same failure mode test 1 pins
+      for the skyline profile, one layer up.
+
+   7. THE GUARANTEE SURVIVES THE FURNITURE, and this is the assertion the whole pass is gated on. A
+      water tower sits ON a roof and a parapet rims one. Neither may change what a tower's ROOF is,
+      because `roofAt` is what a derived rope is read off (swing-lab's `fitRopeToArena`) and
+      `stats.swingable` is what the level PROMISES. A rooftop pass that quietly moved the roof ladder
+      would re-fit the rope and invalidate every chain number in one step, with nothing on screen to
+      show for it.
+
+   8. EVERY NEW PART IS A COLLIDER SOLID. Same reason test 4 exists for spires: the ONLY thing that
+      makes a water tower's underside an anchor with air beneath it — the ledger's OPEN #6 lever — is
+      being in the packed buffer `findAnchor` casts against. A part that is only a mesh is scenery.
+
+   9. `emissiveKinds` PARTITIONS, IT DOES NOT DUPLICATE. The unlit sign mesh draws a subset of the SAME
+      boxes; if it added a second copy, the collider would gain phantom solids. The buffer is the
+      shared truth, so it is checked float for float.
+   ================================================================================================ */
+const KIT = { parapet: 1, penthouse: 1, waterTower: 1, mast: 1, sign: 1 };
+
+test('A-DRESS: the rooftop kit is an EXACT no-op at its default rates', () => {
+  const a = createBoxArena(CITY);
+  const b = createBoxArena({ ...CITY, silhouette: { parapet: 0, penthouse: 0, waterTower: 0, mast: 0, sign: 0 } });
+  assert.equal(a.boxes.length, b.boxes.length, 'a silhouette with the new rates zeroed IS the A-SKYLINE silhouette');
+  for (let i = 0; i < a.solids.length; i++) assert.equal(a.solids[i], b.solids[i], `solid float ${i}`);
+  const kinds = new Set(a.boxes.map((x) => x.kind));
+  for (const k of ['parapet', 'penthouse', 'watertower', 'mast', 'sign']) {
+    assert.ok(!kinds.has(k), `${k} must not exist unless it is asked for`);
+  }
+});
+
+test('A-DRESS: the swingable guarantee and the ROOF LADDER survive the rooftop kit, exactly', () => {
+  const bare = createBoxArena(CITY);
+  const kit = createBoxArena({ ...CITY, silhouette: { ...KIT } });
+  assert.ok(kit.boxes.length > bare.boxes.length * 1.3, 'the kit must actually emit geometry');
+  assert.equal(kit.stats.swingable.clearing, bare.stats.swingable.clearing);
+  assert.equal(kit.stats.swingable.towers, bare.stats.swingable.towers);
+  assert.ok(Math.abs(kit.stats.swingable.frac - CITY.skyline.frac) < 0.02,
+    `asked ${CITY.skyline.frac}, counted ${kit.stats.swingable.frac.toFixed(3)}`);
+  // and the thing a rope is derived off — a roof is what you can STAND on, not the highest object
+  for (const p of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+    assert.equal(kit.roofAt(p), bare.roofAt(p), `roofAt(${p}) must not move when a roof grows furniture`);
+  }
+  const rope = swingableRope({ towerTop: kit.roofAt(0.30), arcClear: 0.45, skim: 0.06, groundY: 0, ropeMin: 0.55 });
+  const bareRope = swingableRope({ towerTop: bare.roofAt(0.30), arcClear: 0.45, skim: 0.06, groundY: 0, ropeMin: 0.55 });
+  assert.equal(rope, bareRope, 'the derived rope is a fact about the SKYLINE, never about its plant');
+});
+
+test('A-DRESS: every new part is a COLLIDER SOLID — a water tower you cannot web is scenery', () => {
+  const a = createBoxArena({ ...CITY, silhouette: { ...KIT } });
+  for (const kind of ['parapet', 'penthouse', 'watertower', 'mast', 'sign']) {
+    const b = a.boxes.find((x) => x.kind === kind);
+    assert.ok(b, `${kind} must be emitted at rate 1`);
+    /* the same test `findAnchor` runs: a zero-radius stab through the part's middle must be stopped. */
+    const t = a.world.segmentHit(b.x, b.y + b.h / 2, b.z - b.d - 0.5, b.x, b.y + b.h / 2, b.z + b.d + 0.5, 0);
+    assert.ok(t < 1, `${kind} must stop a segment cast — it is in the packed buffer or it is not real`);
+  }
+  /* THE WATER TOWER'S TANK HAS AIR UNDER IT (the ledger's OPEN #6 lever, arriving on a rooftop): the
+     tank is a box whose own `y` is above the roof it stands on, held up by legs. */
+  const tanks = a.boxes.filter((x) => x.kind === 'watertower');
+  const roofOf = new Map(a.towers.map((t) => [t.i * 4096 + t.j, t.top]));
+  assert.ok(tanks.some((x) => x.y > (roofOf.get(x.i * 4096 + x.j) ?? 0) + 0.2),
+    'a tank sits ABOVE its legs, so the arc under it has air');
+});
+
+test('A-DRESS: emissiveKinds PARTITIONS the draw, it does not duplicate the geometry', () => {
+  const plain = createBoxArena({ ...CITY, silhouette: { ...KIT } });
+  const split = createBoxArena({ ...CITY, silhouette: { ...KIT, emissiveKinds: ['sign'] } });
+  assert.equal(split.boxes.length, plain.boxes.length, 'naming a kind emissive must not add or remove a box');
+  for (let i = 0; i < plain.solids.length; i++) assert.equal(split.solids[i], plain.solids[i], `solid float ${i}`);
+  assert.ok(split.boxes.some((b) => b.kind === 'sign'), 'the signs are still in the one shared buffer');
+});
+
+test('A-DRESS: DISTRICT WEIGHTING — masts go downtown, signage goes to the low-rise', () => {
+  const a = createBoxArena({ ...CITY, silhouette: { ...KIT } });
+  /* every part carries its tower's (i,j), so a part can be attributed to that tower's RANK. */
+  const rank = new Map(a.towers.map((t) => [t.i * 4096 + t.j, t.rank]));
+  const meanRank = (kind) => {
+    const rs = a.boxes.filter((b) => b.kind === kind).map((b) => rank.get(b.i * 4096 + b.j)).filter((r) => r != null);
+    return rs.reduce((s, r) => s + r, 0) / Math.max(1, rs.length);
+  };
+  const mast = meanRank('mast'), sign = meanRank('sign');
+  assert.ok(mast > sign + 0.08,
+    `a broadcast mast belongs on the tall stock and a sign on the low-rise (mast rank ${mast.toFixed(2)} vs sign ${sign.toFixed(2)})`);
+});
+
+test('A-DRESS: the kit is DETERMINISTIC — two builds of one seed are byte-identical', () => {
+  const a = createBoxArena({ ...CITY, silhouette: { ...KIT } });
+  const b = createBoxArena({ ...CITY, silhouette: { ...KIT } });
+  assert.equal(a.boxes.length, b.boxes.length);
+  for (let i = 0; i < a.solids.length; i++) assert.equal(a.solids[i], b.solids[i]);
+});

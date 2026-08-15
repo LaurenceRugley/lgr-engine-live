@@ -307,6 +307,13 @@ export { applyGroundMacro } from './src/ground-macro.js';
 // (three axis projections blended by normal, side set on X/Z + top set on Y) so UV-less, wildly
 // differently-sized instanced boxes can share ONE textured material at ONE draw call. Opt-in.
 export { createTriplanarForgeMaterial, tilesPerUnit } from './src/triplanar-forge.js';
+// Arc A-DRESS — the street, as opposed to the buildings. `applyStreetGrid` paints asphalt/sidewalk/
+// kerb/lane-dashes/zebra-crossings as a FUNCTION OF WORLD XZ on a ground material already being drawn
+// (zero extra draw calls, and it CHAINS onto an existing onBeforeCompile rather than clobbering it);
+// `createStreetKit` places lamps/trees/benches/hydrants/shelters on the same grid as three instanced
+// meshes total, whatever the city's size. Both opt-in, both no-ops for every existing consumer.
+export { applyStreetGrid } from './src/street-grid.js';
+export { createStreetKit } from './src/street-kit.js';
 
 // Arc A14 GLINT — constant-time glinty-NDF specular (own implementation from the SIGGRAPH-Asia-2025
 // paper; no textures/RTs/half-float). applyGlint decorates a lit MeshStandardMaterial (composes with
@@ -402,6 +409,22 @@ export { createCharacterHorde } from './src/createCharacterHorde.js';
    growing that list to look generous is how a public API becomes furniture. */
 export { createHeroBody } from './src/createHeroBody.js';
 export { gaitBlend, gaitName, heroPose } from './src/hero-body-pose.js';
+
+/* ARC A-AIR (2026-08-15) — THE HELD FRAMES START BREATHING. A-BODY above shipped jump/fall/swing/cling
+   as one FROZEN frame of the Jump clip each and named the gap in its own header: "It does not breathe",
+   and "a cling reads as reaching at the wall, not spread-eagled on it". The cure is a procedural layer
+   (`handle.setAirMotion` on the rig; `createHeroBody` wires it from a controller state) composed on top
+   of that held frame — a launch crunch, a fall that spreads with the fall speed, a swing whose legs pump
+   with the pendulum, and a cling that finally uses BOTH arms because an additive layer is not limited to
+   the rig's one aimable arm. Every angle is a function of `vy`, which is the half a baked clip cannot do.
+   OFF by default at the rig (`setAirMotion` never called → the block is one failed `if`; the horde, the
+   city crowd and hoard2 are untouched), ON by default in createHeroBody with `airMotion:false` kept as
+   the A/B control arm.
+   NOTHING IS EXPORTED HERE, on the same rule the A-BODY note above states: `airPose` / `riseFall` /
+   `makeAirPose` / `AIR_MODES` are real exports of hero-air.js and the node test reads them, but the only
+   runtime consumer is createCharacterRig, which imports the module directly. A barrel export with no
+   consumer is counted ORPHANED by the capability index, and it stays off this list until a second
+   consumer (a thrown body, a vehicle ejection) actually wants the curves. */
 
 /* A-CITIZENS (2026-08-12, mass-agents Phase 2) — the SEIR agent population, LIFTED from hoard2's
    civilians.js (84c0667) so every project inherits it: pooled S/E(/in-pool I) state machine, wander +

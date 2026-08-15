@@ -92,6 +92,13 @@ test('EVERY consumer layer resolves on its rig — the horde CAN lunge/hit-react
   assert.deepEqual(findMissingLayerBones(SURVIVOR), [], 'all layers resolve on the survivor');
   assert.doesNotThrow(() => assertLayersResolvable(ZOMBIE, CONSUMER_LAYERS.zombieHorde, 'zombie'));
   assert.doesNotThrow(() => assertLayersResolvable(SURVIVOR, CONSUMER_LAYERS.survivor, 'survivor'));
+  /* A-AIR: createHeroBody's player drives idle-relax, the aim arm and the new 'air' layer on the SAME
+     survivor rig. Asserted separately from `survivor` because it is a different consumer with a
+     different layer set — and because 'air' is the layer whose silent no-op would be invisible: an
+     airborne body that simply didn't move would still look airborne (it would look exactly like the
+     held frame this arc replaced), so no capture would flag it either. This is the check that can. */
+  assert.deepEqual(findMissingLayerBones(SURVIVOR, CONSUMER_LAYERS.heroBody), [], 'hero-body layers all resolve');
+  assert.doesNotThrow(() => assertLayersResolvable(SURVIVOR, CONSUMER_LAYERS.heroBody, 'heroBody'));
 });
 
 test('RED on a planted missing bone: a Quaternius rig missing its spine bone FAILS the lunge/hit-react check', () => {
