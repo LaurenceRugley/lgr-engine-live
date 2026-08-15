@@ -401,7 +401,16 @@ if (streetKit) {
    --------------------------------------------------------------------------------------------- */
 /* THE DENSITY DIAL — bench-picked default (see the A-CITIZENS bench table), owner-owned. Sparse-
    theater doctrine governs the DEFAULT; ?civs= and the dock slider are the owner's crank. */
-const CIVS_DEFAULT = 150;
+/* RATIFIED 2026-08-15 by the owner ("density dial"), on a bench not a preference. Frame cost is FLAT
+   across the whole dial on this machine: 150/400/600/900 civs all sit at p50 8.2-8.3 ms, and p95 gets
+   BETTER as it rises (12.3 -> 12.6 -> 11.2 -> 10.6) because more of the population demotes to the
+   instanced tier. Draws 18 -> 38, tris 88k -> 201k. So the sparse default was never paying for
+   anything, and A-CITIZENS' "doctrine-sparse choice, not a limit" is now spent as intended.
+   THE HONEST LIMIT, and it is not this number: 600 agents over an 84.7 u city is still only a handful
+   per canyon, so raising the COUNT buys less than it looks like. What would actually read as a busy
+   street is DISTRIBUTION — clustering agents onto sidewalks and plazas instead of spreading them
+   uniformly. Recorded as the next lever rather than chased here (ledger OPEN #30). */
+const CIVS_DEFAULT = 600;
 /* A-AERIAL — which arm of the OPEN #25 cure is running. 'on' is the shipped default; the other two
    exist so the ablation in the ledger can be re-run by anyone, not just believed. */
 const MARK_MODE = Q.get('mark') === '0' ? 'off' : Q.get('mark') === 'flat' ? 'flat' : 'on';
