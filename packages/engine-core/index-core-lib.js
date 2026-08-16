@@ -103,6 +103,10 @@ export { createCharacterHorde } from './src/createCharacterHorde.js';
 // family — general capability, not city content (createAgentSim imports nothing; tiers import the horde).
 export { createAgentSim, createAgentRng } from './src/createAgentSim.js';
 export { createCrowdTiers } from './src/createCrowdTiers.js';
+// A-CROWD (2026-08-15): the sim's `placer` — WHERE bodies are, as opposed to how they move. Rides in
+// the slim barrel for the same reason createAgentSim does: it imports NOTHING (no THREE, no city), and
+// a second consumer that has the sim without the placer has the uniform-thin crowd OPEN #30 is about.
+export { createStreetPlaces } from './src/createStreetPlaces.js';
 // A-BODY (2026-08-13): the PLAYER's body — same family, same argument as the line above (general
 // capability, no city content: it composes the rig and reads a controller state). It belongs in the
 // slim barrel because the thing it replaces — a hand-rolled CapsuleGeometry beside every character

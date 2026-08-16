@@ -48,6 +48,10 @@
    params = { count, walkSpeed, fleeSpeed, staggerSpeed, populateRadius, panicCells, calmCells,
               biteRadius, pTransmitPerSec, contactCells, incubationS: [min,max], wanderIdleS: [min,max],
               wanderRadius, playRadius, arriveR?, lookAhead?, chase?: { speed, directR } }
+   opts.placer? = { spawn(srng,out), wander(srng,c,out), dwellScale?(c) }  — A-CROWD, see below:
+              WHERE bodies are, injected, so the sim keeps knowing nothing about cities. Absent (hoard2,
+              and the lab's uniform control arm) ⇒ not one statement of it runs and the stream is
+              byte-identical. `createStreetPlaces` is the engine's street-grid implementation of it.
    TWO MEASURED TUNING INVARIANTS (createAgentSim.test.mjs found both on first contact):
      · chase.speed must CLEAR fleeSpeed or the outbreak stalls (the gap grows, no second bite, ever);
      · biteRadius must CLEAR opts.sepRadius — a slow chase closes to the separation shell and ORBITS
@@ -83,6 +87,21 @@ export function createAgentSim(params, srng, opts = {}) {
 
   const clampBlocked = !!opts.clampBlocked;
 
+  /* THE PLACER SEAM (A-CROWD, 2026-08-15) — an injected strategy for WHERE bodies are, as opposed to
+     HOW they move. The sim's own answer is "uniformly over a disc, wandering at random", which is the
+     right default for hoard2's forest and is measurably the wrong one for a city: a uniform crowd is a
+     THIN crowd at every count you can afford (swing-ledger OPEN #30). A consumer that knows what its
+     world looks like passes an object with three methods and the sim asks it three questions:
+       spawn(srng, out)       — where does a body start?
+       wander(srng, c, out)   — where does it go next?
+       dwellScale(c)          — how much longer than usual does THIS body stand still here?
+     `createStreetPlaces` is the engine's implementation for a street grid; nothing here knows about
+     streets, which is the point — a forest, a market or a spaceport would pass a different one.
+     GATED ON PRESENCE, so every existing consumer (hoard2, and the lab's own uniform control arm) runs
+     the identical code path off the identical stream: not one statement below executes without it. */
+  const placer = opts.placer || null;
+  const _pt = { x: 0, z: 0 };   // hoisted placer scratch — no per-call allocation
+
   const cs = [];
   for (let i = 0; i < MAXC; i++) {
     cs.push({ id: i, x: 0, z: 0, vx: 0, vz: 0, alive: false, state: 's',
@@ -102,11 +121,22 @@ export function createAgentSim(params, srng, opts = {}) {
     for (let i = 0; i < MAXC; i++) {
       const c = cs[i];
       let x = cx, z = cz;
-      for (let t = 0; t < 20; t++) { // rejection-sample off blocked cells (obstacles); accept the last try
-        const ang = srng.range(0, Math.PI * 2);
-        const rad = Math.sqrt(srng()) * C.populateRadius; // sqrt → area-uniform over the disc
-        x = cx + Math.cos(ang) * rad; z = cz + Math.sin(ang) * rad;
-        if (!field || !field.isBlocked(x, z)) break;
+      if (placer) {
+        /* THE CLUSTERED SPAWN. The placer picks a gathering place and a point in it, re-testing its
+           OWN blocked predicate; the field's mask is stricter (it inflates obstacles by the agent
+           radius — configuration space), so the sim keeps its own rejection loop over the placer. */
+        for (let t = 0; t < 6; t++) {
+          placer.spawn(srng, _pt);
+          x = _pt.x; z = _pt.z;
+          if (!field || !field.isBlocked(x, z)) break;
+        }
+      } else {
+        for (let t = 0; t < 20; t++) { // rejection-sample off blocked cells (obstacles); accept the last try
+          const ang = srng.range(0, Math.PI * 2);
+          const rad = Math.sqrt(srng()) * C.populateRadius; // sqrt → area-uniform over the disc
+          x = cx + Math.cos(ang) * rad; z = cz + Math.sin(ang) * rad;
+          if (!field || !field.isBlocked(x, z)) break;
+        }
       }
       c.x = x; c.z = z; c.vx = 0; c.vz = 0;
       c.alive = true; c.state = 's'; c.incubT = 0; c.incubDur = 0;
@@ -118,6 +148,21 @@ export function createAgentSim(params, srng, opts = {}) {
   }
 
   function pickWander(c, field) {
+    if (placer) {
+      /* THE CLUSTERED TARGET — and it is the half that KEEPS them, not just the half that puts them
+         there. A spawn-only cluster dissolves in about a minute: every random-walk step is a step
+         toward the uniform average, which is what the uniform arm IS. Asking the placer every time
+         means a body that drifts out of its group walks back into it. */
+      for (let t = 0; t < 4; t++) {
+        placer.wander(srng, c, _pt);
+        let wx = _pt.x, wz = _pt.z;
+        const d = Math.hypot(wx, wz);
+        if (d > C.populateRadius) { wx *= C.populateRadius / d; wz *= C.populateRadius / d; }
+        c.wx = wx; c.wz = wz;
+        if (!field || !field.isBlocked(wx, wz)) return;
+      }
+      return;
+    }
     for (let t = 0; t < 8; t++) {
       const ang = srng.range(0, Math.PI * 2);
       const r = srng.range(1, C.wanderRadius);
@@ -270,7 +315,16 @@ export function createAgentSim(params, srng, opts = {}) {
               const arrive = C.arriveR != null ? C.arriveR : 0.4;
               const ahead = C.lookAhead != null ? C.lookAhead : 0.5;
               const dx = c.wx - c.x, dz = c.wz - c.z, d = Math.hypot(dx, dz);
-              if (d < arrive) { c.idleT = srng.range(C.wanderIdleS[0], C.wanderIdleS[1]); pickWander(c, field); }
+              /* THE LOITER. `dwellScale` is the third placer question and the one that actually
+                 accumulates a group: if bodies only TARGET gathering places but stand still for the
+                 same time everywhere, steady-state occupancy is set by travel time and comes back out
+                 nearly uniform. Time spent standing still is what makes a crowd. The base roll is
+                 taken FIRST and unchanged, so the stream is the sim's, scaled — not the placer's. */
+              if (d < arrive) {
+                c.idleT = srng.range(C.wanderIdleS[0], C.wanderIdleS[1]);
+                if (placer && placer.dwellScale) c.idleT *= placer.dwellScale(c);
+                pickWander(c, field);
+              }
               else if (field && field.isBlocked(c.x + (dx / d) * ahead, c.z + (dz / d) * ahead)) pickWander(c, field);
               else { desX = (dx / d) * C.walkSpeed; desZ = (dz / d) * C.walkSpeed; }
             }

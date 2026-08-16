@@ -87,6 +87,9 @@ export { createTriplanarForgeMaterial, tilesPerUnit } from './src/triplanar-forg
 // count does not grow with the city. Both opt-in.
 export { applyStreetGrid } from './src/street-grid.js';
 export { createStreetKit } from './src/street-kit.js';
+// Arc A-CROWD — the people on that same grid: a sparse gathering-place set that is a createAgentSim
+// placer, so a crowd clusters and loiters instead of spreading uniformly thin. Imports nothing.
+export { createStreetPlaces } from './src/createStreetPlaces.js';
 export { DECREPIT_TOWERS, buildDecrepitProfile, buildIntactProfile } from './src/world-profiles.js';
 export { deriveHarvest, placeCoverBuildings, scatterProps, scatterRuins, citySolidsToObstacles } from './src/world-scatter.js';
 export { cityProfileFromUrban, URBAN_ERAS } from './src/urban-profile.js';

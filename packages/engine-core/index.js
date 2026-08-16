@@ -314,6 +314,11 @@ export { createTriplanarForgeMaterial, tilesPerUnit } from './src/triplanar-forg
 // meshes total, whatever the city's size. Both opt-in, both no-ops for every existing consumer.
 export { applyStreetGrid } from './src/street-grid.js';
 export { createStreetKit } from './src/street-kit.js';
+// Arc A-CROWD — the THIRD thing that lives on that same street grid, after the paint and the props:
+// the PEOPLE. `createStreetPlaces` turns the grid into a sparse set of gathering places (junction
+// corners, mid-block stops, a plaza) and is a `createAgentSim` placer, so a crowd clusters where a
+// crowd would and loiters once it gets there. Imports nothing; node-testable; opt-in.
+export { createStreetPlaces } from './src/createStreetPlaces.js';
 
 // Arc A14 GLINT — constant-time glinty-NDF specular (own implementation from the SIGGRAPH-Asia-2025
 // paper; no textures/RTs/half-float). applyGlint decorates a lit MeshStandardMaterial (composes with

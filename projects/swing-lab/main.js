@@ -40,7 +40,7 @@ import {
   createFlowField, createAgentSim, createAgentRng, createCrowdTiers, createCharacterRig,
   createHeroBody,
   createTextureForge, CITY_SURFACES, createTriplanarForgeMaterial, tilesPerUnit, applyGroundMacro,
-  createStreetKit, applyStreetGrid,
+  createStreetKit, applyStreetGrid, createStreetPlaces,
 } from '@lgr/engine-core';
 /* A-CITIZENS: the tier-A skin. The engine deliberately does NOT inline this GLB (pedestrians.js's
    lib-size note) — the consumer that ships people pays for the model. */
@@ -408,8 +408,11 @@ if (streetKit) {
    anything, and A-CITIZENS' "doctrine-sparse choice, not a limit" is now spent as intended.
    THE HONEST LIMIT, and it is not this number: 600 agents over an 84.7 u city is still only a handful
    per canyon, so raising the COUNT buys less than it looks like. What would actually read as a busy
-   street is DISTRIBUTION — clustering agents onto sidewalks and plazas instead of spreading them
-   uniformly. Recorded as the next lever rather than chased here (ledger OPEN #30). */
+   street is DISTRIBUTION — see §2.6's placer block below (A-CROWD, ledger OPEN #30, now closed).
+   AND 600 STAYS, on evidence rather than inertia: clustered at 400 the median agents-visible from a
+   standing vantage falls 10 -> 3 and the share of views that see NOBODY rises 20% -> 32%. Clustering
+   makes the count matter MORE, not less, because the WALKERS — the share of the crowd permanently in
+   transit — are what keep the stretches between the groups occupied, and they are a fraction of it. */
 const CIVS_DEFAULT = 600;
 /* A-AERIAL — which arm of the OPEN #25 cure is running. 'on' is the shipped default; the other two
    exist so the ablation in the ledger can be re-run by anyone, not just believed. */
@@ -460,9 +463,46 @@ function bootPopulation(count) {
   const flee = createFlowField(fieldOpts);   // multi-source from the I set — susceptibles ASCEND it
   const hunt = createFlowField(fieldOpts);   // multi-source from the S set — the infected DESCEND it
   const srng = createAgentRng((qNum('seed', 11) * 2654435761 ^ 0xC1717) >>> 0); // the sim's own stream, off the level seed
+
+  /* ---- A-CROWD (2026-08-15): THE DISTRIBUTION, which is the lever the density dial was not.
+     `createStreetPlaces` is the ability (engine-core); everything here is this city's numbers.
+
+     `count` IS THE GROUP SIZE, NOT A NUMBER OF PLACES, and that is the one parameter choice worth
+     reading twice. The candidate set on this grid is ~2600 corners and mid-block stops — spreading
+     600 bodies over 2600 gathering places is the uniform crowd with extra steps. Stating it as
+     `civs / CIV_PER_PLACE` makes the FEEL scale-free: turn the density dial and the number of
+     gathering places tracks it, so a group stays a group at 150 and at 900.
+
+     THE PLAZA is box-arena's own: `plaza: 1` clears the centre block, so there is exactly one
+     spacing-wide open patch in this city and it is at the origin. Given the biggest radius and the
+     heaviest weight, because it is the only geometry here that can hold a real crowd.
+
+     ?cluster=0 IS THE CONTROL ARM, and it is a URL param for the reason the ledger's own A-BODY entry
+     gives: a before/after must be two URLs of ONE build, never two builds of two trees. With it the
+     placer is null, not one statement of the clustering runs, and the sim is the A-CITIZENS crowd
+     off the identical stream. */
+  const CIV_PER_PLACE = qNum('perplace', 6);
+  const CLUSTER = Q.get('cluster') !== '0';
+  const places = CLUSTER ? createStreetPlaces({
+    spacing: arena.params.spacing,
+    extent: arena.stats.extent,
+    radius: CIV.populateRadius,                 // the peopled disc — places outside it would strand bodies
+    roadHalf: arena.params.spacing * 0.235,     // the same carriageway `applyStreetGrid` paints
+    count: Math.max(4, Math.round(count / CIV_PER_PLACE)),
+    placeR: qNum('placer', 0.62),               // ~3.7 m across: a knot of people, not a rally
+    stay: qNum('stay', 0.72),
+    dwell: qNum('dwell', 3.2),
+    loiterFrac: qNum('loiter', 0.25),            // the rest are WALKERS — see the module's own note
+    travelR: arena.params.spacing * 3,          // a pedestrian's next errand is three blocks, not thirty
+    plaza: arena.params.plaza > 0 ? { x: 0, z: 0, r: arena.params.spacing * 0.42, w: 6 } : null,
+    seed: qNum('seed', 11),
+    /* the SAME blocked predicate the street kit dresses against — one description of one city. */
+    blocked: (x, z) => arena.world.segmentHit(x, arena.params.groundY + 0.05, z, x, arena.params.groundY + 0.30, z, 0) < 1,
+  }) : null;
+
   // ?noflee=1 is the flee-measurement CONTROL ARM (hoard2's lever, same name) — decided at
   // construction, one sim either way, so both arms consume the stream identically.
-  const sim = createAgentSim({ ...CIV, count }, srng, { cap: count, sepRadius: 0.10, clampBlocked: true, flee: Q.get('noflee') !== '1' });
+  const sim = createAgentSim({ ...CIV, count }, srng, { cap: count, sepRadius: 0.10, clampBlocked: true, flee: Q.get('noflee') !== '1', placer: places });
   sim.populate(flee);
 
   /* the outbreak's receipts: an event log the probes replay-compare (payload strings built AT emit
@@ -521,7 +561,7 @@ function bootPopulation(count) {
 
   let acc = 0;
   return {
-    sim, tiers, ob, flee, hunt,
+    sim, tiers, ob, flee, hunt, places,
     update(dt, camX, camY, camZ) {
       acc += dt;
       let sub = 0;
@@ -1311,6 +1351,12 @@ window.__level = {
   skylineP: SKYLINE_P,
   get stats() { return arena.stats; },
   get draws() { const r = renderer.info.render; return { calls: r.calls, triangles: r.triangles }; },
+  /* THE VIEW, AS A READABLE FACT (A-CROWD, 2026-08-15). `city-visibility-bench` models the frustum of
+     a standing eye to count the agents a player can actually SEE, and a fov typed into the tool would
+     be a second description of the camera — which is always the copy that drifts (the ledger's own
+     `CHAR_AIM_REACH` carried a stale chase arm for two arcs for exactly this reason). Read LIVE, so a
+     harness measuring while the speed-dolly is widening the lens sees the lens it is measuring. */
+  get camera() { const c = rig.camera; return { fov: c.fov, aspect: c.aspect, near: c.near, far: c.far }; },
 };
 /* A-CITIZENS: THE OUTBREAK'S RECEIPTS. A probe reads the sim's OWN clock (tick — fixed 1/60, fps-
    independent) and the emit-time event log, so two boots with one seed can be compared string-for-
@@ -1324,6 +1370,16 @@ window.__outbreak = population ? {
     return { s: s.sCount, e: s.eCount, i: s.iCount, bites: population.ob.bites, turns: population.ob.turns };
   },
   get tiers() { return { ...population.tiers.counts }; },
+  /* A-CROWD: THE DISTRIBUTION, AS A READABLE FACT. A capture can show a busy street and cannot show
+     whether the crowd clustered or the camera got lucky, and `city-visibility-bench` has to be able to
+     prove WHICH ARM it is measuring — the same rule as `__input` and `__level`: a harness that cannot
+     see its own configuration cannot tell a distribution change from a URL typo. null = the uniform
+     control arm (?cluster=0). `list` is the kept places themselves, so a probe can score occupancy per
+     place rather than inferring clustering from a count. */
+  get places() {
+    const p = population.places;
+    return p ? { ...p.stats, list: p.places.map((q) => ({ x: +q.x.toFixed(3), z: +q.z.toFixed(3), r: q.r, kind: q.kind })) } : null;
+  },
   sample() { const out = []; population.sim.forEach((_i, c) => { if (c.alive) out.push({ x: c.x, z: c.z, state: c.state }); }); return out; },
   infect: (n = 1, x = 0, z = 0) => population.sim.forceExpose(n, x, z),
 } : null;

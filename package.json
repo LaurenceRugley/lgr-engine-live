@@ -65,6 +65,8 @@
     "build:swing-lab": "npm run build -w projects/swing-lab",
     "swing-lab-probe": "node tools/swing-lab-probe.mjs",
     "city-legibility": "node tools/city-legibility.mjs",
+    "city-visibility-bench": "node tools/city-visibility-bench.mjs",
+    "city-crowd-shots": "node tools/city-crowd-shots.mjs",
     "city-dress-probe": "node tools/city-dress-probe.mjs",
     "city-swing-reel": "node tools/city-swing-reel.mjs"
   },
