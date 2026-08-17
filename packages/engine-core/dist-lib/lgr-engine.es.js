@@ -3576,7 +3576,17 @@ function Kr({ extent: t = 8, waterSize: n = 28, plinthTop: r = .3, boatCount: i 
 		fps: T.fps
 	});
 	let k = C.length, A = Array.from({ length: m + k }, () => new e.Vector3()), j = (e) => e.laneIndex, M = new e.Vector3(), N = new e.Vector3(), P = new e.Vector3();
-	function F(t, n, r) {
+	function F(e, t, n = 128) {
+		let r = 0, i = Infinity;
+		for (let a = 0; a < n; a++) {
+			let o = a / n;
+			e.getPointAt(o, M);
+			let s = M.x - t.x, c = M.z - t.z, l = s * s + c * c;
+			l < i && (i = l, r = o);
+		}
+		return r;
+	}
+	function I(t, n, r) {
 		let i = r ? r.windowGlow : 0, a = 1 - i;
 		for (let e = 0; e < m; e++) {
 			let r = p[e];
@@ -3597,7 +3607,7 @@ function Kr({ extent: t = 8, waterSize: n = 28, plinthTop: r = .3, boatCount: i 
 				_[x] = M.x + h * (b + .05), _[x + 1] = e, _[x + 2] = M.z + g * (b + .05), _[S] = M.x - h * (b + .02), _[S + 1] = e, _[S + 2] = M.z - g * (b + .02);
 			} else _[x + 1] = -50, _[S + 1] = -50;
 		}
-		I(), x.material.opacity = e.MathUtils.clamp(i * 1.8, 0, 1);
+		L(), x.material.opacity = e.MathUtils.clamp(i * 1.8, 0, 1);
 		for (let n = 0; n < k; n++) {
 			let r = C[n], i = m + n;
 			if (r._piloted) {
@@ -3647,13 +3657,13 @@ function Kr({ extent: t = 8, waterSize: n = 28, plinthTop: r = .3, boatCount: i 
 			};
 		}
 	}
-	function I() {
+	function L() {
 		g.attributes.position.needsUpdate = !0;
 	}
-	function L() {
+	function R() {
 		return A.length;
 	}
-	let R = [
+	let z = [
 		...p.map((t, n) => ({
 			kind: "boat",
 			label: t.isFerry ? "ferry" : `boat ${n + 1}`,
@@ -3681,7 +3691,7 @@ function Kr({ extent: t = 8, waterSize: n = 28, plinthTop: r = .3, boatCount: i 
 					t._piloted = !0;
 				},
 				resumeAutonomy: () => {
-					t._piloted = !1, t.u = t.u;
+					t._piloted = !1, t.u = F(l[t.laneIndex], t.mesh.position);
 				},
 				setBodyVisible: (e) => {
 					t.mesh.visible = e;
@@ -3765,16 +3775,16 @@ function Kr({ extent: t = 8, waterSize: n = 28, plinthTop: r = .3, boatCount: i 
 			}
 		}))
 	];
-	function z() {
-		return R;
+	function B() {
+		return z;
 	}
 	return {
 		group: o,
-		update: F,
-		getFollowables: z,
+		update: I,
+		getFollowables: B,
 		wakeDrops: A,
 		get wakeCount() {
-			return L();
+			return R();
 		},
 		lanes: l,
 		setRouter(e) {
@@ -13912,7 +13922,7 @@ function $u({ scene: t, blocks: n = [], blockSize: r = 1.9, count: i = 24, url: 
 				pace: s * (.8 + d() * .5)
 			}), r.setState("walk"), r.setTimeScale(.8 + d() * .4), u.add(r.object);
 		}
-	});
+	}).catch((e) => console.error("pedestrian rig failed to load (sidewalks stay empty):", e));
 	function x(e) {
 		for (let t of p) t.t = ((t.t + t.dir * t.pace * e) % h + h) % h, g(t.t, t.block[0], t.block[1], _, v), t.h.object.position.copy(_), t.h.object.rotation.y = Math.atan2(v.x * t.dir, v.z * t.dir);
 		f.update(e);
@@ -17691,7 +17701,10 @@ function Lm({ celestial: t }) {
 		blending: e.AdditiveBlending,
 		fog: !1,
 		toneMapped: !1
-	}), a = null, o = null, s = /* @__PURE__ */ new Map(), c = new Float32Array(), l = new e.Vector3(), u = new e.Vector3(), d = fetch(xm).then((e) => e.arrayBuffer()).then((t) => {
+	}), a = null, o = null, s = /* @__PURE__ */ new Map(), c = new Float32Array(), l = new e.Vector3(), u = new e.Vector3(), d = fetch(xm).then((e) => {
+		if (!e.ok) throw Error(`BSC5 catalog HTTP ${e.status}`);
+		return e.arrayBuffer();
+	}).then((t) => {
 		o = Im(t);
 		let l = o.count;
 		c = new Float32Array(l * 3);
@@ -17702,7 +17715,7 @@ function Lm({ celestial: t }) {
 			d[e] = t, u[e] = n, f[e] = e * 2.399963 % (Math.PI * 2), Fm(o.bv[e] <= Mm ? 0 : o.bv[e], m), p[e * 3] = m.r, p[e * 3 + 1] = m.g, p[e * 3 + 2] = m.b;
 		}
 		return r.setAttribute("position", new e.BufferAttribute(c, 3)), r.setAttribute("aSize", new e.BufferAttribute(u, 1)), r.setAttribute("aBright", new e.BufferAttribute(d, 1)), r.setAttribute("aPhase", new e.BufferAttribute(f, 1)), r.setAttribute("aColor", new e.BufferAttribute(p, 3)), r.setAttribute("aMag", new e.BufferAttribute(o.vmag, 1)), a = new e.Points(r, i), a.raycast = () => {}, a.frustumCulled = !1, n.add(a), o.count;
-	});
+	}).catch((e) => console.error("BSC5 star catalog failed to load (real sky stays off):", e));
 	function f(e, s, d, f, p, m, h) {
 		if (i.uniforms.uTime.value = p, i.uniforms.uTwinkle.value = +!m, i.uniforms.uNight.value = f, !(!o || !a)) {
 			for (let n = 0; n < o.count; n++) {
@@ -17764,21 +17777,23 @@ function Hm() {
 	i.raycast = () => {}, i.frustumCulled = !1, t.add(i);
 	let a = null, o = [], s = new Float32Array(), c = [], l = new e.Vector3(), u = new e.Vector3(), d = new e.Vector3(), f = new e.Vector3(), p = fetch(Rm).then((e) => e.json()).then((e) => {
 		a = e;
-	});
+	}).catch((e) => console.error("constellations catalog failed to load (lines stay empty):", e));
 	function m(t) {
-		o = [], c = [];
-		for (let e of a) {
-			let n = /* @__PURE__ */ new Set(), r = o.length;
-			for (let [r, i] of e.segments) {
-				let e = t.get(r), a = t.get(i);
-				e == null || a == null || (o.push([e, a]), n.add(e), n.add(a));
+		if (a) {
+			o = [], c = [];
+			for (let e of a) {
+				let n = /* @__PURE__ */ new Set(), r = o.length;
+				for (let [r, i] of e.segments) {
+					let e = t.get(r), a = t.get(i);
+					e == null || a == null || (o.push([e, a]), n.add(e), n.add(a));
+				}
+				o.length > r && c.push({
+					name: e.name,
+					memberIdx: [...n]
+				});
 			}
-			o.length > r && c.push({
-				name: e.name,
-				memberIdx: [...n]
-			});
+			s = new Float32Array(o.length * 2 * 3), r.setAttribute("position", new e.BufferAttribute(s, 3));
 		}
-		s = new Float32Array(o.length * 2 * 3), r.setAttribute("position", new e.BufferAttribute(s, 3));
 	}
 	function h(e, i, a, p) {
 		if (t.visible = a && o.length > 0, n.opacity = a ? i * Bm : 0, !t.visible) return [];
@@ -18016,7 +18031,7 @@ function dh({ celestial: t }) {
 			let a = lh[t.type] || uh;
 			f[n * 3] = a[0], f[n * 3 + 1] = a[1], f[n * 3 + 2] = a[2], p[n] = r;
 		}), r.setAttribute("position", new e.BufferAttribute(s, 3)), r.setAttribute("aSize", new e.BufferAttribute(l, 1)), r.setAttribute("aBright", new e.BufferAttribute(u, 1)), r.setAttribute("aPhase", new e.BufferAttribute(d, 1)), r.setAttribute("aColor", new e.BufferAttribute(f, 3)), r.setAttribute("aMag", new e.BufferAttribute(p, 1)), a = new e.Points(r, i), a.raycast = () => {}, a.frustumCulled = !1, n.add(a), o.length;
-	});
+	}).catch((e) => console.error("Messier catalog failed to load (deep-sky layer stays empty):", e));
 	function m(e, c, d, f, p, m, h) {
 		if (i.uniforms.uTime.value = p, i.uniforms.uTwinkle.value = +!m, i.uniforms.uNight.value = f, !(!o || !a)) {
 			for (let n = 0; n < o.length; n++) {
@@ -20109,7 +20124,7 @@ function Xh({ url: t, gltf: n, states: r = Gh, extraClips: i = [], height: a = 1
 			});
 		}
 		return M = _ ? k.findBone(_) : null, E &&= (T.remove(E), E.geometry.dispose(), E.material.dispose(), null), k;
-	}) : Promise.resolve(null);
+	}).catch((e) => console.error("hero body rig failed to load (fallback capsule carries the player):", e)) : Promise.resolve(null);
 	function z(e) {
 		if (N.length) {
 			if (e) {
@@ -23318,7 +23333,13 @@ function my() {
 		},
 		loadSample(e) {
 			if (!t) throw Error("audio-bus: loadSample requires unlock() first");
-			return a.has(e) || a.set(e, fetch(e).then((e) => e.arrayBuffer()).then((e) => t.decodeAudioData(e))), a.get(e);
+			if (!a.has(e)) {
+				let n = fetch(e).then((e) => e.arrayBuffer()).then((e) => t.decodeAudioData(e));
+				n.catch(() => {
+					a.get(e) === n && a.delete(e);
+				}), a.set(e, n);
+			}
+			return a.get(e);
 		},
 		playBuffer(e, { loop: r = !1, gain: i = 1, when: a = 0, dest: o = null } = {}) {
 			if (!t || !e) return { stop() {} };

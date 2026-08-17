@@ -291,6 +291,24 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3, b
   // scratch (zero per-frame alloc)
   const _p = new THREE.Vector3(), _t = new THREE.Vector3(), _uv = new THREE.Vector3();
 
+  /* The INVERSE of getPointAt, the numeric way (audit 2026-08-17 B2). getPointAt maps u → position;
+     a Catmull-Rom loop has no closed form the other direction, so: coarse sample-and-argmin over the
+     whole loop. PLANAR distance only — lane points sit at WATER_Y while a hull carries bob/pilot y.
+     Runs ONCE per release (not per frame), so a 128-step linear scan is the right tool: ~0.6 u sample
+     spacing on the longest lane, far inside the follower's own frame-to-frame movement budget.
+     C++ anchor: argmin over a sampled curve — `for (i..N) best = min(best, |P(i/N) - hull|)`. */
+  function nearestLaneU(lane, pos, samples = 128) {
+    let bestU = 0, bestD2 = Infinity;
+    for (let i = 0; i < samples; i++) {
+      const u = i / samples;
+      lane.getPointAt(u, _p);
+      const dx = _p.x - pos.x, dz = _p.z - pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestD2) { bestD2 = d2; bestU = u; }
+    }
+    return bestU;
+  }
+
   function update(dt, elapsed, sunRig) {
     const night = sunRig ? sunRig.windowGlow : 0;  // ~1 night, ~0 day (SunRig signal, like the cars)
     const day = 1 - night;
@@ -451,8 +469,10 @@ export function createWaterLife({ extent = 8, waterSize = 28, plinthTop = 0.3, b
         resumeAutonomy: () => {
           b._piloted = false;
           // hand the lane-follower back a param that matches where the human left the hull, or it
-          // would teleport to wherever u had drifted to while parked.
-          b.u = b.u;
+          // would teleport back to the stale u frozen at possession time. This line WAS `b.u = b.u`
+          // (a self-assign no-op — audit 2026-08-17 B2), so the documented protection didn't exist;
+          // now it is the real inverse: nearest-u on this boat's lane for the hull's live position.
+          b.u = nearestLaneU(LANES[b.laneIndex], b.mesh.position);
         },
         setBodyVisible: (v) => { b.mesh.visible = v; },
       },

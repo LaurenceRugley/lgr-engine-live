@@ -443,7 +443,7 @@ const CIV = {
   chase: { speed: 0.8, directR: 1.2 },  // ≈4.8 m/s — catches a fleeing civ, loses to a sprinting player
 };
 const CIV_HEIGHT = 0.26;      // a head under the hero's 0.28 eye
-const CIV_SCALE = 0.055;      // survivor.glb ≈ 4.7 raw units tall → ~0.26 u at this scale
+const CIV_SCALE = 0.055;      // survivor.glb = 5.259 raw units tall (measured bind-pose bbox, ledger OPEN #26) → ~0.29 u at this scale
 const SIM_DT = 1 / 60, SIM_MAX_SUB = 4;   // fixed tick; capped substeps (CI's 1 fps renderer must not spiral)
 const FLEE_EVERY = 30, HUNT_EVERY = 30, HUNT_OFFSET = 15; // re-solve cadence in ticks (0.5 s, staggered)
 

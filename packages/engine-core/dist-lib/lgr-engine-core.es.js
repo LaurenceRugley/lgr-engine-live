@@ -13927,7 +13927,7 @@ function Sf({ url: t, gltf: n, states: r = _f, extraClips: i = [], height: a = 1
 			});
 		}
 		return M = _ ? k.findBone(_) : null, E &&= (T.remove(E), E.geometry.dispose(), E.material.dispose(), null), k;
-	}) : Promise.resolve(null);
+	}).catch((e) => console.error("hero body rig failed to load (fallback capsule carries the player):", e)) : Promise.resolve(null);
 	function z(e) {
 		if (N.length) {
 			if (e) {
@@ -14949,7 +14949,13 @@ function Qf() {
 		},
 		loadSample(e) {
 			if (!t) throw Error("audio-bus: loadSample requires unlock() first");
-			return a.has(e) || a.set(e, fetch(e).then((e) => e.arrayBuffer()).then((e) => t.decodeAudioData(e))), a.get(e);
+			if (!a.has(e)) {
+				let n = fetch(e).then((e) => e.arrayBuffer()).then((e) => t.decodeAudioData(e));
+				n.catch(() => {
+					a.get(e) === n && a.delete(e);
+				}), a.set(e, n);
+			}
+			return a.get(e);
 		},
 		playBuffer(e, { loop: r = !1, gain: i = 1, when: a = 0, dest: o = null } = {}) {
 			if (!t || !e) return { stop() {} };
@@ -18981,7 +18987,10 @@ function d_({ celestial: t }) {
 		blending: e.AdditiveBlending,
 		fog: !1,
 		toneMapped: !1
-	}), a = null, o = null, s = /* @__PURE__ */ new Map(), c = new Float32Array(), l = new e.Vector3(), u = new e.Vector3(), d = fetch(Yg).then((e) => e.arrayBuffer()).then((t) => {
+	}), a = null, o = null, s = /* @__PURE__ */ new Map(), c = new Float32Array(), l = new e.Vector3(), u = new e.Vector3(), d = fetch(Yg).then((e) => {
+		if (!e.ok) throw Error(`BSC5 catalog HTTP ${e.status}`);
+		return e.arrayBuffer();
+	}).then((t) => {
 		o = u_(t);
 		let l = o.count;
 		c = new Float32Array(l * 3);
@@ -18992,7 +19001,7 @@ function d_({ celestial: t }) {
 			d[e] = t, u[e] = n, f[e] = e * 2.399963 % (Math.PI * 2), l_(o.bv[e] <= o_ ? 0 : o.bv[e], m), p[e * 3] = m.r, p[e * 3 + 1] = m.g, p[e * 3 + 2] = m.b;
 		}
 		return r.setAttribute("position", new e.BufferAttribute(c, 3)), r.setAttribute("aSize", new e.BufferAttribute(u, 1)), r.setAttribute("aBright", new e.BufferAttribute(d, 1)), r.setAttribute("aPhase", new e.BufferAttribute(f, 1)), r.setAttribute("aColor", new e.BufferAttribute(p, 3)), r.setAttribute("aMag", new e.BufferAttribute(o.vmag, 1)), a = new e.Points(r, i), a.raycast = () => {}, a.frustumCulled = !1, n.add(a), o.count;
-	});
+	}).catch((e) => console.error("BSC5 star catalog failed to load (real sky stays off):", e));
 	function f(e, s, d, f, p, m, h) {
 		if (i.uniforms.uTime.value = p, i.uniforms.uTwinkle.value = +!m, i.uniforms.uNight.value = f, !(!o || !a)) {
 			for (let n = 0; n < o.count; n++) {
@@ -19054,21 +19063,23 @@ function g_() {
 	i.raycast = () => {}, i.frustumCulled = !1, t.add(i);
 	let a = null, o = [], s = new Float32Array(), c = [], l = new e.Vector3(), u = new e.Vector3(), d = new e.Vector3(), f = new e.Vector3(), p = fetch(f_).then((e) => e.json()).then((e) => {
 		a = e;
-	});
+	}).catch((e) => console.error("constellations catalog failed to load (lines stay empty):", e));
 	function m(t) {
-		o = [], c = [];
-		for (let e of a) {
-			let n = /* @__PURE__ */ new Set(), r = o.length;
-			for (let [r, i] of e.segments) {
-				let e = t.get(r), a = t.get(i);
-				e == null || a == null || (o.push([e, a]), n.add(e), n.add(a));
+		if (a) {
+			o = [], c = [];
+			for (let e of a) {
+				let n = /* @__PURE__ */ new Set(), r = o.length;
+				for (let [r, i] of e.segments) {
+					let e = t.get(r), a = t.get(i);
+					e == null || a == null || (o.push([e, a]), n.add(e), n.add(a));
+				}
+				o.length > r && c.push({
+					name: e.name,
+					memberIdx: [...n]
+				});
 			}
-			o.length > r && c.push({
-				name: e.name,
-				memberIdx: [...n]
-			});
+			s = new Float32Array(o.length * 2 * 3), r.setAttribute("position", new e.BufferAttribute(s, 3));
 		}
-		s = new Float32Array(o.length * 2 * 3), r.setAttribute("position", new e.BufferAttribute(s, 3));
 	}
 	function h(e, i, a, p) {
 		if (t.visible = a && o.length > 0, n.opacity = a ? i * m_ : 0, !t.visible) return [];
@@ -19306,7 +19317,7 @@ function z_({ celestial: t }) {
 			let a = L_[t.type] || R_;
 			f[n * 3] = a[0], f[n * 3 + 1] = a[1], f[n * 3 + 2] = a[2], p[n] = r;
 		}), r.setAttribute("position", new e.BufferAttribute(s, 3)), r.setAttribute("aSize", new e.BufferAttribute(l, 1)), r.setAttribute("aBright", new e.BufferAttribute(u, 1)), r.setAttribute("aPhase", new e.BufferAttribute(d, 1)), r.setAttribute("aColor", new e.BufferAttribute(f, 3)), r.setAttribute("aMag", new e.BufferAttribute(p, 1)), a = new e.Points(r, i), a.raycast = () => {}, a.frustumCulled = !1, n.add(a), o.length;
-	});
+	}).catch((e) => console.error("Messier catalog failed to load (deep-sky layer stays empty):", e));
 	function m(e, c, d, f, p, m, h) {
 		if (i.uniforms.uTime.value = p, i.uniforms.uTwinkle.value = +!m, i.uniforms.uNight.value = f, !(!o || !a)) {
 			for (let n = 0; n < o.length; n++) {

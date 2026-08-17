@@ -18,7 +18,7 @@ export function createAudioBus() {
   if (!AC) return null;
 
   let ctx = null, master = null, _muted = false, _unlocked = false;
-  const _cache = new Map();   // url → Promise<AudioBuffer> — decode once, cache forever
+  const _cache = new Map();   // url → Promise<AudioBuffer> — successes cached forever; rejections evicted (see loadSample)
 
   function _init() {
     if (ctx) return;
@@ -54,7 +54,13 @@ export function createAudioBus() {
     loadSample(url) {
       if (!ctx) throw new Error('audio-bus: loadSample requires unlock() first');
       if (!_cache.has(url)) {
-        _cache.set(url, fetch(url).then(r => r.arrayBuffer()).then(ab => ctx.decodeAudioData(ab)));
+        const p = fetch(url).then(r => r.arrayBuffer()).then(ab => ctx.decodeAudioData(ab));
+        /* EVICT ON REJECTION (audit 2026-08-17 R3): a cached rejected promise poisoned the URL for
+           the whole session — every later call replayed the same failure with no retry path. The
+           tenant check guards the race where a retry already replaced this entry. Callers still see
+           the rejection (p itself is returned below); this side-channel only clears the slot. */
+        p.catch(() => { if (_cache.get(url) === p) _cache.delete(url); });
+        _cache.set(url, p);
       }
       return _cache.get(url);
     },

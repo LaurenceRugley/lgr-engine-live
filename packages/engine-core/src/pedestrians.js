@@ -90,7 +90,10 @@ export function createPedestrians({
       h.setTimeScale(0.8 + rand() * 0.4);          // desynchronised strides
       group.add(h.object);
     }
-  });
+  }).catch((e) => console.error('pedestrian rig failed to load (sidewalks stay empty):', e));
+  // ^ audit 2026-08-17 R2, the createCrowdTiers.js:116 convention: a missing survivor.glb used to
+  //   erase every walker behind an unhandled rejection. `walkers` stays empty so update() is a
+  //   harmless no-op loop — the city degrades to empty sidewalks, loudly, instead of dying.
 
   function update(dt) {
     for (const w of walkers) {

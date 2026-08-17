@@ -89,7 +89,9 @@ export function createMessier({ celestial }) {
     points.raycast = () => {}; points.frustumCulled = false;
     group.add(points);
     return cat.length;
-  });
+  }).catch((e) => console.error('Messier catalog failed to load (deep-sky layer stays empty):', e));
+  // ^ audit 2026-08-17 R1, the landmarks.js convention: named + loud. update() already gates on
+  //   `!cat || !points`, so a failed load leaves this layer inert instead of an unhandled rejection.
 
   function update(date, latDeg, lonDeg, nightK, elapsed, reduced, camera) {
     material.uniforms.uTime.value = elapsed;

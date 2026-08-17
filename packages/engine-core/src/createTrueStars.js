@@ -147,7 +147,10 @@ export function createTrueStars({ celestial }) {
   const _dir = new THREE.Vector3(), _camPos = new THREE.Vector3();
 
   const ready = fetch(bsc5Url)
-    .then((res) => res.arrayBuffer())
+    /* res.ok FIRST (audit 2026-08-17 R1): unlike the JSON catalogs, a 404's HTML body parses as
+       arrayBuffer just fine — parseCatalog would then read garbage bytes as star records and place
+       a silently wrong sky. Turn the bad status into a named error the catch below can report. */
+    .then((res) => { if (!res.ok) throw new Error(`BSC5 catalog HTTP ${res.status}`); return res.arrayBuffer(); })
     .then((buf) => {
       cat = parseCatalog(buf);
       const n = cat.count;
@@ -174,7 +177,10 @@ export function createTrueStars({ celestial }) {
       points.raycast = () => {}; points.frustumCulled = false;
       group.add(points);
       return cat.count;
-    });
+    }).catch((e) => console.error('BSC5 star catalog failed to load (real sky stays off):', e));
+  // ^ audit 2026-08-17 R1, the landmarks.js convention: named + loud. update() gates on
+  //   `!cat || !points` and hrToIndex stays empty (so constellations resolve to zero segments) —
+  //   the whole real-sky stack degrades inert instead of leaving an unhandled rejection.
 
   /* Recompute every star's real alt/az for `date` at (latDeg, lonDeg), and place the group at the
      camera (zero-parallax shell, same trick as the procedural dome). No-op until the catalog has

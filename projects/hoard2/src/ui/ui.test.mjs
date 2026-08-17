@@ -26,7 +26,6 @@ function fakeWin(search, seed) {
   return {
     __seed: seed,
     location: {
-      search,
       assign: (u) => calls.push(['assign', u]),
       reload: () => calls.push(['reload']),
       set search(v) { calls.push(['setSearch', v]); },

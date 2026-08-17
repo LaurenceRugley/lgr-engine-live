@@ -225,7 +225,11 @@ export function createHeroBody({
     hand = handBone ? handle.findBone(handBone) : null;
     if (fb) { group.remove(fb); fb.geometry.dispose(); fb.material.dispose(); fb = null; }
     return handle;
-  });
+  }).catch((e) => console.error('hero body rig failed to load (fallback capsule carries the player):', e));
+  // ^ audit 2026-08-17 R2, the createCrowdTiers.js:116 convention: a missing GLB used to silently
+  //   delete the player's body behind an unhandled rejection. The fallback capsule `fb` is only
+  //   removed on the success path above, so on failure it stays and every getter already
+  //   null-checks `handle` — visible degrade, named error, no crash.
 
   /* THE FIRST-PERSON HEAD COLLAPSE. Applied AFTER the mixer has posed the skeleton, and re-applied on
      every first-person frame rather than once on the transition. The shipped survivor's clips carry no

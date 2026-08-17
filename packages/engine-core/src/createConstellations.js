@@ -49,12 +49,18 @@ export function createConstellations() {
   let labelDefs = [];                 // [{ name, memberIdx: [array indices] }] — one per constellation with >=1 resolved segment
   const _dir = new THREE.Vector3(), _world = new THREE.Vector3(), _ndc = new THREE.Vector3(), _camPos = new THREE.Vector3();
 
-  const ready = fetch(constellationsUrl).then((r) => r.json()).then((json) => { raw = json; });
+  /* Named catch per the repo's own convention (landmarks.js) — audit 2026-08-17 R1. Without it a
+     missing/blocked catalog was an UNHANDLED rejection and the consumer's Promise.all join never
+     settled. Now `ready` resolves either way; resolve() below no-ops on the null catalog, update()
+     already gates on segIdx.length — the sky degrades to line-less stars, loudly, instead of dying. */
+  const ready = fetch(constellationsUrl).then((r) => r.json()).then((json) => { raw = json; })
+    .catch((e) => console.error('constellations catalog failed to load (lines stay empty):', e));
 
   /* Call once both constellations.json (this module's `ready`) and the star catalog's own catalog
      (its `ready`) have resolved. Builds the flattened segment index list + per-constellation
      member-star lists (for label centroids) against the star catalog's hrToIndex. */
   function resolve(hrToIndex) {
+    if (!raw) return;                      // catalog never arrived (caught above) — stay inert, don't crash the join
     segIdx = [];
     labelDefs = [];
     for (const c of raw) {
