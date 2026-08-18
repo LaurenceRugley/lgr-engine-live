@@ -744,6 +744,222 @@ export function createFishModel(profile = FISH_PROFILE) {
   return { step };
 }
 
+/* ---- THE DIRTBIKE (A-MOTO, 2026-08-18) — a ground vehicle that can LEAVE the ground.
+   WHY A NEW MODEL rather than tuning ATV_PROFILE — the reconcile, written down (the fish-precedent
+   rule): createGroundModel's terrain-follow is `state.y = damp(state.y, groundY, 18, dt)` — it has
+   no vertical velocity state AT ALL, so it structurally cannot leave the ground: at any crest it
+   glues to the downslope. Airtime — the entire subject of this arc — is unreachable by parameter,
+   which is the same argument shape as createRoadModel's "the steering law says so" and
+   createBoatModel's "a hull has no grip". ATV_PROFILE itself is left untouched: placed-life.js is a
+   second consumer (Rule 7), and a dune buggy that hugs the terrain SHOULD keep hugging it.
+
+   WHAT IS REUSED, term for term, because it was right: the ATV's speed-scaled steer authority
+   (`0.35 + 0.65·speedFrac` — mushy parked, bites at speed: correct for a bike too), the
+   semi-implicit throttle/coast order, the central-difference slope basis, and the +Z-nose heading
+   convention every model in this file shares.
+
+   WHAT IS NEW, and each is the point:
+   1. TWO PHASES with a decompose/recompose seam — the FISH's own architecture ("one integrator
+      with a branch on a boolean the world answers, not two classes"), with the ground for the
+      water. Grounded: y follows the heightfield and `vy` TRACKS the slope's vertical rate. The
+      LAUNCH TEST each frame: where would ballistics put me (`y + (vy − g·dt)·dt`) vs where the
+      ground is. If the ground falls away below the ballistic path, you are AIRBORNE — which makes
+      crest launches emerge from the terrain's own curvature (v²·A·k² > g, the arithmetic moto.js
+      derives the level from) with no scripted "jump" anywhere.
+   2. AIR PITCH CONTROL — the half the fish deliberately lacks (a breaching fish is a projectile;
+      a rider is not). `axes.lift` is the lean axis: lean back (S, lift −1) pitches the nose UP and
+      over — hold it and that is the backflip; lean forward pushes the nose down. Yaw and steering
+      are FROZEN in the air (whips/spins are phase-2 scoring vocabulary, stated not smuggled).
+   3. A LANDING VERDICT — the fish re-enters water, and water does not care about attitude; dirt
+      does. At touchdown the bike's pitch is compared to the slope's own pitch along the heading,
+      WRAPPED to (−π, π] — so a full 2π backflip that comes round lands CLEAN, which is the one
+      arithmetic detail the whole trick system hangs on. Clean keeps speed; a botch scrubs speed
+      proportionally down to `keepMin` — phase-1 forgiving BY DESIGN: no wreck state, no ragdoll,
+      the worst landing is a slow exit (a crash animation is a later, separate ability).
+   C++ anchor: a two-state integrator with an explicit state transition test, not a physics engine —
+   the MM2 read ("crazy enough to be fun, real enough to look right") is a real parabola + full
+   authorial control of the three constants that matter (g, pitch rate, scrub). */
+export const BIKE_PROFILE = {
+  maxSpeed: 7.5,          // u/s — faster than the ATV (6.0); speed is what a dirtbike is FOR
+  accel: 8.0,             // u/s² — ~1.5 s to the launch-speed band
+  brake: 12.0,            // u/s² — S is a BRAKE first (a bike stops much harder than it accelerates)
+  reverseMax: 1.2,        // u/s — paddle-walk reverse, not a gear
+  drag: 3.0,              // coast friction (u/s²) — a bike coasts further than the ATV's 5.0
+  turnRate: 2.6,          // rad/s at speed (the ATV's law, slightly quicker — it is lighter)
+  gravity: 5.4,           // u/s² — the GRAPPLE/character constant, so a moto world and a walker world agree
+  airPitchRate: 3.6,      // rad/s of air rotation authority — 2π in 1.75 s: the backflip budget
+  airDrag: 0.12,          // proportional (1/s) — you keep ~90% of speed through a 1 s flight (hang-time feel)
+  launchMinSpeed: 0.3,    // u/s below which the launch test is off (a parked bike nudged at a lip stays a parked bike)
+  cleanAngle: 0.5,        // rad of pitch-vs-slope mismatch that still lands clean (~29° — forgiving)
+  scrub: 0.75, keepMin: 0.30,   // a botched landing scrubs toward keepMin·speed, never a wreck (phase 1)
+  landPitchTau: 10,       // 1/s — how fast the chassis re-seats onto the slope after touchdown
+  bankMax: 0.42, bankTau: 0.16, // bikes LEAN — most of the cornering read
+  steerAttack: 0.14, steerRelease: 0.2, liftAttack: 0.1, expo: 0.5,   // input envelope (pilot controller)
+  chaseDist: 2.8, chaseElev: 0.3, chaseMin: 1.0, camLead: 0.14,
+  eye: { x: 0, y: 0.62, z: 0.06 },
+  collide: { r: 0.35, yOff: 0.25, PUSH_MAX: 12.0, SLIDE_FRICTION: 2.0, SKIN: 0.02 },
+  boost: { speed: 1.2, accel: 1.2 },
+};
+export function createBikeModel(profile = BIKE_PROFILE) {
+  const _up = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
+  const _fwd2 = new THREE.Vector3(), _m = new THREE.Matrix4(), _e = new THREE.Euler(), _qLean = new THREE.Quaternion();
+  const _upS = new THREE.Vector3();               // scratch for the damped surface normal (the STATE carries it)
+  const EPS = 0.45;                               // central-difference offset — the ATV's own constant
+  const P = (k) => (profile[k] !== undefined ? profile[k] : BIKE_PROFILE[k]);
+  const wrapPi = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a <= -Math.PI) a += 2 * Math.PI; return a; };
+
+  function step(state, axes, dt, world) {
+    const H = (world && world.heightAt) || (() => 0);
+    // SELF-SEEDING (the road model's rule): a consumer's transform object owes this model nothing.
+    if (typeof state.vy !== 'number') state.vy = 0;
+    if (typeof state.pitch !== 'number') state.pitch = 0;
+    if (typeof state.bank !== 'number') state.bank = 0;
+    if (typeof state.airborne !== 'boolean') { state.airborne = false; state.y = H(state.x, state.z); }
+    if (typeof state.airtime !== 'number') { state.airtime = 0; state.airTotal = 0; state.jumps = 0; }
+    if (typeof state.upY !== 'number') { state.upX = 0; state.upY = 1; state.upZ = 0; }   // the damped chassis normal — STATE, so two bikes never share one model's smoothing
+    if (!state.landing) state.landing = { err: 0, kept: 1, clean: true, count: 0 };
+    const g = P('gravity');
+    const maxS = P('maxSpeed') * bk(profile, axes, 'speed');
+    const th = axes.throttle || 0;
+
+    if (!state.airborne) {
+      /* ── GROUNDED — the ATV's laws + the launch test ─────────────────────────────────────── */
+      const speedFrac = clamp(Math.abs(state.speed) / maxS, 0, 1);
+      const dirSign = state.speed >= 0 ? 1 : -1;
+      /* SIGN — a Rule-6 conflict SURFACED, not averaged: this file already ships two yaw
+         conventions (the spacecraft's `yaw -= steer` at its own line vs the ground/road models'
+         `+=`), while every project wires the same key map (steer = D − A). Measured ground truth
+         for a chase camera directly behind the body (a −5 z eye looking at the origin projects
+         world +x to NDC −0.17, i.e. +x is screen-LEFT), plus the character's owner-verified
+         convention (swing-ledger A-LOCK: "a right turn DECREASES atan2(vx,vz)"): D-turns-right
+         requires yaw to DECREASE on positive steer. The bike therefore takes the SPACECRAFT's
+         sign — the one craft whose chase feel is flown daily — and keeps the uniform D−A wiring. */
+      state.yaw -= axes.steer * P('turnRate') * (0.35 + 0.65 * speedFrac) * dirSign * dt;
+      // throttle forward; S brakes hard to a stop, then paddle-reverses; released → coast (momentum)
+      if (th > 0) state.speed += th * P('accel') * bk(profile, axes, 'accel') * dt;
+      else if (th < 0) {
+        if (state.speed > 0.02) state.speed = Math.max(0, state.speed + th * P('brake') * dt);
+        else state.speed = Math.max(-P('reverseMax'), state.speed + th * P('accel') * 0.4 * dt);
+      } else {
+        const f = Math.min(Math.abs(state.speed), P('drag') * dt);
+        state.speed -= Math.sign(state.speed) * f;
+      }
+      state.speed = clamp(state.speed, -P('reverseMax'), maxS);
+
+      const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
+      state.x += s * state.speed * dt;
+      state.z += c * state.speed * dt;
+      const y0 = state.y;
+      const g1 = H(state.x, state.z);
+      const hL = H(state.x - EPS, state.z), hR = H(state.x + EPS, state.z);
+      const hD = H(state.x, state.z - EPS), hU = H(state.x, state.z + EPS);
+
+      /* THE LAUNCH TEST — accelerations, not positions, and the distinction cost a red test to
+         learn (kept, because it is the whole design): a position test ("is the ground below the
+         one-frame ballistic step?") compares two paths that BOTH drop quadratically, so its signal
+         is ½·(v²Ak² − g)·dt² ≈ 1e-4 u/frame — two orders below any usable skin, and dt-dependent.
+         The first-order statement is the physical one, and it is LITERALLY the inequality moto.js
+         derives the terrain from: the wheel leaves the dirt when following the surface would demand
+         more downward acceleration than gravity can supply (normal force < 0):
+             required = d(vyGround)/dt < −g      with   vyGround = v · slope-along-heading
+         vyGround is taken from the SAME ±EPS central differences the chassis basis uses — smoothed
+         over ~a cell, so bilinear facet corners do not fire it — and `state.vy` carries last frame's
+         value, which is the vertical velocity the body ACTUALLY has. The decompose at launch is the
+         fish's: horizontal speed rides through; vy is inherited from the slope — a kicker's face
+         hands you its own climb rate (v·tanθ, exactly flipRampSpec's vy₀), a crest hands ≈0 and the
+         falling ground makes the air. A cliff lip is the same test at large magnitude: the forward
+         EPS sample already sees the basin, vyGround plunges, `required` goes hugely negative. */
+      const dhdx = (hR - hL) / (2 * EPS), dhdz = (hU - hD) / (2 * EPS);
+      const vyG = state.speed * (s * dhdx + c * dhdz);
+      const required = dt > 0 ? (vyG - state.vy) / dt : 0;
+      if (dt > 0 && Math.abs(state.speed) > P('launchMinSpeed') && required < -g) {
+        state.airborne = true;
+        state.jumps++;
+        state.airtime = 0;
+        state.vy -= g * dt;                       // gravity owns vy from here (first ballistic step)
+        /* FLOORED at the ground on the launch frame — the accel test can fire while the surface is
+           still RISING (a convex kink mid-upslope), where the raw ballistic step lands ~1.6 mm
+           INSIDE the field for one frame. The wheel is still touching at the instant of leaving;
+           the no-sink contract (y ≥ heightAt, every frame) is the probe's containment analog and
+           it caught exactly this. */
+        state.y = Math.max(y0 + state.vy * dt, g1);
+        // pitch continuity: you leave the lip AT the slope angle you left with; the air owns it now.
+      } else {
+        state.y = g1;
+        state.vy = vyG;
+
+        /* ORIENT TO SLOPE — the ATV's central-difference basis, with the normal DAMPED
+           (landPitchTau) so a touchdown re-seats over ~0.1 s instead of snapping the chassis. */
+        _up.set(hL - hR, 2 * EPS, hD - hU).normalize();
+        state.upX = damp(state.upX, _up.x, P('landPitchTau'), dt);
+        state.upY = damp(state.upY, _up.y, P('landPitchTau'), dt);
+        state.upZ = damp(state.upZ, _up.z, P('landPitchTau'), dt);
+        _upS.set(state.upX, state.upY, state.upZ).normalize();
+        _fwd.set(s, 0, c);
+        _right.crossVectors(_upS, _fwd).normalize();
+        _fwd2.crossVectors(_right, _upS).normalize();
+        _m.makeBasis(_right, _upS, _fwd2);
+        state.quat.setFromRotationMatrix(_m);
+        // LEAN into the corner (bikes bank; the ATV's basis alone only rolls on side-slopes)
+        const lean = clamp(-(axes.steer || 0) * speedFrac * P('bankMax'), -P('bankMax'), P('bankMax'));
+        state.bank = damp(state.bank, lean, 1 / P('bankTau'), dt);
+        state.quat.premultiply(_qLean.setFromAxisAngle(_fwd2, state.bank));
+        // the landing-test pitch: the slope's own pitch along the heading (+ = nose up)
+        state.pitch = Math.asin(clamp(_fwd2.y, -1, 1));
+      }
+    } else {
+      /* ── AIRBORNE — ballistics + the rider's lean ────────────────────────────────────────── */
+      state.airtime += dt;
+      state.airTotal += dt;
+      state.vy -= g * dt;
+      state.speed -= state.speed * P('airDrag') * dt;
+      /* THE LEAN AXIS: lift −1 (lean BACK / S) pitches the nose UP and over — the backflip
+         direction; lift +1 noses down. Yaw/steer deliberately dead in the air (phase 2). */
+      state.pitch += -(axes.lift || 0) * P('airPitchRate') * dt;
+      const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
+      state.x += s * state.speed * dt;
+      state.z += c * state.speed * dt;
+      const yN = state.y + state.vy * dt;
+      const g1 = H(state.x, state.z);
+      if (yN <= g1) {
+        /* ── TOUCHDOWN — the verdict. Slope pitch ALONG THE HEADING from the full central-
+           difference gradient (both axes — an early draft sampled only z and was wrong for every
+           diagonal heading); the error is WRAPPED so a completed flip (2π) reads as 0 — land it
+           round and it is a clean landing, which is the entire contract of the trick. */
+        const dhdx = (H(state.x + EPS, state.z) - H(state.x - EPS, state.z)) / (2 * EPS);
+        const dhdz = (H(state.x, state.z + EPS) - H(state.x, state.z - EPS)) / (2 * EPS);
+        const slopeAlong = s * dhdx + c * dhdz;
+        const slopePitch = Math.atan(slopeAlong);              // rise per unit travelled; + = uphill = nose up
+        const err = Math.abs(wrapPi(state.pitch - slopePitch));
+        const clean = err <= P('cleanAngle');
+        const kept = clean ? 1 : Math.max(P('keepMin'), 1 - P('scrub') * (err - P('cleanAngle')) / (Math.PI - P('cleanAngle')));
+        state.speed *= kept;
+        state.landing = { err, kept, clean, count: state.landing.count + 1 };
+        state.lastAir = state.airtime;
+        state.airborne = false;
+        state.y = g1;
+        /* vy hands over as the slope's OWN rate — the launch continuity rule in reverse. Landing on
+           a downslope with vy = 0 would make next frame's `required` read the whole slope rate as
+           one frame of acceleration and phantom-relaunch the bike off every descent it lands on. */
+        state.vy = state.speed * slopeAlong;
+        state.pitch = wrapPi(state.pitch);         // unwind the flip count; the ground damp takes it from here
+        /* seed the damped normal from the bike's ACTUAL air attitude, so the re-seat eases from
+           where the body really is rather than snapping through level first. */
+        _up.set(0, 1, 0).applyQuaternion(state.quat);
+        state.upX = _up.x; state.upY = _up.y; state.upZ = _up.z;
+      } else {
+        state.y = yN;
+      }
+      // attitude in the air: yaw + the rider's pitch, bank easing out (+pitch = nose up ⇒ euler.x = −pitch)
+      state.bank = damp(state.bank, 0, 1 / P('bankTau'), dt);
+      _e.set(-state.pitch, state.yaw, state.bank, 'YXZ');
+      state.quat.setFromEuler(_e);
+    }
+    return state;
+  }
+  return { step };
+}
+
 /* ---- carryMomentum(from, to, opts) — A-CROSSING (2026-08-07): hand one body's motion to another.
    ---------------------------------------------------------------------------------------------
    The ability behind "the gull hits the water and becomes the fish". Deliberately a PURE FUNCTION over
@@ -1763,7 +1979,7 @@ export function createGrappleModel(profile = GRAPPLE_PROFILE) {
 
 /* the model registry the controller dispatches on (a PilotProfile names its model by key). Adding a
    craft type = one entry here + its model factory + a PilotProfile on the entity. */
-const MODEL_FACTORIES = { ground: createGroundModel, spacecraft: createSpacecraftModel, road: createRoadModel, boat: createBoatModel, bird: createBirdModel, fish: createFishModel, grapple: createGrappleModel };
+const MODEL_FACTORIES = { ground: createGroundModel, spacecraft: createSpacecraftModel, road: createRoadModel, boat: createBoatModel, bird: createBirdModel, fish: createFishModel, bike: createBikeModel, grapple: createGrappleModel };
 
 const ENTER_TIME = 0.55;                 // seconds the ENTERING camera-move runs (input ignored) — "the move is the onboarding"
 const ZERO_AXES = { throttle: 0, steer: 0, lift: 0, boost: 0, aimPoint: null, fire: false };

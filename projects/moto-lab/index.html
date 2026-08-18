@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e0b07'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='18' font-weight='700' fill='%23b89968' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E" />
+  <title>LGR — Moto Lab</title>
+  <style>
+    button, select, input, textarea { font: inherit; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%; background: #0e0b07; color: #e8d5b8;
+      font-family: ui-monospace, "JetBrains Mono", monospace; overflow: hidden;
+    }
+    canvas { display: block; }
+
+    #lgr-loader {
+      position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px;
+      background: #0e0b07; color: rgba(184,153,104,0.85);
+      font: 600 12px/1 ui-monospace, monospace; letter-spacing: 0.22em;
+      transition: opacity .4s ease;
+    }
+    #lgr-loader.gone { opacity: 0; pointer-events: none; }
+    #lgr-loader .mark { font: 700 36px/1 Georgia, serif; letter-spacing: 0.08em; color: #b89968; }
+
+    /* ---- THE READOUT (the swing-lab rule, applied to a bike): you cannot tune what you cannot
+       see, so every number the ride turns on is on screen at 10 Hz. ---- */
+    #hud {
+      position: fixed; left: 12px; top: 12px; z-index: 30;
+      background: rgba(14,11,7,0.78); border: 1px solid #2a2018; border-radius: 6px;
+      padding: 9px 11px; font-size: 11px; line-height: 1.55; min-width: 240px;
+      backdrop-filter: blur(6px); pointer-events: none; letter-spacing: 0.01em;
+    }
+    #hud .row { display: flex; justify-content: space-between; gap: 14px; }
+    #hud .k { color: #8a7a5e; }
+    #hud .v { color: #e8d5b8; font-variant-numeric: tabular-nums; }
+    #hud .v.hot { color: #f0884a; }
+    #hud .v.on { color: #7fd6a2; }
+    #hud .v.off { color: #6a6055; }
+    #hud .v.bad { color: #e06c60; }
+    #hud hr { border: 0; border-top: 1px solid #2a2018; margin: 6px 0; }
+    #hud .title { color: #b89968; font-weight: 700; letter-spacing: 0.16em; font-size: 10px; margin-bottom: 5px; }
+    #state-chip { display: inline-block; padding: 0 5px; border-radius: 3px; font-weight: 700; }
+    #state-chip.ride { background: #2b3a2b; color: #7fd6a2; }
+    #state-chip.air  { background: #3a352b; color: #e8c66a; }
+
+    #dock {
+      position: fixed; right: 12px; top: 12px; z-index: 30; width: 262px;
+      background: rgba(14,11,7,0.86); border: 1px solid #2a2018; border-radius: 6px;
+      padding: 10px 11px 11px; font-size: 11px; backdrop-filter: blur(6px);
+      max-height: calc(100vh - 24px); overflow-y: auto;
+    }
+    #dock.min { width: auto; padding: 6px 9px; }
+    #dock.min .body { display: none; }
+    #dock .head { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: pointer; }
+    #dock .head h2 { color: #b89968; font-weight: 700; letter-spacing: 0.16em; font-size: 10px; }
+    #dock .head button { background: none; border: 1px solid #2a2018; color: #8a7a5e; border-radius: 3px; cursor: pointer; padding: 0 6px; font-size: 11px; }
+    #dock .body { margin-top: 9px; display: flex; flex-direction: column; gap: 7px; }
+    #dock .grp { color: #8a7a5e; font-size: 9px; letter-spacing: 0.18em; margin-top: 4px; border-top: 1px solid #2a2018; padding-top: 7px; }
+    #dock label { display: grid; grid-template-columns: 82px 1fr 46px; align-items: center; gap: 7px; color: #b3a68d; }
+    #dock label .n { color: #e8d5b8; text-align: right; font-variant-numeric: tabular-nums; }
+    #dock input[type=range] { width: 100%; accent-color: #b89968; height: 14px; }
+    #dock .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+    #dock .btns button {
+      flex: 1; min-width: 66px; background: #1a1510; border: 1px solid #2a2018; color: #e8d5b8;
+      border-radius: 3px; padding: 4px 0; cursor: pointer; font-size: 10px; letter-spacing: 0.06em;
+    }
+    #dock .btns button:hover { border-color: #b89968; }
+    #dock .note { color: #6a6055; font-size: 9px; line-height: 1.5; }
+
+    #hint {
+      position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 30;
+      background: rgba(14,11,7,0.78); border: 1px solid #2a2018; border-radius: 6px;
+      padding: 6px 12px; font-size: 11px; color: #b3a68d; letter-spacing: 0.03em;
+      backdrop-filter: blur(6px); pointer-events: none; text-align: center; max-width: 92vw;
+    }
+    #hint b { color: #e8d5b8; font-weight: 700; }
+    @media (max-width: 760px) { #dock { display: none; } #hud { font-size: 10px; min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div id="lgr-loader"><div class="mark">LGR</div><div>MOTO LAB</div></div>
+
+  <div id="hud">
+    <div class="title">LIVE STATE</div>
+    <div class="row"><span class="k">state</span><span class="v"><span id="state-chip" class="ride">RIDE</span></span></div>
+    <div class="row"><span class="k">speed</span><span class="v" id="v-speed">0.00</span></div>
+    <div class="row"><span class="k">vy</span><span class="v" id="v-vy">0.00</span></div>
+    <div class="row"><span class="k">height y</span><span class="v" id="v-y">0.00</span></div>
+    <div class="row"><span class="k">clearance</span><span class="v" id="v-clear">0.00</span></div>
+    <hr />
+    <div class="row"><span class="k">airtime</span><span class="v" id="v-air">—</span></div>
+    <div class="row"><span class="k">last air · total</span><span class="v" id="v-airtot">0.00 · 0.0</span></div>
+    <div class="row"><span class="k">jumps</span><span class="v" id="v-jumps">0</span></div>
+    <div class="row"><span class="k">pitch · slope</span><span class="v" id="v-pitch">0° · 0°</span></div>
+    <div class="row"><span class="k">last landing</span><span class="v" id="v-land">—</span></div>
+    <div class="row"><span class="k">clean rate</span><span class="v" id="v-clean">—</span></div>
+    <hr />
+    <div class="row"><span class="k">airtime / min</span><span class="v" id="v-apm">—</span></div>
+    <div class="row"><span class="k">launches / min</span><span class="v" id="v-lpm">—</span></div>
+    <div class="row"><span class="k">top · sustained</span><span class="v" id="v-top">0.00 · 0.00</span></div>
+    <div class="row"><span class="k">travelled</span><span class="v" id="v-trav">0.0</span></div>
+    <div class="row"><span class="k">min clear (sink)</span><span class="v" id="v-sink">—</span></div>
+    <hr />
+    <div class="row"><span class="k">terrain</span><span class="v" id="v-terr">—</span></div>
+    <div class="row"><span class="k">launch line</span><span class="v" id="v-guar">—</span></div>
+    <div class="row"><span class="k">flip ramp</span><span class="v" id="v-flip">—</span></div>
+    <div class="row"><span class="k">draws · fps</span><span class="v" id="v-draws">—</span></div>
+  </div>
+
+  <div id="dock">
+    <div class="head" id="dock-head"><h2>MOTO LAB — THE DIALS</h2><button id="dock-toggle">–</button></div>
+    <div class="body">
+      <div class="grp">TERRAIN (rebuilds — derived from the bike)</div>
+      <label>seed<input id="p-seed" type="range" min="1" max="99" step="1" /><span class="n" id="n-seed">7</span></label>
+      <label>λ scale<input id="p-wl" type="range" min="0.5" max="4" step="0.1" /><span class="n" id="n-wl">1.0</span></label>
+      <label>amplitude<input id="p-amp" type="range" min="0.3" max="1.6" step="0.05" /><span class="n" id="n-amp">0.9</span></label>
+      <div class="grp">BIKE (live · speed/gravity/flip re-derive the terrain)</div>
+      <label>max speed<input id="p-maxSpeed" type="range" min="3" max="12" step="0.25" /><span class="n" id="n-maxSpeed">7.5</span></label>
+      <label>accel<input id="p-accel" type="range" min="3" max="14" step="0.5" /><span class="n" id="n-accel">8.0</span></label>
+      <label>air pitch<input id="p-airPitchRate" type="range" min="1" max="7" step="0.2" /><span class="n" id="n-airPitchRate">3.6</span></label>
+      <label>gravity<input id="p-gravity" type="range" min="2" max="10" step="0.2" /><span class="n" id="n-gravity">5.4</span></label>
+      <div class="btns">
+        <button id="b-spawn">respawn (R)</button>
+        <button id="b-ramp">ramp (G)</button>
+        <button id="b-reset">reset</button>
+        <button id="b-copy">copy url</button>
+      </div>
+      <div class="note">W throttle · S brake · A/D lean-steer · in the AIR: ↓ leans back (hold for a backflip), ↑ noses down — throttle and lean are separate hands, so a flip at full throttle is possible · V first/third person · R respawn · G the big ramp.</div>
+    </div>
+  </div>
+
+  <div id="hint"><b>W</b> throttle · <b>A/D</b> steer · crest a dune at speed to fly · in the air <b>↓</b> leans back — hold it off the big ramp (<b>G</b>) for a backflip · <b>V</b> camera</div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
