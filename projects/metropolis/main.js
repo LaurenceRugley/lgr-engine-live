@@ -1032,7 +1032,7 @@ const HINTS = {
   /* A-METRO-INHERIT: the walk hint now describes the LATCHED scheme, because the old one described a
      control scheme this body no longer has. A hint bar that lies is worse than none — it is the only
      place these bindings are written down for a player. */
-  walk:  'WASD walk · Shift SPRINT · SPACE JUMP · click to capture the mouse, then AIM — LEFT-CLICK locks a target, RIGHT-CLICK webs it (no lock = webs the crosshair) · the rope STAYS UP · A/D steer the arc · W/S reel — and hold W at a wall to CLIMB it onto the roof · SPACE launches off the swing · V = 1st/3rd person · Esc frees the mouse',
+  walk:  'WASD walk · Shift SPRINT · SPACE JUMP · click to capture the mouse, then AIM — LEFT-CLICK locks a target, RIGHT-CLICK webs it (no lock = webs the crosshair) · the rope STAYS UP · A/D steer the arc · W/S reel — and hold W at a wall to CLIMB it onto the roof (SPACE leaps OFF the wall) · SPACE launches off the swing · V = 1st/3rd person · Esc frees the mouse',
   drive: 'W/S throttle · A/D steer · Shift boost (you cannot corner at full boost)',
   heli:  'W/S thrust · A/D steer · Space climb · C descend · Shift boost',
   boat:  'W/S throttle · A/D rudder (only steers with way on) · Shift full-ahead',

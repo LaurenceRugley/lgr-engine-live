@@ -920,7 +920,7 @@ function updateHud(dt) {
   /* THE TWO RANGES, SIDE BY SIDE, because they are different numbers and "why did that not fire" has
      to be answerable without guessing which one the dim crosshair meant (A-CLIMB). */
   set('v-range', `web ${SWING.ropeMax.toFixed(2)} u · lock ${aimReach().toFixed(2)} u`);
-  set('v-cling', character.clinging ? 'STUCK — W up, S down' : 'no', character.clinging ? 'on' : 'off');
+  set('v-cling', character.clinging ? 'STUCK — W up, S down, SPACE leap' : 'no', character.clinging ? 'on' : 'off');
   /* A-BODY: the body's own verdict, next to the physics'. `rigged` is the honest half — before the GLB
      lands this says so rather than reporting a pose the capsule cannot be in. */
   /* A-AIR appends the airborne layer's own weight, and it earns the space: it is the one number that

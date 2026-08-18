@@ -83,8 +83,10 @@
        arc. metropolis is on this path and every PROVEN row in swing-ledger.md was measured on it.
      · LATCHED / lock-and-launch — pass `web` (and keep passing `jump`). The owner's scheme: the button
        THROWS one web per press, the rope stays up on its own, and SPACE cuts it with a launch. Space
-       still jumps when grounded — one verb, "get air", in both states, which is the point of binding
-       them together rather than to two keys.
+       still jumps when grounded — and, since A-WALLJUMP (2026-08-18), LEAPS OFF a wall you are
+       clinging to. One verb, "get air", in EVERY state — grounded, roped, on the wall — which is the
+       point of binding them together rather than to three keys. (The wall was the gap for a whole
+       audit cycle: R4 recorded Space being silently eaten while clinging.)
    Nothing selects between them at runtime except the presence of that one field, so a consumer cannot
    half-adopt it and end up with a rope that answers to two masters.
    ============================================================ */
@@ -249,6 +251,23 @@ export function createCharacterController(opts = {}) {
                        // (radius 0.09 + the resolver's 0.02 SKIN) or it steps back onto the facade
     mantleUp: 0.22,    // u above the feet a lip may still be and be mantled onto
     mantleDrop: 0.30,  // u below the feet a roof may be and still count (a lower lip is a DROP, not a top-out)
+    /* ---- A-WALLJUMP (2026-08-18): SPACE ON THE WALL IS A LEAP OFF IT — audit R4's missing verb.
+       "Space = get air" already meant jump on the ground and release-with-a-launch on a rope; the wall
+       was the one state where the press was silently EATEN (the climb zeroed `buffered` and returned
+       before the jump block ever saw it). Now it detaches and throws the body OFF the facade: UP at
+       `jumpUp`×jumpSpeed, OUT along the REVERSE of the cling ray (the outward normal that ray already
+       implies — you climb where you look, so you leap away from where you look) at `jumpOut`×jumpSpeed.
+       BOTH halves derive from the grounded jump's own impulse rather than a new constant: at 1×/1× the
+       leap is that exact hop rotated 45° off the wall — the same v²/2g rise (0.133 u at the metropolis
+       scale), and the out half crosses a 0.55 u street canyon in about one hang time (2v/g ≈ 0.44 s),
+       which is what makes facade-to-facade chains land. The two exits stay DISTINCT: releasing the
+       lift axis is still the plain drop; Space is the leap. `rejump` blanks the cling ray briefly
+       after a leap — without it the very next frame re-clings (the body is still within `reach` and
+       the axis is still held) and the leap is silently deleted; 0.25 s ≈ reach / (jumpOut·jumpSpeed)
+       with margin, i.e. just long enough to outrun the ray it is hiding from. */
+    jumpUp: 1.0,       // × jumpSpeed, vertical half of the leap
+    jumpOut: 1.0,      // × jumpSpeed, horizontal push off the facade
+    rejump: 0.25,      // s the cling ray is ignored after a leap (see above for the derivation)
   }, opts.cling || {});
 
   /* ---- THE SHARED BODY STATE. This exact object is what `createGrappleModel.step` mutates, which is
@@ -277,6 +296,8 @@ export function createCharacterController(opts = {}) {
   // A-CLIMB: the cling's whole state is "am I stuck to a wall this frame", plus two counters a probe
   // reads instead of inferring the ability from a y trace.
   let clinging = false, climbs = 0, mantles = 0, clingT = 0;
+  // A-WALLJUMP: the leap's own counted receipt, and the post-leap blank on the cling ray (see `rejump`)
+  let wallJumps = 0, clingCool = 0;
   const _euler = new THREE.Euler();          // hoisted: an Euler per frame is a hot-path allocation
 
   /* THE ONE GROUND ANSWER. Every part of this controller — the walk floor, the fall test, the landing
@@ -385,6 +406,7 @@ export function createCharacterController(opts = {}) {
        a cut the timer would freeze at its full value and the character could never web again. Owning
        the body means owning its clocks. */
     state.refire = Math.max(0, (state.refire || 0) - dt);
+    clingCool = Math.max(0, clingCool - dt);     // A-WALLJUMP: same rule — the leap's blank is a clock too
 
     /* 1) THE WEB, FIRST, because attaching must be able to interrupt a walk on the very frame the
        button goes down — a web you have to be airborne to throw is a mode, and a mode is the thing
@@ -474,32 +496,58 @@ export function createCharacterController(opts = {}) {
          fallback), and a climber is by definition not moving horizontally. You climb where you look. */
       const wasClinging = clinging;
       const liftAx = input.lift || 0;
+      let wallJumped = false;                    // set by the leap below; gates the mantle this frame
       clinging = false;
-      if (cling.enabled && world.segmentHit && liftAx !== 0) {
+      if (cling.enabled && world.segmentHit && liftAx !== 0 && clingCool <= 0) {
         const cfx = Math.sin(lookYaw), cfz = Math.cos(lookYaw);
         const cy = state.y + cling.probeY;
         const t = world.segmentHit(state.x, cy, state.z, state.x + cfx * cling.reach, cy, state.z + cfz * cling.reach, cling.probeR);
         if (t < 1) {
-          clinging = true;
-          if (!wasClinging) climbs++;
-          clingT += dt;
-          /* Hold position against the facade and climb under the lift axis. Zeroing the horizontal
-             velocity is what makes it read as ADHESION rather than a very slow slide — pilot.js's
-             own wording and its own factor. The walker is told BOTH halves (position then velocity),
-             because `setPosition` zeroes velocity and the free branch reads `walker.vx` back out:
-             the exact leak `handOff()` exists to plug, arriving here by a second route. */
-          state.vy = liftAx * cling.climbRate;
-          state.y += state.vy * dt;
-          state.vx *= 0.12; state.vz *= 0.12;
-          walker.setPosition(state.x, state.z);
-          walker.setVelocity(state.vx, state.vz);
-          walker.setYaw(lookYaw);
-          grounded = false; coyote = 0; airT += dt; buffered = 0;
-          state.grounded = false; state.airborne = false; state.clinging = true;
-          state.speed = Math.hypot(state.vx, state.vy, state.vz);
-          _euler.set(0, state.yaw, 0, 'YXZ'); state.quat.setFromEuler(_euler);
-          tickChase(dt);
-          return state;                          // the climb owns this frame entirely
+          /* --- A-WALLJUMP: Space, while the wall is under your hand, is the LEAP OFF IT — checked
+             BEFORE the climb takes the frame, because the climb's own exit was the exact defect
+             (audit R4): the press was edge-detected at the top, `buffered` was zeroed below, and the
+             jump block further down never ran, so Space on a wall was silently eaten. Same shape as
+             the rope's 1b: spend the press, throw the impulse, and FALL THROUGH — the free path
+             integrates the launch on this very frame, so there is no one-frame cling of lag and no
+             second copy of the physics. See the `jumpUp`/`jumpOut`/`rejump` block for the numbers. */
+          if (jumpPressed && !pressSpent) {
+            /* UP is `Math.max` rather than assignment so a body already rising faster than the hop
+               (a project with climbRate > jumpSpeed) keeps its momentum — the same "never hand back
+               a slower body" rule `handOff` exists for. OUT is ADDED for the same reason, though the
+               climb damped the horizontal to ~0 a frame ago, so in practice it IS the impulse. */
+            state.vy = Math.max(state.vy, jumpSpeed * cling.jumpUp);
+            state.vx -= cfx * jumpSpeed * cling.jumpOut;
+            state.vz -= cfz * jumpSpeed * cling.jumpOut;
+            handOff();                           // the walker must carry the push-off, or the free
+                                                 // branch reads its stale ~0 back out (the A-LOCK leak)
+            clingCool = cling.rejump;            // blank the ray long enough to outrun it
+            jumpFromY = state.y; apex = state.y; airT = 0;   // rise/air receipts measure THIS leap
+            wallJumps++;
+            pressSpent = true;                   // one press, one verb — it must not also buy a
+                                                 // buffered jump off the landing (the 1b rule)
+            wallJumped = true;
+          } else {
+            clinging = true;
+            if (!wasClinging) climbs++;
+            clingT += dt;
+            /* Hold position against the facade and climb under the lift axis. Zeroing the horizontal
+               velocity is what makes it read as ADHESION rather than a very slow slide — pilot.js's
+               own wording and its own factor. The walker is told BOTH halves (position then velocity),
+               because `setPosition` zeroes velocity and the free branch reads `walker.vx` back out:
+               the exact leak `handOff()` exists to plug, arriving here by a second route. */
+            state.vy = liftAx * cling.climbRate;
+            state.y += state.vy * dt;
+            state.vx *= 0.12; state.vz *= 0.12;
+            walker.setPosition(state.x, state.z);
+            walker.setVelocity(state.vx, state.vz);
+            walker.setYaw(lookYaw);
+            grounded = false; coyote = 0; airT += dt; buffered = 0;
+            state.grounded = false; state.airborne = false; state.clinging = true;
+            state.speed = Math.hypot(state.vx, state.vy, state.vz);
+            _euler.set(0, state.yaw, 0, 'YXZ'); state.quat.setFromEuler(_euler);
+            tickChase(dt);
+            return state;                        // the climb owns this frame entirely
+          }
         }
       }
       /* --- 2b-ii) THE TOP-OUT (MANTLE). The wall ran out from under a body that was climbing UP it.
@@ -509,8 +557,11 @@ export function createCharacterController(opts = {}) {
          THE THREE GATES ARE ALL NECESSARY: `wasClinging` (this is a top-out, not a jump); `liftAx > 0`
          (you were going UP — letting go of the axis must still drop you past the facade, which is the
          opt-in half of cling); and the height window, which is what stops a body that climbed off the
-         SIDE of a tower being teleported down onto the street 5 u below. */
-      if (wasClinging && liftAx > 0 && world.surfaceAt) {
+         SIDE of a tower being teleported down onto the street 5 u below.
+         `!wallJumped` (A-WALLJUMP) is the fourth: on the leap frame the wall did not run out — we LEFT
+         it. Without the gate, a Space pressed near the lip converts the leap into a free top-out (the
+         mantle zeroes the velocity it teleports with), which is the wrong verb quietly winning. */
+      if (wasClinging && !wallJumped && liftAx > 0 && world.surfaceAt) {
         const cfx = Math.sin(lookYaw), cfz = Math.cos(lookYaw);
         const tx = state.x + cfx * cling.mantle, tz = state.z + cfz * cling.mantle;
         const top = world.surfaceAt(tx, tz, state.y + cling.mantleUp, footR);
@@ -774,6 +825,7 @@ export function createCharacterController(opts = {}) {
       // repo's recurring bug class — a respawn that leaves you holding a rope to nowhere).
       webLatched = false; webHeld = false;
       clinging = false;                          // …and so is a hand on a wall you have been moved off
+      clingCool = 0;                             // …and the leap's blank on the ray (A-WALLJUMP)
     },
     setYaw(r) { lookYaw = r; state.yaw = r; walker.setYaw(r); },
     recenterPitch() { lookPitch = 0; },
@@ -791,6 +843,8 @@ export function createCharacterController(opts = {}) {
     get clinging() { return clinging; },
     get climbs() { return climbs; }, get mantles() { return mantles; },
     get clingTime() { return clingT; },
+    // A-WALLJUMP: counted, not inferred — a y trace cannot tell a leap from a release's own coast
+    get wallJumps() { return wallJumps; },
     get moving() { return walker.moving; },
     get x() { return state.x; }, get y() { return state.y; }, get z() { return state.z; },
     get lookYaw() { return lookYaw; }, get lookPitch() { return lookPitch; },

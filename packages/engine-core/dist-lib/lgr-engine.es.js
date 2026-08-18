@@ -1,28 +1,28 @@
 import * as e from "three";
-import { ACESFilmicToneMapping as t, AgXToneMapping as n, AnimationClip as r, BackSide as i, Bone as a, Box3 as o, BoxGeometry as s, BufferAttribute as c, BufferGeometry as l, CineonToneMapping as u, ClampToEdgeWrapping as d, Color as f, ColorManagement as p, CustomToneMapping as m, DirectionalLight as h, DoubleSide as g, FileLoader as _, Float32BufferAttribute as v, FrontSide as y, Group as b, HalfFloatType as x, ImageBitmapLoader as S, InstancedBufferAttribute as C, InstancedMesh as w, InterleavedBuffer as T, InterleavedBufferAttribute as E, Interpolant as D, InterpolateDiscrete as O, InterpolateLinear as k, Line as A, LineBasicMaterial as j, LineLoop as M, LineSegments as N, LinearFilter as P, LinearMipmapLinearFilter as F, LinearMipmapNearestFilter as I, LinearSRGBColorSpace as L, LinearToneMapping as R, Loader as z, LoaderUtils as B, Material as V, MathUtils as H, Matrix4 as U, Mesh as W, MeshBasicMaterial as G, MeshLambertMaterial as K, MeshPhysicalMaterial as ee, MeshStandardMaterial as te, MirroredRepeatWrapping as ne, NearestFilter as re, NearestMipmapLinearFilter as ie, NearestMipmapNearestFilter as ae, NeutralToneMapping as oe, NoBlending as se, NumberKeyframeTrack as ce, Object3D as le, OrthographicCamera as ue, PerspectiveCamera as de, PointLight as fe, Points as pe, PointsMaterial as me, PropertyBinding as he, Quaternion as q, QuaternionKeyframeTrack as ge, RawShaderMaterial as _e, ReinhardToneMapping as ve, RepeatWrapping as ye, SRGBColorSpace as be, SRGBTransfer as xe, Scene as Se, ShaderMaterial as Ce, Skeleton as we, SkinnedMesh as Te, Sphere as Ee, SpotLight as De, Texture as Oe, TextureLoader as ke, Timer as Ae, TriangleFanDrawMode as je, TriangleStripDrawMode as Me, TrianglesDrawMode as Ne, UniformsUtils as Pe, Vector2 as Fe, Vector3 as Ie, VectorKeyframeTrack as Le, WebGLRenderTarget as Re } from "three";
+import { ACESFilmicToneMapping as t, AgXToneMapping as n, AnimationClip as r, BackSide as i, Bone as a, Box3 as o, BoxGeometry as s, BufferAttribute as c, BufferGeometry as l, CineonToneMapping as u, ClampToEdgeWrapping as d, Color as f, ColorManagement as p, CustomToneMapping as m, DirectionalLight as h, DoubleSide as g, FileLoader as _, Float32BufferAttribute as v, FrontSide as y, Group as b, HalfFloatType as x, ImageBitmapLoader as S, InstancedBufferAttribute as C, InstancedMesh as w, InterleavedBuffer as T, InterleavedBufferAttribute as E, Interpolant as D, InterpolateDiscrete as O, InterpolateLinear as k, Line as A, LineBasicMaterial as j, LineLoop as M, LineSegments as N, LinearFilter as P, LinearMipmapLinearFilter as F, LinearMipmapNearestFilter as I, LinearSRGBColorSpace as L, LinearToneMapping as R, Loader as z, LoaderUtils as B, Material as V, MathUtils as H, Matrix4 as U, Mesh as W, MeshBasicMaterial as G, MeshLambertMaterial as K, MeshPhysicalMaterial as ee, MeshStandardMaterial as te, MirroredRepeatWrapping as ne, NearestFilter as re, NearestMipmapLinearFilter as ie, NearestMipmapNearestFilter as ae, NeutralToneMapping as oe, NoBlending as se, NumberKeyframeTrack as ce, Object3D as le, OrthographicCamera as ue, PerspectiveCamera as de, PointLight as fe, Points as pe, PointsMaterial as me, PropertyBinding as he, Quaternion as q, QuaternionKeyframeTrack as ge, RawShaderMaterial as _e, ReinhardToneMapping as ve, RepeatWrapping as ye, SRGBColorSpace as be, SRGBTransfer as xe, Scene as Se, ShaderMaterial as Ce, Skeleton as we, SkinnedMesh as Te, Sphere as Ee, SpotLight as De, Texture as Oe, TextureLoader as ke, Timer as J, TriangleFanDrawMode as Ae, TriangleStripDrawMode as je, TrianglesDrawMode as Me, UniformsUtils as Ne, Vector2 as Pe, Vector3 as Fe, VectorKeyframeTrack as Ie, WebGLRenderTarget as Le } from "three";
 //#region \0rolldown/runtime.js
-var ze = Object.defineProperty, Be = (e, t) => {
+var Re = Object.defineProperty, ze = (e, t) => {
 	let n = {};
-	for (var r in e) ze(n, r, {
+	for (var r in e) Re(n, r, {
 		get: e[r],
 		enumerable: !0
 	});
-	return t || ze(n, Symbol.toStringTag, { value: "Module" }), n;
-}, J = (e, t, n, r) => e + (t - e) * (1 - Math.exp(-n * r)), Y = (e, t, n) => e < t ? t : e > n ? n : e, Ve = (e, t) => {
+	return t || Re(n, Symbol.toStringTag, { value: "Module" }), n;
+}, Y = (e, t, n, r) => e + (t - e) * (1 - Math.exp(-n * r)), X = (e, t, n) => e < t ? t : e > n ? n : e, Be = (e, t) => {
 	let n = (t - e) % (Math.PI * 2);
 	return n > Math.PI && (n -= Math.PI * 2), n < -Math.PI && (n += Math.PI * 2), n;
-}, He = Math.atan(1 / Math.SQRT2), Ue = Math.atan(.5), We = Math.PI / 4, Ge = {
+}, Ve = Math.atan(1 / Math.SQRT2), He = Math.atan(.5), Ue = Math.PI / 4, We = {
 	PERSPECTIVE: 4,
 	ISOMETRIC: 5,
 	DIMETRIC: 6
 };
-function Ke({ near: e = .1, fov: t = 60, aspect: n = 2, margin: r = 1.25 } = {}) {
+function Ge({ near: e = .1, fov: t = 60, aspect: n = 2, margin: r = 1.25 } = {}) {
 	let i = Math.tan(t * Math.PI / 180 / 2) * e;
 	return Math.hypot(e, i * n, i) * r;
 }
-var qe = 8, Je = .03, Ye = 1.45, Xe = 4, Ze = 40, Qe = 1.5, $e = 16, et = 1.2, tt = .15, nt = 4, rt = .4, it = 6, at = 22, ot = 3.5, X = 11, st = (e, t, n) => J(e, t, qe, n), Z = (e, t) => e + Math.PI * 2 * Math.round((t - e) / (Math.PI * 2));
-function ct({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = new e.Vector3(0, .8, 0), azimuth: o = We, elevation: s = .52, distance: c = 12, zoom: l = 5.5, elMin: u = Je, elMax: d = Ye, distMin: f = Xe, distMax: p = Ze, zoomMin: m = Qe, zoomMax: h = $e, styleDistNear: g = it, styleDistFar: _ = at, styleZoomNear: v = ot, styleZoomFar: y = X } = {}) {
-	let b = new e.PerspectiveCamera(n, t, r, i), x = new e.OrthographicCamera(-1, 1, 1, -1, r, i), S = Ge.PERSPECTIVE, C = t, w = {
+var Ke = 8, qe = .03, Je = 1.45, Ye = 4, Xe = 40, Ze = 1.5, Qe = 16, $e = 1.2, et = .15, tt = 4, nt = .4, rt = 6, it = 22, at = 3.5, ot = 11, st = (e, t, n) => Y(e, t, Ke, n), Z = (e, t) => e + Math.PI * 2 * Math.round((t - e) / (Math.PI * 2));
+function ct({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = new e.Vector3(0, .8, 0), azimuth: o = Ue, elevation: s = .52, distance: c = 12, zoom: l = 5.5, elMin: u = qe, elMax: d = Je, distMin: f = Ye, distMax: p = Xe, zoomMin: m = Ze, zoomMax: h = Qe, styleDistNear: g = rt, styleDistFar: _ = it, styleZoomNear: v = at, styleZoomFar: y = ot } = {}) {
+	let b = new e.PerspectiveCamera(n, t, r, i), x = new e.OrthographicCamera(-1, 1, 1, -1, r, i), S = We.PERSPECTIVE, C = t, w = {
 		azimuth: o,
 		elevation: s,
 		distance: c,
@@ -36,22 +36,22 @@ function ct({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = ne
 		zoom: l,
 		target: a.clone(),
 		roll: 0
-	}, E = !1, D = null, O = new e.Vector3(), k = !1, A = null, j = null, M = .25, N = w.distance, P = 0, F = !1, I = new e.Vector3(), L = new e.Vector3(0, 0, 1), R = () => S === Ge.PERSPECTIVE ? b : x;
+	}, E = !1, D = null, O = new e.Vector3(), k = !1, A = null, j = null, M = .25, N = w.distance, P = 0, F = !1, I = new e.Vector3(), L = new e.Vector3(0, 0, 1), R = () => S === We.PERSPECTIVE ? b : x;
 	function z(e) {
 		if (e === S) {
-			(S === Ge.ISOMETRIC || S === Ge.DIMETRIC) && (w.elevation = S === Ge.ISOMETRIC ? He : Ue, E = !0);
+			(S === We.ISOMETRIC || S === We.DIMETRIC) && (w.elevation = S === We.ISOMETRIC ? Ve : He, E = !0);
 			return;
 		}
-		S = e, S === Ge.ISOMETRIC || S === Ge.DIMETRIC ? (w.elevation = S === Ge.ISOMETRIC ? He : Ue, w.azimuth = Z(We, T.azimuth), E = !0) : E = !1;
+		S = e, S === We.ISOMETRIC || S === We.DIMETRIC ? (w.elevation = S === We.ISOMETRIC ? Ve : He, w.azimuth = Z(Ue, T.azimuth), E = !0) : E = !1;
 	}
 	function B(t, n) {
 		w.azimuth += t, E || (w.elevation = e.MathUtils.clamp(w.elevation + n, u, d));
 	}
 	function V(t) {
-		S === Ge.PERSPECTIVE ? w.distance = e.MathUtils.clamp(w.distance * t, f, p) : w.zoom = e.MathUtils.clamp(w.zoom * t, m, h);
+		S === We.PERSPECTIVE ? w.distance = e.MathUtils.clamp(w.distance * t, f, p) : w.zoom = e.MathUtils.clamp(w.zoom * t, m, h);
 	}
 	function H(t, n, r = 0) {
-		let i = w.azimuth, a = S === Ge.PERSPECTIVE ? w.distance * .04 : w.zoom * .08, o = new e.Vector3(Math.cos(i), 0, -Math.sin(i)), s = new e.Vector3(-Math.sin(i), 0, -Math.cos(i)), c = w.target.x, l = w.target.y, u = w.target.z, d = c + o.x * t * a + s.x * n * a, f = u + o.z * t * a + s.z * n * a;
+		let i = w.azimuth, a = S === We.PERSPECTIVE ? w.distance * .04 : w.zoom * .08, o = new e.Vector3(Math.cos(i), 0, -Math.sin(i)), s = new e.Vector3(-Math.sin(i), 0, -Math.cos(i)), c = w.target.x, l = w.target.y, u = w.target.z, d = c + o.x * t * a + s.x * n * a, f = u + o.z * t * a + s.z * n * a;
 		if (k && A && (t !== 0 || n !== 0)) {
 			let e = A(c, l, u, d, l, f, M);
 			e < 1 && (d = c + (d - c) * e, f = u + (f - u) * e);
@@ -74,13 +74,13 @@ function ct({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = ne
 		let t = Math.cos(T.elevation), n = Math.sin(T.elevation), r = Math.cos(T.azimuth), i = Math.sin(T.azimuth), a = R(), o = T.target.x + T.distance * t * i, s = T.target.y + T.distance * n, c = T.target.z + T.distance * t * r;
 		if (k) {
 			if (j) {
-				P = J(P, j(o, c), qe, e);
-				let t = P + rt;
+				P = Y(P, j(o, c), Ke, e);
+				let t = P + nt;
 				s < t && (s = t);
 			}
 			if (A) {
-				let t = A(T.target.x, T.target.y, T.target.z, o, s, c, M), n = Math.hypot(o - T.target.x, s - T.target.y, c - T.target.z), r = t < 1 ? Math.max(et, n * t - tt) : n;
-				N = r < N ? r : J(N, r, nt, e);
+				let t = A(T.target.x, T.target.y, T.target.z, o, s, c, M), n = Math.hypot(o - T.target.x, s - T.target.y, c - T.target.z), r = t < 1 ? Math.max($e, n * t - et) : n;
+				N = r < N ? r : Y(N, r, tt, e);
 				let i = n > 1e-4 ? N / n : 1;
 				o = T.target.x + (o - T.target.x) * i, s = T.target.y + (s - T.target.y) * i, c = T.target.z + (c - T.target.z) * i;
 			}
@@ -100,10 +100,10 @@ function ct({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = ne
 		w.distance = e.MathUtils.clamp(t, f, p), n && (T.distance = w.distance);
 	}
 	function te(t, n) {
-		f = Number.isFinite(t) ? t : Xe, p = Number.isFinite(n) ? n : Ze, w.distance = e.MathUtils.clamp(w.distance, f, p);
+		f = Number.isFinite(t) ? t : Ye, p = Number.isFinite(n) ? n : Xe, w.distance = e.MathUtils.clamp(w.distance, f, p);
 	}
 	function ne(t, n) {
-		u = Number.isFinite(t) ? t : Je, d = Number.isFinite(n) ? n : Ye, w.elevation = e.MathUtils.clamp(w.elevation, u, d);
+		u = Number.isFinite(t) ? t : qe, d = Number.isFinite(n) ? n : Je, w.elevation = e.MathUtils.clamp(w.elevation, u, d);
 	}
 	function re(e, t = !1) {
 		w.azimuth = Z(e, T.azimuth), t && (T.azimuth = w.azimuth);
@@ -112,7 +112,7 @@ function ct({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = ne
 		w.elevation = e.MathUtils.clamp(t, u, d), n && (T.elevation = w.elevation);
 	}
 	function ae(t, { frame: n, snap: r = !1 } = {}) {
-		D = t, r && (D(O), w.target.copy(O), T.target.copy(O)), n != null && (S === Ge.PERSPECTIVE ? w.distance = e.MathUtils.clamp(n, f, p) : w.zoom = e.MathUtils.clamp(n, m, h));
+		D = t, r && (D(O), w.target.copy(O), T.target.copy(O)), n != null && (S === We.PERSPECTIVE ? w.distance = e.MathUtils.clamp(n, f, p) : w.zoom = e.MathUtils.clamp(n, m, h));
 	}
 	function oe() {
 		D = null;
@@ -173,7 +173,7 @@ function ct({ aspect: t, fov: n = 48, near: r = .1, far: i = 100, target: a = ne
 		setAzimuth: re,
 		setElevation: ie,
 		get styleT() {
-			return S === Ge.PERSPECTIVE ? e.MathUtils.clamp((T.distance - g) / (_ - g), 0, 1) : e.MathUtils.clamp((T.zoom - v) / (y - v), 0, 1);
+			return S === We.PERSPECTIVE ? e.MathUtils.clamp((T.distance - g) / (_ - g), 0, 1) : e.MathUtils.clamp((T.zoom - v) / (y - v), 0, 1);
 		},
 		setMode: z,
 		orbit: B,
@@ -1241,7 +1241,7 @@ function bn(t = {}) {
 	function Ce(e) {
 		d = !e, typeof window < "u" && (window.__paused = d);
 	}
-	let we = 3, Te = !1, Ee = !1, De = "native", Oe = .3, ke = .46, Ae = ["native", ...At], je = {
+	let we = 3, Te = !1, Ee = !1, De = "native", Oe = .3, ke = .46, J = ["native", ...At], Ae = {
 		"16-bit": "16-bit",
 		"8-bit": "8-bit",
 		gb: "Game Boy",
@@ -1250,21 +1250,21 @@ function bn(t = {}) {
 		"1-bit": "1-bit"
 	};
 	typeof window < "u" && (window.__mode = we, window.__vector = Te, window.__era = De), typeof window < "u" && (window.__frames = 0), typeof window < "u" && (window.__loaded = !1);
-	function Me(e) {
+	function je(e) {
 		let t = Ee ? te.terminal : te.inkgold, n = e % 1 * 4, r = Math.floor(n) % 4;
 		ne.uniforms.uPalette.value = t[r], ne.uniforms.uPaletteB.value = t[(r + 1) % 4], ne.uniforms.uPaletteBlend.value = n - Math.floor(n);
 	}
-	function Ne(e) {
+	function Me(e) {
 		let t = Ot[e];
 		t && (re.uniforms.uGridWidth.value = t.gridWidth, re.uniforms.uDither.value = t.dither, re.uniforms.uUsePalette.value = +!!t.palette, t.palette && (re.uniforms.uPalette.value = ie[e], re.uniforms.uPaletteSize.value = t.palette.length));
 	}
+	function Ne() {
+		De !== "native" && Me(De);
+	}
 	function Pe() {
-		De !== "native" && Ne(De);
+		return Fe();
 	}
 	function Fe() {
-		return Ie();
-	}
-	function Ie() {
 		if (we === 1 || we === 2) return { kind: "none" };
 		if (we === 7) return { kind: "pixel" };
 		if (we === 8) return { kind: "toon" };
@@ -1278,29 +1278,29 @@ function bn(t = {}) {
 			era: "16-bit"
 		};
 	}
-	function Le(e) {
-		return we === 1 || we === 2 ? "" : Te && we !== 7 && we !== 8 ? "Vector" : e.kind === "toon" ? "Toon" : e.kind === "pixel" ? je[e.era || De] || "Pixel" : e.kind === "blend" ? "Toon → " + (je[e.era] || "Pixel") : "";
+	function Ie(e) {
+		return we === 1 || we === 2 ? "" : Te && we !== 7 && we !== 8 ? "Vector" : e.kind === "toon" ? "Toon" : e.kind === "pixel" ? Ae[e.era || De] || "Pixel" : e.kind === "blend" ? "Toon → " + (Ae[e.era] || "Pixel") : "";
 	}
-	function Re(e) {
+	function Le(e) {
 		we = e, window.__mode = we;
 	}
-	function ze() {
+	function Re() {
 		return Te = !Te, Pt.value = +!!Te, window.__vector = Te, Te;
 	}
-	function Be(e) {
+	function ze(e) {
 		return Te = !!e, Pt.value = +!!Te, window.__vector = Te, Te;
 	}
-	function J() {
-		return De = Ae[(Ae.indexOf(De) + 1) % Ae.length], window.__era = De, Pe(), De;
-	}
 	function Y() {
+		return De = J[(J.indexOf(De) + 1) % J.length], window.__era = De, Ne(), De;
+	}
+	function X() {
 		return Ee = !Ee, Ee;
 	}
-	function Ve(e) {
+	function Be(e) {
 		f = e;
 	}
 	return {
-		onContextRestored: Ve,
+		onContextRestored: Be,
 		registerContentResizer: me,
 		renderer: a,
 		drawBuffer: l,
@@ -1374,15 +1374,15 @@ function bn(t = {}) {
 		get sceneEra() {
 			return De;
 		},
-		decideStyle: Fe,
-		styleHintName: Le,
-		updatePixelPalette: Me,
-		setEra: Ne,
-		setPostMode: Re,
-		toggleVector: ze,
-		setVector: Be,
-		cycleEra: J,
-		togglePalette: Y,
+		decideStyle: Pe,
+		styleHintName: Ie,
+		updatePixelPalette: je,
+		setEra: Me,
+		setPostMode: Le,
+		toggleVector: Re,
+		setVector: ze,
+		cycleEra: Y,
+		togglePalette: X,
 		setTonemap: (e) => {
 			let t = e === "agx" || e === 1 || e === !0;
 			return R.uniforms.uTonemap.value = +!!t, typeof window < "u" && (window.__tonemap = t ? "agx" : "aces"), t ? "agx" : "aces";
@@ -2592,22 +2592,22 @@ function _r(e, t, n) {
 	let r = e && e.boost;
 	if (!r || !t) return 1;
 	let i = r[n];
-	return i === void 0 ? 1 : 1 + (i - 1) * Y(t.boost || 0, 0, 1);
+	return i === void 0 ? 1 : 1 + (i - 1) * X(t.boost || 0, 0, 1);
 }
 function vr(t = gr) {
 	let n = new e.Vector3(), r = new e.Vector3(), i = new e.Vector3(), a = new e.Vector3(), o = new e.Matrix4(), s = .45;
 	function c(e, c, l, u) {
-		let d = u && u.heightAt || (() => 0), f = t.maxSpeed * _r(t, c, "speed"), p = Y(Math.abs(e.speed) / f, 0, 1), m = e.speed >= 0 ? 1 : -1;
+		let d = u && u.heightAt || (() => 0), f = t.maxSpeed * _r(t, c, "speed"), p = X(Math.abs(e.speed) / f, 0, 1), m = e.speed >= 0 ? 1 : -1;
 		if (e.yaw += c.steer * t.turnRate * (.35 + .65 * p) * m * l, c.throttle !== 0) e.speed += c.throttle * t.accel * _r(t, c, "accel") * l;
 		else {
 			let n = Math.min(Math.abs(e.speed), t.drag * l);
 			e.speed -= Math.sign(e.speed) * n;
 		}
-		e.speed = Y(e.speed, -f * .5, f);
+		e.speed = X(e.speed, -f * .5, f);
 		let h = Math.sin(e.yaw), g = Math.cos(e.yaw);
 		e.x += h * e.speed * l, e.z += g * e.speed * l;
 		let _ = d(e.x, e.z);
-		e.y = J(e.y, _, 18, l);
+		e.y = Y(e.y, _, 18, l);
 		let v = d(e.x - s, e.z), y = d(e.x + s, e.z), b = d(e.x, e.z - s), x = d(e.x, e.z + s);
 		return n.set(v - y, 2 * s, b - x).normalize(), r.set(h, 0, g), i.crossVectors(n, r).normalize(), a.crossVectors(i, n).normalize(), o.makeBasis(i, n, a), e.quat.setFromRotationMatrix(o), e;
 	}
@@ -2709,19 +2709,19 @@ function Tr(t = yr) {
 		for (let e of Cr) y[e] = wr(_[e], g[e], v);
 		e.yaw -= u.steer * y.turn * d, u.throttle === 0 ? e.speed -= Math.sign(e.speed) * Math.min(Math.abs(e.speed), y.drag * d) : e.speed += u.throttle * t.accel * _r(t, u, "accel") * d;
 		let b = y.maxSpeed * _r(t, u, "speed");
-		e.speed = Y(e.speed, -b * .6, b);
+		e.speed = X(e.speed, -b * .6, b);
 		let x = Math.sin(e.yaw), S = Math.cos(e.yaw);
 		e.x += x * e.speed * d, e.z += S * e.speed * d;
 		let C = p.heightAt(e.x, e.z), w = p.waterHeightAt ? p.waterHeightAt(e.x, e.z) : hr;
 		if (h === "ground" && u.lift <= 0) {
-			e.vy = 0, e.y = J(e.y, C, 14, d);
+			e.vy = 0, e.y = Y(e.y, C, 14, d);
 			let t = .45, s = p.heightAt(e.x - t, e.z), c = p.heightAt(e.x + t, e.z), l = p.heightAt(e.x, e.z - t), u = p.heightAt(e.x, e.z + t);
 			n.set(s - c, 2 * t, l - u).normalize(), r.set(x, 0, S), i.crossVectors(n, r).normalize(), a.crossVectors(i, n).normalize(), o.makeBasis(i, n, a), e.quat.setFromRotationMatrix(o);
 		} else {
-			e.vy += (u.lift * t.lift + y.buoyancy) * d, e.vy -= Math.sign(e.vy) * Math.min(Math.abs(e.vy), y.vDrag * d), e.vy = Y(e.vy, -t.maxV, t.maxV), e.y += e.vy * d, e.y < C && (e.y = C, e.vy < 0 && (e.vy = 0)), w > -999 && e.y < w && (e.y = w, e.vy < 0 && (e.vy = 0)), e.bank ??= 0;
-			let n = Y(Math.abs(e.speed) / b, 0, 1), r = t.bankMax || .4, i = Y(u.steer * n * r, -r, r);
-			e.bank = J(e.bank, i, 1 / (t.bankTau || .14), d);
-			let a = Y(-e.vy * .06, -.3, .3);
+			e.vy += (u.lift * t.lift + y.buoyancy) * d, e.vy -= Math.sign(e.vy) * Math.min(Math.abs(e.vy), y.vDrag * d), e.vy = X(e.vy, -t.maxV, t.maxV), e.y += e.vy * d, e.y < C && (e.y = C, e.vy < 0 && (e.vy = 0)), w > -999 && e.y < w && (e.y = w, e.vy < 0 && (e.vy = 0)), e.bank ??= 0;
+			let n = X(Math.abs(e.speed) / b, 0, 1), r = t.bankMax || .4, i = X(u.steer * n * r, -r, r);
+			e.bank = Y(e.bank, i, 1 / (t.bankTau || .14), d);
+			let a = X(-e.vy * .06, -.3, .3);
 			s.set(a, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(s);
 		}
 		return e;
@@ -2763,11 +2763,11 @@ function Dr(t = Er) {
 			e.speed -= Math.sign(e.speed) * n;
 		}
 		let f = t.maxSpeed * _r(t, r, "speed");
-		e.speed = Y(e.speed, -f * .5, f);
+		e.speed = X(e.speed, -f * .5, f);
 		let p = Math.sin(e.yaw), m = Math.cos(e.yaw);
-		e.x += p * e.speed * i, e.z += m * e.speed * i, e.y = J(e.y, o(e.x, e.z), 18, i);
+		e.x += p * e.speed * i, e.z += m * e.speed * i, e.y = Y(e.y, o(e.x, e.z), 18, i);
 		let h = r.steer * (s / d) * c, g = t.bankMax || .1;
-		return e.bank = J(e.bank, Y(-(s * h) / u * g * 3, -g, g), 1 / (t.bankTau || .14), i), n.set(0, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
+		return e.bank = Y(e.bank, X(-(s * h) / u * g * 3, -g, g), 1 / (t.bankTau || .14), i), n.set(0, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
 	}
 	return { step: r };
 }
@@ -2797,7 +2797,7 @@ function kr(t = Or) {
 			let n = Math.min(Math.abs(e.speed), (t.drag ?? Or.drag) * i);
 			e.speed -= Math.sign(e.speed) * n;
 		}
-		e.speed = Y(e.speed, -s * .4, s);
+		e.speed = X(e.speed, -s * .4, s);
 		let c = Math.abs(e.speed), l = t.steerMinWay ?? Or.steerMinWay;
 		if (c > l) {
 			let n = Math.min(1, (c - l) / (o - l));
@@ -2806,9 +2806,9 @@ function kr(t = Or) {
 		let u = Math.sin(e.yaw), d = Math.cos(e.yaw), f = u * e.speed * i, p = d * e.speed * i, m = (e, t) => !a || !a.waterHeightAt || a.waterHeightAt(e, t) > -999;
 		m(e.x + f, e.z + p) ? (e.x += f, e.z += p) : m(e.x + f, e.z) ? (e.x += f, e.speed *= .985) : m(e.x, e.z + p) ? (e.z += p, e.speed *= .985) : e.speed *= .55;
 		let h = a && a.waterHeightAt ? a.waterHeightAt(e.x, e.z) : hr;
-		e.y = J(e.y, h > -999 ? h : 0, t.rideDamp ?? Or.rideDamp, i);
-		let g = t.bankMax ?? Or.bankMax, _ = Y(-r.steer * (c / o) * g, -g, g);
-		return e.bank = J(e.bank, _, 1 / (t.bankTau ?? Or.bankTau), i), n.set(0, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
+		e.y = Y(e.y, h > -999 ? h : 0, t.rideDamp ?? Or.rideDamp, i);
+		let g = t.bankMax ?? Or.bankMax, _ = X(-r.steer * (c / o) * g, -g, g);
+		return e.bank = Y(e.bank, _, 1 / (t.bankTau ?? Or.bankTau), i), n.set(0, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
 	}
 	return { step: r };
 }
@@ -2837,14 +2837,14 @@ function jr(t = Ar) {
 	let n = new e.Euler(), r = (e) => t[e] === void 0 ? Ar[e] : t[e];
 	function i(e, i, a, o) {
 		typeof e.bank != "number" && (e.bank = 0), typeof e.pitch != "number" && (e.pitch = 0), e.speed === 0 && (e.speed = r("cruiseSpeed"));
-		let s = Y((i.lift || 0) * r("pitchMax"), -r("pitchMax"), r("pitchMax"));
-		e.pitch = J(e.pitch, s, 1 / .25, a);
-		let c = Y(-i.steer * r("bankMax"), -r("bankMax"), r("bankMax"));
-		e.bank = J(e.bank, c, r("bankRate"), a), e.yaw += -e.bank * r("turnFromBank") * a, e.speed += -Math.sin(e.pitch) * r("gravityTrade") * a, (i.throttle || 0) > 0 && (e.speed += i.throttle * r("flap") * _r(t, i, "flap") * a), e.speed -= r("glideDrag") * a, e.speed = Y(e.speed, .05, r("maxSpeed"));
+		let s = X((i.lift || 0) * r("pitchMax"), -r("pitchMax"), r("pitchMax"));
+		e.pitch = Y(e.pitch, s, 1 / .25, a);
+		let c = X(-i.steer * r("bankMax"), -r("bankMax"), r("bankMax"));
+		e.bank = Y(e.bank, c, r("bankRate"), a), e.yaw += -e.bank * r("turnFromBank") * a, e.speed += -Math.sin(e.pitch) * r("gravityTrade") * a, (i.throttle || 0) > 0 && (e.speed += i.throttle * r("flap") * _r(t, i, "flap") * a), e.speed -= r("glideDrag") * a, e.speed = X(e.speed, .05, r("maxSpeed"));
 		let l = e.pitch;
 		if (e.speed < r("stallSpeed")) {
 			let t = 1 - e.speed / r("stallSpeed");
-			l = e.pitch - t * .7, e.pitch = J(e.pitch, -.4, 1 / .4, a), e.stalling = !0;
+			l = e.pitch - t * .7, e.pitch = Y(e.pitch, -.4, 1 / .4, a), e.stalling = !0;
 		} else e.stalling = !1;
 		let u = Math.sin(e.yaw), d = Math.cos(e.yaw), f = e.speed * Math.cos(l);
 		e.x += u * f * a, e.z += d * f * a, e.y += Math.sin(l) * e.speed * a;
@@ -2889,15 +2889,15 @@ function Nr(t = Mr) {
 				e.speed = Math.hypot(t, e.vy), e.pitch = Math.atan2(e.vy, Math.max(1e-4, t)), e.airborne = !1;
 			}
 			e.yaw += i.steer * r("turnRate") * a;
-			let n = Y((i.lift || 0) * r("pitchMax"), -r("pitchMax"), r("pitchMax"));
-			e.pitch = J(e.pitch, n, r("pitchRate"), a), (i.throttle || 0) !== 0 && (e.speed += i.throttle * r("accel") * _r(t, i, "accel") * a), e.speed -= e.speed * r("drag") * a, e.speed = Y(e.speed, -u * .4, u);
+			let n = X((i.lift || 0) * r("pitchMax"), -r("pitchMax"), r("pitchMax"));
+			e.pitch = Y(e.pitch, n, r("pitchRate"), a), (i.throttle || 0) !== 0 && (e.speed += i.throttle * r("accel") * _r(t, i, "accel") * a), e.speed -= e.speed * r("drag") * a, e.speed = X(e.speed, -u * .4, u);
 		} else e.airborne ||= (e.vy = e.speed * Math.sin(e.pitch), e.speed *= Math.cos(e.pitch), !0), e.vy -= r("gravity") * a, e.speed -= e.speed * r("airDrag") * a, e.y += e.vy * a, e.pitch = Math.atan2(e.vy, Math.max(1e-4, Math.abs(e.speed)));
 		let d = e.airborne ? e.speed : e.speed * Math.cos(e.pitch), f = Math.sin(e.yaw) * d * a, p = Math.cos(e.yaw) * d * a, m = (e, t) => s(e, t) > hr;
 		m(e.x + f, e.z + p) ? (e.x += f, e.z += p) : m(e.x + f, e.z) ? (e.x += f, e.speed *= .985) : m(e.x, e.z + p) ? (e.z += p, e.speed *= .985) : e.speed *= .5, l && (e.y += Math.sin(e.pitch) * e.speed * a);
 		let h = (o && o.heightAt ? o.heightAt(e.x, e.z) : 0) + r("floorSkim");
 		e.y < h && (e.y = h, e.pitch < 0 && (e.pitch = 0), e.vy < 0 && (e.vy = 0));
-		let g = r("bankMax"), _ = l ? Y(-i.steer * g, -g, g) : e.bank * .9;
-		return e.bank = J(e.bank, _, 1 / r("bankTau"), a), n.set(e.pitch, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e.submerged = l, e;
+		let g = r("bankMax"), _ = l ? X(-i.steer * g, -g, g) : e.bank * .9;
+		return e.bank = Y(e.bank, _, 1 / r("bankTau"), a), n.set(e.pitch, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e.submerged = l, e;
 	}
 	return { step: i };
 }
@@ -3108,7 +3108,7 @@ function Ir(t = Fr) {
 			e.vx = Math.sin(e.yaw) * t, e.vz = Math.cos(e.yaw) * t, e.vy = 0, e.anchor = null, e.rope = 0, e.refire = 0, e.hang = 0, e.rose = !1;
 		}
 		e.refire = Math.max(0, (e.refire || 0) - i);
-		let c = Y(t.boost || 0, 0, 1), d = t.fire === !0 || (t.throttle || 0) > 0, g = r("aimMode") === "point", _ = g ? a(e, t.aimPoint) : null;
+		let c = X(t.boost || 0, 0, 1), d = t.fire === !0 || (t.throttle || 0) > 0, g = r("aimMode") === "point", _ = g ? a(e, t.aimPoint) : null;
 		e.aimInRange = g ? !!_ : void 0, d && !e.anchor ? f(e, t, s) : !d && e.anchor && u(e, !0);
 		let v = Math.sin(e.yaw), y = Math.cos(e.yaw), b = !1;
 		if (!e.anchor && s && s.segmentHit && (t.lift || 0) !== 0) {
@@ -3124,7 +3124,7 @@ function Ir(t = Fr) {
 		if (e.anchor) {
 			let t = Math.hypot(e.vx, e.vz), n = t > .05 ? e.vx / t : Math.sin(e.yaw), a = t > .05 ? e.vz / t : Math.cos(e.yaw), o = Math.max(0, 1 - e.speed / r("maxSpeed")), s = r("assist") * o * i;
 			if (e.vx += n * s, e.vz += a * s, e.anchor.zip) {
-				let t = e.anchor.y - e.y, n = e.anchor.x - e.x, a = e.anchor.z - e.z, o = Math.hypot(n, t, a) || 1e-6, s = Y(1 - e.vy / r("zipClimb"), 0, 1);
+				let t = e.anchor.y - e.y, n = e.anchor.x - e.x, a = e.anchor.z - e.z, o = Math.hypot(n, t, a) || 1e-6, s = X(1 - e.vy / r("zipClimb"), 0, 1);
 				if (s > 0) {
 					let c = r("zipAccel") * s * i;
 					e.vx += n / o * c, e.vy += t / o * c, e.vz += a / o * c;
@@ -3133,7 +3133,7 @@ function Ir(t = Fr) {
 		}
 		if (e.anchor && t.lift) {
 			let n = r("pump") * (1 + (r("boost").pump - 1) * c);
-			e.rope = Y(e.rope - t.lift * n * i, r("ropeMin"), r("ropeMax"));
+			e.rope = X(e.rope - t.lift * n * i, r("ropeMin"), r("ropeMax"));
 		}
 		let S = r("floorAssist");
 		if (S > 0 && e.anchor && !e.anchor.zip && e.vy < 0) {
@@ -3178,10 +3178,10 @@ function Ir(t = Fr) {
 		} else e.perched = !1;
 		let P = Math.hypot(e.vx, e.vz);
 		P > .05 && (e.yaw = Math.atan2(e.vx, e.vz)), e.speed = Math.hypot(e.vx, e.vy, e.vz);
-		let F = Y(Math.atan2(e.vy, Math.max(P, .05)), -.9, .9);
-		e.pitch = J(typeof e.pitch == "number" ? e.pitch : 0, F, 1 / .18, i);
-		let I = Y(-(t.steer || 0) * .7 + (e.anchor ? .25 : 0), -.9, .9);
-		return e.bank = J(typeof e.bank == "number" ? e.bank : 0, I, 2.2, i), e.airborne = !e.anchor && !b && e.y > N + .02, n.set(e.pitch, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
+		let F = X(Math.atan2(e.vy, Math.max(P, .05)), -.9, .9);
+		e.pitch = Y(typeof e.pitch == "number" ? e.pitch : 0, F, 1 / .18, i);
+		let I = X(-(t.steer || 0) * .7 + (e.anchor ? .25 : 0), -.9, .9);
+		return e.bank = Y(typeof e.bank == "number" ? e.bank : 0, I, 2.2, i), e.airborne = !e.anchor && !b && e.y > N + .02, n.set(e.pitch, e.yaw, e.bank, "YXZ"), e.quat.setFromEuler(n), e;
 	}
 	return {
 		step: g,
@@ -3243,7 +3243,7 @@ function Br({ rig: t, world: n } = {}) {
 		let g = h.getTransform(), _ = m || zr, v = h.profile || {};
 		if (v.steerAttack) {
 			let t = Math.abs(_.steer) > .01 ? 1 / v.steerAttack : 1 / v.steerRelease, n = Math.abs(_.lift) > .01 ? 1 / v.liftAttack : 1 / v.steerRelease;
-			c.steer = J(c.steer, u(_.steer, v.expo), t, e), c.lift = J(c.lift, _.lift, n, e);
+			c.steer = Y(c.steer, u(_.steer, v.expo), t, e), c.lift = Y(c.lift, _.lift, n, e);
 		} else c.steer = _.steer, c.lift = _.lift;
 		c.throttle = _.throttle, c.boost = _.boost || 0, c.aimPoint = _.aimPoint || null, c.fire = _.fire === !0;
 		let y = h.profile && h.profile.collide, b = y && n.collide && n.collideActive && n.collideActive();
@@ -3795,8 +3795,8 @@ function Kr({ extent: t = 8, waterSize: n = 28, plinthTop: r = .3, boatCount: i 
 //#endregion
 //#region ../../node_modules/three/examples/jsm/utils/BufferGeometryUtils.js
 function qr(e, t) {
-	if (t === Ne) return console.warn("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Geometry already defined as triangles."), e;
-	if (t === je || t === Me) {
+	if (t === Me) return console.warn("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Geometry already defined as triangles."), e;
+	if (t === Ae || t === je) {
 		let n = e.getIndex();
 		if (n === null) {
 			let t = [], r = e.getAttribute("position");
@@ -3806,7 +3806,7 @@ function qr(e, t) {
 			} else return console.error("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Undefined position attribute. Processing not possible."), e;
 		}
 		let r = n.count - 2, i = [];
-		if (t === je) for (let e = 1; e <= r; e++) i.push(n.getX(0)), i.push(n.getX(e)), i.push(n.getX(e + 1));
+		if (t === Ae) for (let e = 1; e <= r; e++) i.push(n.getX(0)), i.push(n.getX(e)), i.push(n.getX(e + 1));
 		else for (let e = 0; e < r; e++) e % 2 == 0 ? (i.push(n.getX(e)), i.push(n.getX(e + 1)), i.push(n.getX(e + 2))) : (i.push(n.getX(e + 2)), i.push(n.getX(e + 1)), i.push(n.getX(e)));
 		i.length / 3 !== r && console.error("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Unable to generate correct amount of triangles.");
 		let a = e.clone();
@@ -4095,7 +4095,7 @@ var $r = {
 		let r = [];
 		if (n.clearcoatFactor !== void 0 && (t.clearcoat = n.clearcoatFactor), n.clearcoatTexture !== void 0 && r.push(this.parser.assignTexture(t, "clearcoatMap", n.clearcoatTexture)), n.clearcoatRoughnessFactor !== void 0 && (t.clearcoatRoughness = n.clearcoatRoughnessFactor), n.clearcoatRoughnessTexture !== void 0 && r.push(this.parser.assignTexture(t, "clearcoatRoughnessMap", n.clearcoatRoughnessTexture)), n.clearcoatNormalTexture !== void 0 && (r.push(this.parser.assignTexture(t, "clearcoatNormalMap", n.clearcoatNormalTexture)), n.clearcoatNormalTexture.scale !== void 0)) {
 			let e = n.clearcoatNormalTexture.scale;
-			t.clearcoatNormalScale = new Fe(e, e);
+			t.clearcoatNormalScale = new Pe(e, e);
 		}
 		return Promise.all(r);
 	}
@@ -4307,7 +4307,7 @@ var $r = {
 		return a.length < 1 ? null : (a.push(this.parser.createNodeMesh(e)), Promise.all(a).then((e) => {
 			let t = e.pop(), n = t.isGroup ? t.children : [t], r = e[0].count, i = [];
 			for (let e of n) {
-				let t = new U(), n = new Ie(), a = new q(), s = new Ie(1, 1, 1), c = new w(e.geometry, e.material, r);
+				let t = new U(), n = new Fe(), a = new q(), s = new Fe(1, 1, 1), c = new w(e.geometry, e.material, r);
 				for (let e = 0; e < r; e++) o.TRANSLATION && n.fromBufferAttribute(o.TRANSLATION, e), o.ROTATION && a.fromBufferAttribute(o.ROTATION, e), o.SCALE && s.fromBufferAttribute(o.SCALE, e), c.setMatrixAt(e, t.compose(n, a, s));
 				for (let t in o) if (t === "_COLOR_0") {
 					let e = o[t];
@@ -4870,7 +4870,7 @@ var Ki = new U(), qi = class {
 		}
 		i.doubleSided === !0 && (o.side = g);
 		let l = i.alphaMode || Ii.OPAQUE;
-		if (l === Ii.BLEND ? (o.transparent = !0, o.depthWrite = !1) : (o.transparent = !1, l === Ii.MASK && (o.alphaTest = i.alphaCutoff === void 0 ? .5 : i.alphaCutoff)), i.normalTexture !== void 0 && a !== G && (c.push(t.assignTexture(o, "normalMap", i.normalTexture)), o.normalScale = new Fe(1, 1), i.normalTexture.scale !== void 0)) {
+		if (l === Ii.BLEND ? (o.transparent = !0, o.depthWrite = !1) : (o.transparent = !1, l === Ii.MASK && (o.alphaTest = i.alphaCutoff === void 0 ? .5 : i.alphaCutoff)), i.normalTexture !== void 0 && a !== G && (c.push(t.assignTexture(o, "normalMap", i.normalTexture)), o.normalScale = new Pe(1, 1), i.normalTexture.scale !== void 0)) {
 			let e = i.normalTexture.scale;
 			o.normalScale.set(e, e);
 		}
@@ -4918,7 +4918,7 @@ var Ki = new U(), qi = class {
 			let o = n.slice(0, n.length - 1), s = n[n.length - 1], c = [];
 			for (let n = 0, l = s.length; n < l; n++) {
 				let l = s[n], u = a[n], d, f = o[n];
-				if (u.mode === Oi.TRIANGLES || u.mode === Oi.TRIANGLE_STRIP || u.mode === Oi.TRIANGLE_FAN || u.mode === void 0) d = i.isSkinnedMesh === !0 ? new Te(l, f) : new W(l, f), d.isSkinnedMesh === !0 && d.normalizeSkinWeights(), u.mode === Oi.TRIANGLE_STRIP ? d.geometry = qr(d.geometry, Me) : u.mode === Oi.TRIANGLE_FAN && (d.geometry = qr(d.geometry, je));
+				if (u.mode === Oi.TRIANGLES || u.mode === Oi.TRIANGLE_STRIP || u.mode === Oi.TRIANGLE_FAN || u.mode === void 0) d = i.isSkinnedMesh === !0 ? new Te(l, f) : new W(l, f), d.isSkinnedMesh === !0 && d.normalizeSkinWeights(), u.mode === Oi.TRIANGLE_STRIP ? d.geometry = qr(d.geometry, je) : u.mode === Oi.TRIANGLE_FAN && (d.geometry = qr(d.geometry, Ae));
 				else if (u.mode === Oi.LINES) d = new N(l, f);
 				else if (u.mode === Oi.LINE_STRIP) d = new A(l, f);
 				else if (u.mode === Oi.LINE_LOOP) d = new M(l, f);
@@ -5011,7 +5011,7 @@ var Ki = new U(), qi = class {
 			for (let e = 0, r = n.length; e < r; e++) t.add(n[e]);
 			if (t.userData.pivot !== void 0 && n.length > 0) {
 				let e = t.userData.pivot, r = n[0];
-				t.pivot = new Ie().fromArray(e), t.position.x -= e[0], t.position.y -= e[1], t.position.z -= e[2], r.position.set(0, 0, 0), delete t.userData.pivot;
+				t.pivot = new Fe().fromArray(e), t.position.x -= e[0], t.position.y -= e[1], t.position.z -= e[2], r.position.set(0, 0, 0), delete t.userData.pivot;
 			}
 			return t;
 		});
@@ -5079,7 +5079,7 @@ var Ki = new U(), qi = class {
 				break;
 			case Pi.translation:
 			case Pi.scale:
-				l = Le;
+				l = Ie;
 				break;
 			default:
 				switch (n.itemSize) {
@@ -5087,7 +5087,7 @@ var Ki = new U(), qi = class {
 						l = ce;
 						break;
 					default:
-						l = Le;
+						l = Ie;
 						break;
 				}
 				break;
@@ -5119,7 +5119,7 @@ function Ji(e, t, n) {
 	if (r.POSITION !== void 0) {
 		let e = n.json.accessors[r.POSITION], t = e.min, a = e.max;
 		if (t !== void 0 && a !== void 0) {
-			if (i.set(new Ie(t[0], t[1], t[2]), new Ie(a[0], a[1], a[2])), e.normalized) {
+			if (i.set(new Fe(t[0], t[1], t[2]), new Fe(a[0], a[1], a[2])), e.normalized) {
 				let t = Wi(ki[e.componentType]);
 				i.min.multiplyScalar(t), i.max.multiplyScalar(t);
 			}
@@ -5130,7 +5130,7 @@ function Ji(e, t, n) {
 	} else return;
 	let a = t.targets;
 	if (a !== void 0) {
-		let e = new Ie(), t = new Ie();
+		let e = new Fe(), t = new Fe();
 		for (let r = 0, i = a.length; r < i; r++) {
 			let i = a[r];
 			if (i.POSITION !== void 0) {
@@ -7794,7 +7794,7 @@ var Qo = (e) => e.charAt(0).toUpperCase() + e.slice(1), $o = class e extends W {
 	constructor() {
 		let t = e.SkyShader, n = new Ce({
 			name: t.name,
-			uniforms: Pe.clone(t.uniforms),
+			uniforms: Ne.clone(t.uniforms),
 			vertexShader: t.vertexShader,
 			fragmentShader: t.fragmentShader,
 			side: i,
@@ -7810,8 +7810,8 @@ $o.SkyShader = {
 		rayleigh: { value: 1 },
 		mieCoefficient: { value: .005 },
 		mieDirectionalG: { value: .8 },
-		sunPosition: { value: new Ie() },
-		up: { value: new Ie(0, 1, 0) },
+		sunPosition: { value: new Fe() },
+		up: { value: new Fe(0, 1, 0) },
 		cloudScale: { value: 2e-4 },
 		cloudSpeed: { value: 1e-4 },
 		cloudCoverage: { value: .4 },
@@ -9133,7 +9133,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		planeY: 0
 	});
 	q.uniforms.uReflect.value = Ee.reflRT.texture;
-	let De = null, Oe = null, ke = new e.Color(), Ae = new e.Color(), je = new e.Color();
+	let De = null, Oe = null, ke = new e.Color(), J = new e.Color(), Ae = new e.Color();
 	c && Promise.resolve().then(() => zp).then(({ createVolumetricClouds: t }) => {
 		De = t({
 			noiseN: c.noiseN ?? 32,
@@ -9149,105 +9149,105 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 	}).catch((e) => {
 		typeof console < "u" && console.warn("[ARC A-LIVE] volumetric clouds failed to load", e);
 	});
-	function Me(e) {
+	function je(e) {
 		return !De || U.level >= 2 ? e : (De.pass.render(f, Oe, e), Oe);
 	}
 	t.registerContentResizer((e) => {
 		de.setSize(e.x, e.y), Ee.setSize(e), Oe?.setSize(e.x, e.y), q.uniforms.uResolution.value.set(e.x, e.y);
 	});
-	let Ne = null, Pe = null;
-	u && (Ne = Gs({ renderer: f }), Pe = sc(Ne, { look: u }));
-	let Fe = Pe ? {
-		wall: Pe[oc[u] && oc[u].wallSurface || "facade"],
-		roof: Pe.roof,
-		road: Pe.asphalt,
-		concrete: Pe.concrete
-	} : null, Ie = { value: 0 }, Le = pa({
-		windowGlow: Ie,
+	let Me = null, Ne = null;
+	u && (Me = Gs({ renderer: f }), Ne = sc(Me, { look: u }));
+	let Pe = Ne ? {
+		wall: Ne[oc[u] && oc[u].wallSurface || "facade"],
+		roof: Ne.roof,
+		road: Ne.asphalt,
+		concrete: Ne.concrete
+	} : null, Fe = { value: 0 }, Ie = pa({
+		windowGlow: Fe,
 		manager: no().manager
-	}), Re = Un({
+	}), Le = Un({
 		seed: r,
 		profileIndex: i,
 		profile: a,
-		landmarkFactory: Le,
-		windowGlow: Ie,
-		forgeMaterials: Fe
+		landmarkFactory: Ie,
+		windowGlow: Fe,
+		forgeMaterials: Pe
 	});
-	p.add(Re.group);
-	let ze = $n({
+	p.add(Le.group);
+	let Re = $n({
 		plinthTop: .3,
-		extent: Re.extent,
-		profile: Re.state.profile,
+		extent: Le.extent,
+		profile: Le.state.profile,
 		...l?.cars == null ? {} : { carCount: l.cars },
 		...l?.peds == null ? {} : { pedCount: l.peds }
 	});
+	p.add(Re.group);
+	let ze = rr({ graph: Qn() });
 	p.add(ze.group);
-	let Be = rr({ graph: Qn() });
-	p.add(Be.group);
-	let J = Kr({
-		extent: Re.extent,
+	let Y = Kr({
+		extent: Le.extent,
 		waterSize: 28,
 		plinthTop: .3,
 		...l?.boats == null ? {} : { boatCount: l.boats },
 		...l?.gulls == null ? {} : { gullCount: l.gulls }
 	});
-	p.add(J.group), le.uniforms.uWakeDrops.value = J.wakeDrops;
-	let Y = ha({ extent: Re.extent });
-	p.add(Y.group), le.uniforms.uRainDrops.value = Y.rainDrops;
-	let Ve = _a({ extent: Re.extent });
-	p.add(Ve.group);
-	let He = [
-		ze,
-		J,
-		Ve
-	], Ue = ba({
+	p.add(Y.group), le.uniforms.uWakeDrops.value = Y.wakeDrops;
+	let X = ha({ extent: Le.extent });
+	p.add(X.group), le.uniforms.uRainDrops.value = X.rainDrops;
+	let Be = _a({ extent: Le.extent });
+	p.add(Be.group);
+	let Ve = [
+		Re,
+		Y,
+		Be
+	], He = ba({
 		rig: m,
 		getCamera: () => m.camera,
-		sources: He
-	}), We = Is();
-	p.add(We.group);
-	let Ge = es({ scale: 90 });
-	p.add(Ge.mesh), p.environmentIntensity = .32;
-	let Ke = d === "hillaire" ? ds({
+		sources: Ve
+	}), Ue = Is();
+	p.add(Ue.group);
+	let We = es({ scale: 90 });
+	p.add(We.mesh), p.environmentIntensity = .32;
+	let Ge = d === "hillaire" ? ds({
 		renderer: f,
 		sunDisc: !1
 	}) : null;
-	Ke && (Ke.computeStaticLUTs(), p.add(Ke.skyMesh), Ke.skyMesh.visible = !1, Ke.setExposure(220));
-	let qe = new e.Vector3(0, ls + 2e-4, 0), Je = !1, Ye = !0, Xe = !1;
-	function Ze(e) {
-		let t = Ke ? e : e && h.sunArc.y > -.22;
-		t !== Je && (Je = t, Qe());
+	Ge && (Ge.computeStaticLUTs(), p.add(Ge.skyMesh), Ge.skyMesh.visible = !1, Ge.setExposure(220));
+	let Ke = new e.Vector3(0, ls + 2e-4, 0), qe = !1, Je = !0, Ye = !1;
+	function Xe(e) {
+		let t = Ge ? e : e && h.sunArc.y > -.22;
+		t !== qe && (qe = t, Ze());
 	}
-	function Qe() {
-		let e = Je && !Xe;
-		Ke ? (Ke.skyMesh.visible = e, Ge.mesh.visible = !1) : Ge.mesh.visible = e, he.visible = !Je && Ye && !Xe;
+	function Ze() {
+		let e = qe && !Ye;
+		Ge ? (Ge.skyMesh.visible = e, We.mesh.visible = !1) : We.mesh.visible = e, he.visible = !qe && Je && !Ye;
 	}
-	let $e = null, et = -1, tt = 4, nt = (e) => {
-		tt = Math.max(4, Math.floor(e) || 4);
-	}, rt = 0, it = (e) => {
-		rt = Number.isFinite(e) ? Math.max(0, e) : 0;
+	let Qe = null, $e = -1, et = 4, tt = (e) => {
+		et = Math.max(4, Math.floor(e) || 4);
+	}, nt = 0, rt = (e) => {
+		nt = Number.isFinite(e) ? Math.max(0, e) : 0;
 	};
 	t.onContextRestored(() => {
-		$e = null, et = -1, f.shadowMap.needsUpdate = !0;
+		Qe = null, $e = -1, f.shadowMap.needsUpdate = !0;
 	});
-	function at() {
-		let e = Math.floor(h.t % 1 * tt) % tt;
-		return (e !== et || !$e) && (et = e, $e = Ge.buildEnv(f)), $e;
+	function it() {
+		let e = Math.floor(h.t % 1 * et) % et;
+		return (e !== $e || !Qe) && ($e = e, Qe = We.buildEnv(f)), Qe;
 	}
-	let ot = null, X = null, st = null, Z = null, ct = !1, lt = 1234, ut = "valley", dt = so.map((e) => e.key), ft = new e.MeshStandardMaterial({
+	let at = null, ot = null, st = null, Z = null, ct = !1, lt = 1234, ut = "valley", dt = so.map((e) => e.key), ft = new e.MeshStandardMaterial({
 		color: "#3f6f8c",
 		roughness: .07,
 		metalness: .4,
 		transparent: !0,
 		opacity: .9
 	}), pt = () => [
+		Le.group,
 		Re.group,
-		ze.group,
-		J.group,
-		Be.group
+		Y.group,
+		ze.group
 	], ht = () => [
+		at,
 		ot,
-		X,
 		st
 	].filter(Boolean);
 	function gt() {
@@ -9257,11 +9257,11 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			size: 160,
 			preset: ut
 		});
-		Z = e, ot = bo(e, {
+		Z = e, at = bo(e, {
 			worldSize: 26,
 			baseY: 0,
 			chunks: 6
-		}), X = Go({
+		}), ot = Go({
 			terrain: e,
 			seed: lt,
 			worldSize: 26,
@@ -9278,8 +9278,8 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			seed: lt,
 			preset: ut,
 			active: ct,
-			chunks: ot.children.length,
-			scatter: X.userData.counts,
+			chunks: at.children.length,
+			scatter: ot.userData.counts,
 			lakes: st.userData.count
 		});
 	}
@@ -9287,7 +9287,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		for (let t of ht()) t.visible = e;
 	}, vt = (e) => {
 		for (let t of pt()) t.visible = e;
-		ge.visible = e, Ye = e, he.visible = e && !Je;
+		ge.visible = e, Je = e, he.visible = e && !qe;
 	}, yt = !0, bt = (e) => {
 		yt = !!e, ge.visible = yt, yt || (Xt.group.visible = !1, st && (st.visible = !1));
 	}, xt = .3, St = (e) => {
@@ -9307,7 +9307,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		seaSurfaceY: 0,
 		waterY: .06
 	});
-	At.group.visible = !1, p.add(At.group), He.push(At);
+	At.group.visible = !1, p.add(At.group), Ve.push(At);
 	let jt = .5, Mt = Wn(Rn, xn((r ^ 11579877) >>> 0)()), Nt = Jn({
 		scene: p,
 		at: {
@@ -9331,7 +9331,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 	}
 	let qt = 0;
 	function Jt(e, t) {
-		if (!Z || !ot) return;
+		if (!Z || !at) return;
 		let { size: n, height: r, relief: i } = Z, a = 26 / (n - 1), o = 26 / (t - 1), s = i > 1e-6 ? 1 / i : 0, c = !1;
 		for (let i = 0; i < t; i++) for (let l = 0; l < t; l++) {
 			let u = e[i * t + l];
@@ -9343,13 +9343,13 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 				r[i] = a < 0 ? 0 : a > 1 ? 1 : a;
 			}
 		}
-		c && (qt++, qt % 8 == 0 && xo(ot, Z, ot.children), qt % 24 == 0 && X && Wo(X, Z, {
+		c && (qt++, qt % 8 == 0 && xo(at, Z, at.children), qt % 24 == 0 && ot && Wo(ot, Z, {
 			worldSize: 26,
 			baseY: 0
 		}));
 	}
 	function Yt(e, t) {
-		if (!Z || !ot) return;
+		if (!Z || !at) return;
 		let { size: n, height: r, relief: i } = Z, a = i > 1e-6 ? 1 / i : 0, o = (t - 1) / (n - 1), s = !1;
 		for (let i = 0; i < n; i++) {
 			let c = i * o, l = Math.floor(c), u = c - l, d = Math.min(t - 1, l + 1);
@@ -9362,7 +9362,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 				}
 			}
 		}
-		s && (xo(ot, Z, ot.children), X && Wo(X, Z, {
+		s && (xo(at, Z, at.children), ot && Wo(ot, Z, {
 			worldSize: 26,
 			baseY: 0
 		}));
@@ -9392,13 +9392,13 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		}), st.visible = ct && !rn, p.add(st), window.__world && (window.__world.lakes = st.userData.count));
 	}
 	function cn() {
-		sn(), X && Wo(X, Z, {
+		sn(), ot && Wo(ot, Z, {
 			worldSize: 26,
 			baseY: 0
 		});
 	}
 	function ln(e, t, n = 1, r = 2.2, i = .05) {
-		if (!Z || !ot) return;
+		if (!Z || !at) return;
 		let a = Z.size, o = 26 / (a - 1), s = (e + 13) / o, c = (t + 13) / o, l = r / o, u = Math.max(0, Math.floor(s - l)), d = Math.min(a - 1, Math.ceil(s + l)), f = Math.max(0, Math.floor(c - l)), p = Math.min(a - 1, Math.ceil(c + l)), m = Z.height, h = l * .5 * 2 * (l * .5);
 		for (let e = f; e <= p; e++) for (let t = u; t <= d; t++) {
 			let r = (t - s) * (t - s) + (e - c) * (e - c);
@@ -9407,22 +9407,22 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			m[e * a + t] = o < 0 ? 0 : o > 1 ? 1 : o;
 		}
 		on.clear();
-		for (let e of ot.children) {
+		for (let e of at.children) {
 			let t = e.userData.chunk;
 			t && t.i0 <= d && t.i1 >= u - 1 && t.j0 <= p && t.j1 >= f - 1 && on.add(e);
 		}
-		xo(ot, Z, on), Qt && clearTimeout(Qt), Qt = setTimeout(cn, 140);
+		xo(at, Z, on), Qt && clearTimeout(Qt), Qt = setTimeout(cn, 140);
 	}
 	function un(e, t, n, r = 2.2) {
-		if (!Z || !ot || n == null) return;
+		if (!Z || !at || n == null) return;
 		let i = Z.size, a = 26 / (i - 1), o = (e + 13) / a, s = (t + 13) / a, c = r / a, l = c * c, u = Math.max(0, Math.floor(o - c)), d = Math.min(i - 1, Math.ceil(o + c)), f = Math.max(0, Math.floor(s - c)), p = Math.min(i - 1, Math.ceil(s + c)), m = Z.biome;
 		for (let e = f; e <= p; e++) for (let t = u; t <= d; t++) (t - o) * (t - o) + (e - s) * (e - s) <= l && (m[e * i + t] = n);
 		on.clear();
-		for (let e of ot.children) {
+		for (let e of at.children) {
 			let t = e.userData.chunk;
 			t && t.i0 <= d && t.i1 >= u - 1 && t.j0 <= p && t.j1 >= f - 1 && on.add(e);
 		}
-		xo(ot, Z, on, !0);
+		xo(at, Z, on, !0);
 	}
 	let dn = [
 		"tree",
@@ -9430,8 +9430,8 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		"tuft"
 	];
 	function fn(e, t, { type: n = "tree", density: r = .5, radius: i = 2.2, erase: a = !1 } = {}) {
-		if (!Z || !X) return 0;
-		if (a) return Ho(X, n || "all", e, t, i);
+		if (!Z || !ot) return 0;
+		if (a) return Ho(ot, n || "all", e, t, i);
 		let o = Z.size, s = 26 / (o - 1), c = Z.height, l = Z.sea, u = Z.relief, d = (e) => e < 0 ? 0 : e >= o ? o - 1 : e, f = (e, t) => c[d(Math.round((t + 13) / s)) * o + d(Math.round((e + 13) / s))], p = (e, t) => {
 			let n = Math.max(1, Math.min(o - 2, Math.round((e + 13) / s))), r = Math.max(1, Math.min(o - 2, Math.round((t + 13) / s))), i = (c[r * o + n + 1] - c[r * o + n - 1]) * u / (2 * s), a = (c[(r + 1) * o + n] - c[(r - 1) * o + n]) * u / (2 * s);
 			return Math.hypot(i, a);
@@ -9440,15 +9440,15 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			let r = Math.random() * Math.PI * 2, a = Math.sqrt(Math.random()) * i, o = e + Math.cos(r) * a, s = t + Math.sin(r) * a, c = f(o, s);
 			if (c < l + .005 || p(o, s) > m) continue;
 			let d = (c - l) * u;
-			Vo(X, n, o, d, s, .7 + Math.random() * .6, Math.random() * Math.PI * 2, .82 + Math.random() * .36) && g++;
+			Vo(ot, n, o, d, s, .7 + Math.random() * .6, Math.random() * Math.PI * 2, .82 + Math.random() * .36) && g++;
 		}
-		if (window.__world && X.userData.counts) for (let e of dn) X.userData.counts[e] = (X.userData.placements[e] || []).length;
+		if (window.__world && ot.userData.counts) for (let e of dn) ot.userData.counts[e] = (ot.userData.placements[e] || []).length;
 		return g;
 	}
 	let pn = [];
 	function mn() {
-		if (!X) return null;
-		let e = X.userData.placements, t = {};
+		if (!ot) return null;
+		let e = ot.userData.placements, t = {};
 		for (let n of dn) t[n] = (e[n] || []).map((e) => ({ ...e }));
 		return t;
 	}
@@ -9463,11 +9463,11 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 	function gn() {
 		if (!Z || !pn.length) return !1;
 		let e = pn.pop();
-		if (Z.height.set(e.h), Z.biome.set(e.b), e.sc && X) {
-			let t = X.userData.placements;
+		if (Z.height.set(e.h), Z.biome.set(e.b), e.sc && ot) {
+			let t = ot.userData.placements;
 			for (let n of dn) t[n] = (e.sc[n] || []).map((e) => ({ ...e }));
 		}
-		return e.pl && At.restore(e.pl), xo(ot, Z, ot.children, !0), cn(), !0;
+		return e.pl && At.restore(e.pl), xo(at, Z, at.children, !0), cn(), !0;
 	}
 	let _n = new Set(["boat", "fish"]), vn = new Set(["person", "atv"]);
 	function yn(e, t, n) {
@@ -9490,7 +9490,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 	}
 	let wn = (e) => Sn(new Uint8Array(e.buffer, e.byteOffset, e.byteLength)), Tn = (e) => Sn(e);
 	function En() {
-		let e = X ? X.userData.placements : {}, t = {};
+		let e = ot ? ot.userData.placements : {}, t = {};
 		for (let n of dn) t[n] = (e[n] || []).map((e) => ({ ...e }));
 		return t;
 	}
@@ -9526,11 +9526,11 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		};
 	}
 	function kn(e) {
-		X && (p.remove(X), X.userData.dispose?.()), X = Lo(e || {
+		ot && (p.remove(ot), ot.userData.dispose?.()), ot = Lo(e || {
 			tree: [],
 			rock: [],
 			tuft: []
-		}), X.userData.counts = dn.reduce((e, t) => (e[t] = (X.userData.placements[t] || []).length, e), {}), X.visible = ct, p.add(X);
+		}), ot.userData.counts = dn.reduce((e, t) => (e[t] = (ot.userData.placements[t] || []).length, e), {}), ot.visible = ct, p.add(ot);
 	}
 	function An(e) {
 		if (!e || e.v !== 1) return !1;
@@ -9570,14 +9570,14 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			for (let e = 0; e < t.length; e += 2) Z.height[t[e]] = n(t[e + 1]);
 			for (let e = 0; e < i.length; e += 2) Z.biome[i[e]] = Math.min(r - 1, Math.max(0, i[e + 1] | 0));
 		}
-		return xo(ot, Z, ot.children, !0), e.scatter && kn(e.scatter), sn(), X && Wo(X, Z, {
+		return xo(at, Z, at.children, !0), e.scatter && kn(e.scatter), sn(), ot && Wo(ot, Z, {
 			worldSize: 26,
 			baseY: 0
-		}), At.restore(e.entities), window.__world && (window.__world.scatter = X.userData.counts, window.__world.seed = lt, window.__world.preset = ut), !0;
+		}), At.restore(e.entities), window.__world && (window.__world.scatter = ot.userData.counts, window.__world.seed = lt, window.__world.preset = ut), !0;
 	}
 	let jn = {
 		enter() {
-			ot || gt(), ct = !0, _t(!0), At.group.visible = !0, Xt.group.visible = !0, Zt.group.visible = !0;
+			at || gt(), ct = !0, _t(!0), At.group.visible = !0, Xt.group.visible = !0, Zt.group.visible = !0;
 			for (let e of pt()) e.visible = !1;
 			window.__world && (window.__world.active = !0);
 		},
@@ -9638,19 +9638,19 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		_flowReadTerr: () => Xt._debugReadTerr(),
 		_flowStepN: (e, t) => Xt._debugStepN(e, t),
 		get terrainGroup() {
-			return ot;
+			return at;
 		},
 		get biomes() {
 			return so;
 		},
 		get scatterCounts() {
-			return X ? X.userData.placements && dn.reduce((e, t) => (e[t] = (X.userData.placements[t] || []).length, e), {}) : null;
+			return ot ? ot.userData.placements && dn.reduce((e, t) => (e[t] = (ot.userData.placements[t] || []).length, e), {}) : null;
 		},
 		get placedCounts() {
 			return At.counts();
 		},
 		setScatterHidden(e) {
-			X && (X.visible = !e);
+			ot && (ot.visible = !e);
 		},
 		get placedLife() {
 			return At;
@@ -9673,7 +9673,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 	}, Mn = Xo(), Nn = to({
 		world: jn,
 		catalog: Mn,
-		inspector: Ue
+		inspector: He
 	}), Pn = null, Fn = null;
 	function In(e) {
 		Pn = e || null;
@@ -9706,11 +9706,11 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			surfaceAt: (e, t, n, r) => Vn.surfaceAt(e, t, n, r)
 		}
 	});
-	Re.group.remove(Re.key), p.add(Re.key), Re.key.castShadow = !0, Re.key.shadow.mapSize.set(s, s), Re.key.shadow.bias = -18e-5, Re.key.shadow.normalBias = .028, p.add(Re.key.target);
+	Le.group.remove(Le.key), p.add(Le.key), Le.key.castShadow = !0, Le.key.shadow.mapSize.set(s, s), Le.key.shadow.bias = -18e-5, Le.key.shadow.normalBias = .028, p.add(Le.key.target);
 	let Gn = null;
 	function Kn() {
-		let e = Re.key.shadow.camera, t = Gn ?? Re.extent + 4.5;
-		e.left = -t, e.right = t, e.top = t, e.bottom = -t, e.near = 1, e.far = Gn == null ? 48 : 48 + t, e.updateProjectionMatrix(), f.shadowMap.needsUpdate = !0, Vn.rebuild(Re.state.solids);
+		let e = Le.key.shadow.camera, t = Gn ?? Le.extent + 4.5;
+		e.left = -t, e.right = t, e.top = t, e.bottom = -t, e.near = 1, e.far = Gn == null ? 48 : 48 + t, e.updateProjectionMatrix(), f.shadowMap.needsUpdate = !0, Vn.rebuild(Le.state.solids);
 	}
 	Kn();
 	let qn = 1, Yn = .34, Xn = new e.Color("#cdaa80"), Zn = new e.Vector3(1, 1, 1), er = !1, tr = 0, nr = 1e9, ir = 0, ar = {
@@ -9721,37 +9721,37 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		z: 0
 	};
 	function or(t, n) {
-		Ze(!0), p.environment = at(), $t.value = 1, q.uniforms.uFoamStrength.value = 1 - .85 * mc(h.sunArc.y), q.uniforms.uNear.value = t.near, q.uniforms.uFar.value = t.far, q.uniforms.uIsPerspective.value = +!!t.isPerspectiveCamera;
+		Xe(!0), p.environment = it(), $t.value = 1, q.uniforms.uFoamStrength.value = 1 - .85 * mc(h.sunArc.y), q.uniforms.uNear.value = t.near, q.uniforms.uFar.value = t.far, q.uniforms.uIsPerspective.value = +!!t.isPerspectiveCamera;
 		let r = e.MathUtils.smoothstep(e.MathUtils.clamp(h.sunArc.y, 0, 1), .22, .8), i = mt(h.sunArc.y);
 		q.uniforms.uGlintK.value = i;
 		let a = pc(h.sunArc.y);
-		Re.fill.intensity = qn * (1 - .6 * r - .35 * i) + .35 * a * mc(h.sunArc.y), p.environmentIntensity = Yn * (1 - .45 * r - .58 * i), Ft.value = r, Re.fill.groundColor.copy(h.hemiGround).lerp(hc, .55 * a), q.uniforms.uSkyRefl.value = .55, We.place(t), ge.visible = !1, f.setRenderTarget(de), f.render(p, t), ge.visible = yt, f.setRenderTarget(y), f.render(p, t), L(y), D.uniforms.uScene.value = y.texture, D.uniforms.uAces.value = 1, D.uniforms.uGrade.value = 1, D.uniforms.uGrain.value = 0, D.uniforms.uChroma.value = 0, D.uniforms.uDither.value = 1, D.uniforms.uWarmBal.value = .9 * r, D.uniforms.uBeautyExp.value = 1 - .12 * r - .17 * i, D.uniforms.uRays.value = 0, I(D, n), We.place(m.camera);
+		Le.fill.intensity = qn * (1 - .6 * r - .35 * i) + .35 * a * mc(h.sunArc.y), p.environmentIntensity = Yn * (1 - .45 * r - .58 * i), Ft.value = r, Le.fill.groundColor.copy(h.hemiGround).lerp(hc, .55 * a), q.uniforms.uSkyRefl.value = .55, Ue.place(t), ge.visible = !1, f.setRenderTarget(de), f.render(p, t), ge.visible = yt, f.setRenderTarget(y), f.render(p, t), L(y), D.uniforms.uScene.value = y.texture, D.uniforms.uAces.value = 1, D.uniforms.uGrade.value = 1, D.uniforms.uGrain.value = 0, D.uniforms.uChroma.value = 0, D.uniforms.uDither.value = 1, D.uniforms.uWarmBal.value = .9 * r, D.uniforms.uBeautyExp.value = 1 - .12 * r - .17 * i, D.uniforms.uRays.value = 0, I(D, n), Ue.place(m.camera);
 	}
 	function sr(e) {
-		let t = ge.visible, n = ze.group.visible, r = At.group.visible, i = Xt.group.visible, a = Zt.group.visible;
-		ge.visible = !1, ze.group.visible = !1, At.group.visible = !1, Xt.group.visible = !1, Zt.group.visible = !1;
+		let t = ge.visible, n = Re.group.visible, r = At.group.visible, i = Xt.group.visible, a = Zt.group.visible;
+		ge.visible = !1, Re.group.visible = !1, At.group.visible = !1, Xt.group.visible = !1, Zt.group.visible = !1;
 		let o = Ee.updateCamera(e);
-		We.place(o), f.setRenderTarget(Ee.reflRT), f.render(p, o), We.place(e), ge.visible = t, ze.group.visible = n, At.group.visible = r, Xt.group.visible = i, Zt.group.visible = a;
+		Ue.place(o), f.setRenderTarget(Ee.reflRT), f.render(p, o), Ue.place(e), ge.visible = t, Re.group.visible = n, At.group.visible = r, Xt.group.visible = i, Zt.group.visible = a;
 	}
 	function cr(n, r) {
 		let i = t.mode, a = t.vector, o = n.kind === "toon" ? 1 : n.kind === "blend" ? 1 - n.blend : 0;
 		q.uniforms.uChromaScale.value = e.MathUtils.lerp(1, .5, o), q.uniforms.uSkyRefl.value = !a && (i === 1 || i === 2) ? .55 : 0;
 		let s = !a && (i === 1 || i === 2);
-		Ze(s), p.environment = s ? at() : null, $t.value = +!!s, q.uniforms.uFoamStrength.value = s ? 1 - .85 * mc(h.sunArc.y) : 0, pe.material.color.copy(me).multiplyScalar(s ? 1 - .85 * mc(h.sunArc.y) : 1), q.uniforms.uNear.value = m.camera.near, q.uniforms.uFar.value = m.camera.far, q.uniforms.uIsPerspective.value = +!!m.camera.isPerspectiveCamera;
+		Xe(s), p.environment = s ? it() : null, $t.value = +!!s, q.uniforms.uFoamStrength.value = s ? 1 - .85 * mc(h.sunArc.y) : 0, pe.material.color.copy(me).multiplyScalar(s ? 1 - .85 * mc(h.sunArc.y) : 1), q.uniforms.uNear.value = m.camera.near, q.uniforms.uFar.value = m.camera.far, q.uniforms.uIsPerspective.value = +!!m.camera.isPerspectiveCamera;
 		let c = e.MathUtils.smoothstep(e.MathUtils.clamp(h.sunArc.y, 0, 1), .22, .8), l = mt(h.sunArc.y);
 		q.uniforms.uGlintK.value = s ? l : 0;
 		let u = pc(h.sunArc.y);
-		if (Re.fill.intensity = (s ? qn * (1 - .6 * c - .35 * l) + .35 * u * mc(h.sunArc.y) : qn) + rt * Math.max(0, Math.min(1, h.sunArc.y * 2.2)), Te > 0) {
+		if (Le.fill.intensity = (s ? qn * (1 - .6 * c - .35 * l) + .35 * u * mc(h.sunArc.y) : qn) + nt * Math.max(0, Math.min(1, h.sunArc.y * 2.2)), Te > 0) {
 			let e = Math.max(0, Math.min(1, h.sunArc.y * 2.2));
-			Re.fill.intensity += (3.2 * e - Re.fill.intensity * .35) * Te, Re.fill.color.lerp(we.copy(xe.color).lerp(be, .35), Te), Re.fill.groundColor.lerp(ye, Te * .85);
+			Le.fill.intensity += (3.2 * e - Le.fill.intensity * .35) * Te, Le.fill.color.lerp(we.copy(xe.color).lerp(be, .35), Te), Le.fill.groundColor.lerp(ye, Te * .85);
 		}
-		if (Ft.value = s ? c : 0, s ? (D.uniforms.uWarmBal.value = .9 * c * (1 - Ct), p.environmentIntensity = Yn * (1 - .66 * c - .58 * l), D.uniforms.uBeautyExp.value = 1 - .12 * c - .17 * l, Re.fill.color.lerp(Xn, .45 * c), Re.fill.groundColor.copy(h.hemiGround).lerp(hc, .55 * u)) : (D.uniforms.uWarmBal.value = 0, D.uniforms.uBeautyExp.value = 1, Re.fill.groundColor.copy(h.hemiGround), q.uniforms.uSkyRefl.value = 0), D.uniforms.uBloomStrength.value = 0, D.uniforms.uRays.value = 0, D.uniforms.uSunException.value = Tt, Tt > 0 && (m.camera.getWorldDirection(Ot), Ot.dot(h.sunArc) > .05 ? (Dt.copy(m.camera.position).addScaledVector(h.sunArc, 88).project(m.camera), D.uniforms.uSunScreenPos.value.set(Dt.x * .5 + .5, Dt.y * .5 + .5), D.uniforms.uSunRadius.value = .4) : D.uniforms.uSunRadius.value = 0), en.value = s && t._qualityRefl ? .15 + .45 * mt(h.sunArc.y) + .2 * mc(h.sunArc.y) : 0, q.uniforms.uReflStrength.value = en.value, en.value > 0 && sr(m.camera), ge.visible = !1, f.setRenderTarget(de), f.render(p, m.camera), ge.visible = yt && !rn, i === 1 && !s) f.setRenderTarget(r), f.render(p, m.camera), window.__style = "raw";
+		if (Ft.value = s ? c : 0, s ? (D.uniforms.uWarmBal.value = .9 * c * (1 - Ct), p.environmentIntensity = Yn * (1 - .66 * c - .58 * l), D.uniforms.uBeautyExp.value = 1 - .12 * c - .17 * l, Le.fill.color.lerp(Xn, .45 * c), Le.fill.groundColor.copy(h.hemiGround).lerp(hc, .55 * u)) : (D.uniforms.uWarmBal.value = 0, D.uniforms.uBeautyExp.value = 1, Le.fill.groundColor.copy(h.hemiGround), q.uniforms.uSkyRefl.value = 0), D.uniforms.uBloomStrength.value = 0, D.uniforms.uRays.value = 0, D.uniforms.uSunException.value = Tt, Tt > 0 && (m.camera.getWorldDirection(Ot), Ot.dot(h.sunArc) > .05 ? (Dt.copy(m.camera.position).addScaledVector(h.sunArc, 88).project(m.camera), D.uniforms.uSunScreenPos.value.set(Dt.x * .5 + .5, Dt.y * .5 + .5), D.uniforms.uSunRadius.value = .4) : D.uniforms.uSunRadius.value = 0), en.value = s && t._qualityRefl ? .15 + .45 * mt(h.sunArc.y) + .2 * mc(h.sunArc.y) : 0, q.uniforms.uReflStrength.value = en.value, en.value > 0 && sr(m.camera), ge.visible = !1, f.setRenderTarget(de), f.render(p, m.camera), ge.visible = yt && !rn, i === 1 && !s) f.setRenderTarget(r), f.render(p, m.camera), window.__style = "raw";
 		else if (i === 1) {
 			f.setRenderTarget(y), f.render(p, m.camera);
-			let e = Me(y);
+			let e = je(y);
 			L(e), U.level < 2 && R(e), D.uniforms.uScene.value = e.texture, D.uniforms.uAces.value = 1, D.uniforms.uGrade.value = 1, D.uniforms.uGrain.value = 0, D.uniforms.uChroma.value = 0, D.uniforms.uDither.value = 1, I(D, r), window.__style = "beauty";
 		} else if (f.setRenderTarget(s ? y : _), f.render(p, m.camera), i === 2) {
-			let e = s ? Me(y) : _;
+			let e = s ? je(y) : _;
 			s && L(e), s && U.level < 2 && R(e), D.uniforms.uScene.value = e.texture, D.uniforms.uAces.value = +!!s, D.uniforms.uGrade.value = +!!s, D.uniforms.uGrain.value = 1, D.uniforms.uChroma.value = 1 * xt, D.uniforms.uDither.value = +!!s, I(D, r), window.__style = s ? "beauty" : "raw";
 		} else {
 			D.uniforms.uScene.value = _.texture, D.uniforms.uAces.value = 0, D.uniforms.uGrade.value = 0, D.uniforms.uGrain.value = 0, D.uniforms.uChroma.value = 0, D.uniforms.uDither.value = 0, I(D, v);
@@ -9769,37 +9769,37 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		}
 	}
 	function ur(n, r, { shadowsOn: i = !0, seasonTarget: a = 0 } = {}) {
-		i &&= t._qualityShadows, he.material.uniforms.uTime.value = r, D.uniforms.uTime.value = r, q.uniforms.uTime.value = r % gc, h.update(n), Re.key.position.copy(h.sunDir).multiplyScalar(24), Re.key.color.copy(h.sunColor), Re.key.intensity = h.sunIntensity, Re.fill.color.copy(h.hemiSky), Re.fill.groundColor.copy(h.hemiGround), Ie.value = h.windowGlow;
+		i &&= t._qualityShadows, he.material.uniforms.uTime.value = r, D.uniforms.uTime.value = r, q.uniforms.uTime.value = r % gc, h.update(n), Le.key.position.copy(h.sunDir).multiplyScalar(24), Le.key.color.copy(h.sunColor), Le.key.intensity = h.sunIntensity, Le.fill.color.copy(h.hemiSky), Le.fill.groundColor.copy(h.hemiGround), Fe.value = h.windowGlow;
 		let o = mt(h.sunArc.y);
 		if (o > .001) {
 			let e = h.skyParams;
 			e.turbidity = Math.max(1.5, e.turbidity - 3.6 * o), e.rayleigh = Math.min(e.rayleigh + 2.4 * o, 3.6), e.mie *= 1 - .5 * o, e.mieG = Math.max(.5, e.mieG - .25 * o);
 		}
-		let s = Math.min(1, Y.fog + Y.cloud);
+		let s = Math.min(1, X.fog + X.cloud);
 		if (s > .001) {
 			let e = h.skyParams;
 			e.turbidity = Math.min(10, e.turbidity + 8 * s), e.mieG = Math.max(.45, e.mieG - .2 * s);
 		}
-		if (Ge.setSun(h.sunArc), Ge.setParams(h.skyParams), Ke) {
-			Ke.updateSkyView(h.sunArc, qe), Ke.updateRender(h.sunArc, qe);
+		if (We.setSun(h.sunArc), We.setParams(h.skyParams), Ge) {
+			Ge.updateSkyView(h.sunArc, Ke), Ge.updateRender(h.sunArc, Ke);
 			let e = 1 + 4.5 * s;
-			Math.abs(e - Ke.haze) > .08 && Ke.setHaze(e);
+			Math.abs(e - Ge.haze) > .08 && Ge.setHaze(e);
 		}
 		if (De) {
 			let t = U.level === 0 ? "HIGH" : U.level === 1 ? "MED" : "LOW";
-			if (ke.copy(h.hemiSky), je.copy(h.sunColor), o > .001) {
+			if (ke.copy(h.hemiSky), Ae.copy(h.sunColor), o > .001) {
 				let e = ke.r * .2126 + ke.g * .7152 + ke.b * .0722;
-				ke.lerp(Ae.setScalar(e), .5 * o);
-				let t = je.r * .2126 + je.g * .7152 + je.b * .0722;
-				je.lerp(Ae.setScalar(t), .55 * o);
+				ke.lerp(J.setScalar(e), .5 * o);
+				let t = Ae.r * .2126 + Ae.g * .7152 + Ae.b * .0722;
+				Ae.lerp(J.setScalar(t), .55 * o);
 			}
-			let n = Y.overcast;
-			n > .001 && (ke.multiplyScalar(1 - .45 * n), je.multiplyScalar(1 - .6 * n));
-			let i = Math.min(1, Y.cloud + .5 * Y.fog);
+			let n = X.overcast;
+			n > .001 && (ke.multiplyScalar(1 - .45 * n), Ae.multiplyScalar(1 - .6 * n));
+			let i = Math.min(1, X.cloud + .5 * X.fog);
 			De.setCoverage(e.MathUtils.lerp((c.coverage ?? .5) * (1 - .55 * o), .92, i)), De.update({
 				camera: m.camera,
 				sunDir: h.sunDir,
-				sunColor: je,
+				sunColor: Ae,
 				skyTint: ke,
 				time: r,
 				tierName: t,
@@ -9807,35 +9807,35 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			});
 		}
 		D.uniforms.uGradeSat.value = h.grade.sat * (1 - .4 * Ct), D.uniforms.uGradeContrast.value = h.grade.contrast, p.environmentIntensity = .34 * (1 - .6 * e.MathUtils.clamp(h.sunArc.y * 1.5, 0, 1)), Yn = p.environmentIntensity;
-		let l = Y.overcast;
-		Re.key.intensity *= 1 - .5 * l, Re.key.color.lerp(z, .45 * l), Re.fill.intensity = 1 + .7 * l, qn = Re.fill.intensity;
+		let l = X.overcast;
+		Le.key.intensity *= 1 - .5 * l, Le.key.color.lerp(z, .45 * l), Le.fill.intensity = 1 + .7 * l, qn = Le.fill.intensity;
 		let u = e.MathUtils.smoothstep(h.sunDir.y, .06, .34), d = e.MathUtils.lerp(.28, 1, 1 - h.windowGlow), g = i ? u * d : 0;
-		Re.key.shadow.intensity = .72 * g, Lt.value = .52 * g, nr += n, i && (tr <= 0 || nr >= tr) && (!er || Zn.distanceToSquared(h.sunDir) > 2e-5) && (f.shadowMap.needsUpdate = !0, Zn.copy(h.sunDir), nr = 0, typeof window < "u" && (window.__shadowUpdates = (window.__shadowUpdates | 0) + 1)), er = i;
+		Le.key.shadow.intensity = .72 * g, Lt.value = .52 * g, nr += n, i && (tr <= 0 || nr >= tr) && (!er || Zn.distanceToSquared(h.sunDir) > 2e-5) && (f.shadowMap.needsUpdate = !0, Zn.copy(h.sunDir), nr = 0, typeof window < "u" && (window.__shadowUpdates = (window.__shadowUpdates | 0) + 1)), er = i;
 		let _ = 1 - h.windowGlow;
-		It.setRGB(e.MathUtils.lerp(.46, 1, _), e.MathUtils.lerp(.52, 1, _), e.MathUtils.lerp(.74, 1, _)), D.uniforms.uExposure.value = h.exposure, M.uniforms.uToonGain.value = h.toonGain, f.setClearColor(h.horizon, 1), W(h.t), window.__t = h.t, ze.update(n, r, h), Re.update(r), J.update(n, r, h), Be.update(h.windowGlow), le.uniforms.uWakeCount.value = J.wakeCount, Y.update(n, r), le.uniforms.uRainCount.value = Y.rainDropCount;
-		let v = Y.fog * (1 - _);
-		if (p.fog.density = _c + Y.fog * B, H.copy(h.horizon).lerp(V, .85 * v), xe) {
+		It.setRGB(e.MathUtils.lerp(.46, 1, _), e.MathUtils.lerp(.52, 1, _), e.MathUtils.lerp(.74, 1, _)), D.uniforms.uExposure.value = h.exposure, M.uniforms.uToonGain.value = h.toonGain, f.setClearColor(h.horizon, 1), W(h.t), window.__t = h.t, Re.update(n, r, h), Le.update(r), Y.update(n, r, h), ze.update(h.windowGlow), le.uniforms.uWakeCount.value = Y.wakeCount, X.update(n, r), le.uniforms.uRainCount.value = X.rainDropCount;
+		let v = X.fog * (1 - _);
+		if (p.fog.density = _c + X.fog * B, H.copy(h.horizon).lerp(V, .85 * v), xe) {
 			let e = m.camera.position.y, t = Math.min(1, Math.max(0, (xe.y - e) / xe.blend));
 			t > 0 && (Se.copy(xe.color).multiplyScalar(.25 + .75 * _), p.fog.density = p.fog.density + (xe.density - p.fog.density) * t, H.lerp(Se, t)), ve.visible = t > 0, t > 0 && _e.color.copy(Se).lerp(h.sky, .35 * _), t > 0 && h.toonFloor.lerp(Ce.copy(Se).multiplyScalar(xe.floorMul), t), Te = t;
 			let n = t > .6;
-			n !== Xe && (Xe = n, Qe());
+			n !== Ye && (Ye = n, Ze());
 		}
-		if (p.fog.color.copy(H), f.setClearColor(H, 1), Vt.value = Y.fog, he.material.uniforms.uFogAmt.value = .7 * Y.fog, Rt.value = Y.snow, zt.value = Y.cloud * .55, Bt.x += n * .018, Bt.y += n * .009, Ht.value += (a - Ht.value) * Math.min(1, n * 1.5), tn.value = r, nn.value = .035 + .05 * l, Ve.update(n, r, h, Y), ct && At.update(n, r, h), Nt.update(Wt ? Wt.obj.position : null, n), Ut.visible = !ct, Wt && !ct && Wt.update(n, r, h), Gt && !ct) {
+		if (p.fog.color.copy(H), f.setClearColor(H, 1), Vt.value = X.fog, he.material.uniforms.uFogAmt.value = .7 * X.fog, Rt.value = X.snow, zt.value = X.cloud * .55, Bt.x += n * .018, Bt.y += n * .009, Ht.value += (a - Ht.value) * Math.min(1, n * 1.5), tn.value = r, nn.value = .035 + .05 * l, Be.update(n, r, h, X), ct && At.update(n, r, h), Nt.update(Wt ? Wt.obj.position : null, n), Ut.visible = !ct, Wt && !ct && Wt.update(n, r, h), Gt && !ct) {
 			let e = h.sunArc.y, t = Math.max(0, Math.min(1, (-e - -.05) / .22999999999999998));
 			Gt.update(t * t * (3 - 2 * t), r, !!(te && te.matches));
 		}
 		ct && Xt.step(n), ct && Zt.update(n, r, h, {
-			wind: .6 * Y.cloud,
+			wind: .6 * X.cloud,
 			qualityLevel: window.__quality && window.__quality.level || 0
 		});
 		let y = K(), b = y.kind === "pixel" || y.kind === "blend" ? "pixel" : t.vector ? "vector" : y.kind === "toon" ? "charm" : "realistic";
-		We.update(n, r, h, Y, b, m.camera);
+		Ue.update(n, r, h, X, b, m.camera);
 		let x = 0, S = 0, C = 0, w = .02, T = 99, E = 0;
 		if (re) {
 			let t = Hn.active && Hn.craft ? Hn.craft.pilot.getTransform() : Wt && !ct && Wt.followable ? Wt.followable.pilot.getTransform() : null;
 			if (t) {
 				let n = t.x, r = t.z;
-				(ct ? zn(n, r) === 0 : Math.abs(n) <= 28 / 2 && Math.abs(r) <= 28 / 2 && !Re.isLand(n, r)) && (S = n / 28 + .5, C = .5 - r / 28, T = t.y, E = T >= 0 ? e.MathUtils.clamp(1 - T / 3, 0, 1) ** 2 : 0, t.crossingT > .999 && t.crossing && t.crossing.endsWith(">water") && t.crossFrom === "air" ? (x = .1, w = .03) : E > 0 && (x = -.035 * E, w = .018 + .014 * e.MathUtils.clamp(T / 3, 0, 1)));
+				(ct ? zn(n, r) === 0 : Math.abs(n) <= 28 / 2 && Math.abs(r) <= 28 / 2 && !Le.isLand(n, r)) && (S = n / 28 + .5, C = .5 - r / 28, T = t.y, E = T >= 0 ? e.MathUtils.clamp(1 - T / 3, 0, 1) ** 2 : 0, t.crossingT > .999 && t.crossing && t.crossing.endsWith(">water") && t.crossFrom === "air" ? (x = .1, w = .03) : E > 0 && (x = -.035 * E, w = .018 + .014 * e.MathUtils.clamp(T / 3, 0, 1)));
 			}
 			le.uniforms.uWash.value.set(S, C, x, w);
 		}
@@ -9857,14 +9857,14 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		renderCityPipeline: cr,
 		renderCityBeautyTo: or,
 		prewarm: lr,
-		windowGlow: Ie,
-		landmarkFactory: Le,
-		city: Re,
-		cityLife: ze,
-		waterLife: J,
-		weatherRig: Y,
-		clouds: Ve,
-		inspector: Ue,
+		windowGlow: Fe,
+		landmarkFactory: Ie,
+		city: Le,
+		cityLife: Re,
+		waterLife: Y,
+		weatherRig: X,
+		clouds: Be,
+		inspector: He,
 		world: jn,
 		catalog: Mn,
 		editor: Nn,
@@ -9875,7 +9875,7 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			return Wt ? Wt.followable : null;
 		},
 		get pilotables() {
-			return Ue.pilotables;
+			return He.pilotables;
 		},
 		grabRT: de,
 		card: pe,
@@ -9905,16 +9905,16 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 		get waterEnabled() {
 			return yt;
 		},
-		setCloudsEnabled: (e) => Ve.setEnabled(e),
-		setCloudAltitude: (e) => Ve.setAltitude(e),
-		setWeatherKind: (e) => Y.setKind(e),
+		setCloudsEnabled: (e) => Be.setEnabled(e),
+		setCloudAltitude: (e) => Be.setAltitude(e),
+		setWeatherKind: (e) => X.setKind(e),
 		get weatherKind() {
-			return Y.kind;
+			return X.kind;
 		},
-		setWeatherEaseScale: (e) => Y.setEaseScale(e),
-		setSunCore: (e) => We.setSunCore(e),
-		setEnvSegments: nt,
-		setDayFillBoost: it,
+		setWeatherEaseScale: (e) => X.setEaseScale(e),
+		setSunCore: (e) => Ue.setSunCore(e),
+		setEnvSegments: tt,
+		setDayFillBoost: rt,
 		setSeabedTint: (e) => {
 			me.set(e);
 		},
@@ -9940,10 +9940,10 @@ function vc(t, { demo: n = !1, citySeed: r = 0, profileIndex: i = 0, cityProfile
 			return !!xe;
 		},
 		waterHeightAt: zn,
-		hillaire: Ke,
+		hillaire: Ge,
 		setSunException: Et,
 		get cloudsEnabled() {
-			return Ve.enabled;
+			return Be.enabled;
 		},
 		setChromaScale: St,
 		setGradeCool: wt,
@@ -12388,39 +12388,39 @@ function Fl({ controls: e, state: t, show: n, coarse: r }) {
 		"1-bit": "1-bit"
 	}, Oe = s("Era", () => e.era(), "Cycle the pixel era (B): native → GB → 8-bit → 16-bit → Modern"), ke = document.createElement("input");
 	ke.type = "range", ke.min = "0", ke.max = "1", ke.step = "0.01", ke.title = "Time of day", ke.setAttribute("aria-label", "Time of day");
-	let Ae = !1;
+	let J = !1;
 	ke.addEventListener("pointerdown", () => {
-		Ae = !0;
+		J = !0;
 	}), ke.addEventListener("pointerup", () => {
-		Ae = !1;
+		J = !1;
 	}), ke.addEventListener("pointercancel", () => {
-		Ae = !1;
+		J = !1;
 	}), ke.addEventListener("input", () => e.time(parseFloat(ke.value)));
-	let je = s("▶", () => e.auto(), "Play/pause day cycle (9)"), Me = document.createElement("div");
-	Me.style.cssText = "display:flex;align-items:center;gap:6px;";
-	let Ne = document.createElement("span");
-	Ne.className = "lbl", Ne.textContent = "Day", Me.append(Ne, ke);
-	let Pe = document.createElement("input");
-	Pe.type = "range", Pe.min = "0", Pe.max = "100", Pe.step = "1", Pe.value = "33", Pe.title = "Day-cycle speed", Pe.setAttribute("aria-label", "Day-cycle speed");
+	let Ae = s("▶", () => e.auto(), "Play/pause day cycle (9)"), je = document.createElement("div");
+	je.style.cssText = "display:flex;align-items:center;gap:6px;";
+	let Me = document.createElement("span");
+	Me.className = "lbl", Me.textContent = "Day", je.append(Me, ke);
+	let Ne = document.createElement("input");
+	Ne.type = "range", Ne.min = "0", Ne.max = "100", Ne.step = "1", Ne.value = "33", Ne.title = "Day-cycle speed", Ne.setAttribute("aria-label", "Day-cycle speed");
+	let Pe = document.createElement("span");
+	Pe.className = "lbl", Pe.textContent = "Speed";
 	let Fe = document.createElement("span");
-	Fe.className = "lbl", Fe.textContent = "Speed";
-	let Ie = document.createElement("span");
-	Ie.className = "lbl";
-	function Le() {
-		let t = 600 * (2 / 600) ** (parseFloat(Pe.value) / 100);
-		e.pace && e.pace(t), Ie.textContent = t < 60 ? `${Math.round(t)}s/day` : `${(t / 60).toFixed(1)}min/day`;
+	Fe.className = "lbl";
+	function Ie() {
+		let t = 600 * (2 / 600) ** (parseFloat(Ne.value) / 100);
+		e.pace && e.pace(t), Fe.textContent = t < 60 ? `${Math.round(t)}s/day` : `${(t / 60).toFixed(1)}min/day`;
 	}
-	Pe.addEventListener("input", Le);
-	let Re = document.createElement("div");
-	Re.style.cssText = "display:flex;align-items:center;gap:6px;", Re.append(Fe, Pe, Ie), e.pace && Le();
-	let ze = s("☀ Shadows", () => e.shadows && e.shadows(), "Sun shadows on/off (H)"), Be = s("◐ Theme", () => e.theme && e.theme(), "Swap the UI palette: ink/gold ↔ terminal (P)"), J = document.createElement("div");
-	J.className = "vui-env", J.id = "vui-env-panel", J.setAttribute("role", "group"), J.setAttribute("aria-label", "Environment and view settings");
-	let Y = s("⚙ More ▾", () => {
-		let e = J.classList.toggle("open");
-		Y.setAttribute("aria-expanded", String(e));
+	Ne.addEventListener("input", Ie);
+	let Le = document.createElement("div");
+	Le.style.cssText = "display:flex;align-items:center;gap:6px;", Le.append(Pe, Ne, Fe), e.pace && Ie();
+	let Re = s("☀ Shadows", () => e.shadows && e.shadows(), "Sun shadows on/off (H)"), ze = s("◐ Theme", () => e.theme && e.theme(), "Swap the UI palette: ink/gold ↔ terminal (P)"), Y = document.createElement("div");
+	Y.className = "vui-env", Y.id = "vui-env-panel", Y.setAttribute("role", "group"), Y.setAttribute("aria-label", "Environment and view settings");
+	let X = s("⚙ More ▾", () => {
+		let e = Y.classList.toggle("open");
+		X.setAttribute("aria-expanded", String(e));
 	}, "Environment & view: day/night play · weather · season · shadows · theme");
-	Y.setAttribute("aria-expanded", "false"), Y.setAttribute("aria-controls", "vui-env-panel");
-	let Ve = c([
+	X.setAttribute("aria-expanded", "false"), X.setAttribute("aria-controls", "vui-env-panel");
+	let Be = c([
 		[
 			"Iso",
 			"iso",
@@ -12436,12 +12436,12 @@ function Fl({ controls: e, state: t, show: n, coarse: r }) {
 			"persp",
 			() => e.cam("persp")
 		]
-	]), He = s("ⓘ", () => {
+	]), Ve = s("ⓘ", () => {
 		let e = o.classList.toggle("open");
-		He.setAttribute("aria-expanded", String(e));
+		Ve.setAttribute("aria-expanded", String(e));
 	}, "All keys");
-	He.setAttribute("aria-expanded", "false"), He.setAttribute("aria-controls", "vui-info-panel");
-	let Ue = s("⌄", () => ut(!0), "Hide controls — watch unobstructed (M)"), We = Nl({ commands: [
+	Ve.setAttribute("aria-expanded", "false"), Ve.setAttribute("aria-controls", "vui-info-panel");
+	let He = s("⌄", () => ut(!0), "Hide controls — watch unobstructed (M)"), Ue = Nl({ commands: [
 		{
 			group: "Modes",
 			label: "Go to City",
@@ -12664,7 +12664,7 @@ function Fl({ controls: e, state: t, show: n, coarse: r }) {
 			shortcut: "",
 			run: () => o.classList.add("open")
 		}
-	] }), Ge = s("⌘K", () => We.open(), "Command palette — run anything (⌘K / Ctrl-K)"), Ke = c([
+	] }), We = s("⌘K", () => Ue.open(), "Command palette — run anything (⌘K / Ctrl-K)"), Ge = c([
 		[
 			"City",
 			"city",
@@ -12686,39 +12686,39 @@ function Fl({ controls: e, state: t, show: n, coarse: r }) {
 			() => e.mode("hoard")
 		]
 	]);
-	Ke.btns[0].title = "City — the living skyline", Ke.btns[1].title = "World — the procedural terrain editor", Ke.btns[2].title = "Office — dive into the building", Ke.btns[3].title = "Hoard — the survival game";
-	let qe = document.createElement("div");
-	qe.className = "vui-more", qe.id = "vui-more-panel";
-	let Je = s("More", () => {
-		let e = qe.classList.toggle("open");
-		Je.setAttribute("aria-expanded", String(e)), ft();
+	Ge.btns[0].title = "City — the living skyline", Ge.btns[1].title = "World — the procedural terrain editor", Ge.btns[2].title = "Office — dive into the building", Ge.btns[3].title = "Hoard — the survival game";
+	let Ke = document.createElement("div");
+	Ke.className = "vui-more", Ke.id = "vui-more-panel";
+	let qe = s("More", () => {
+		let e = Ke.classList.toggle("open");
+		qe.setAttribute("aria-expanded", String(e)), ft();
 	}, "More controls");
-	if (Je.setAttribute("aria-expanded", "false"), Je.setAttribute("aria-controls", "vui-more-panel"), r) {
-		a.append(Ke.seg, S, je, Te.seg, Ge, Je, Ue);
+	if (qe.setAttribute("aria-expanded", "false"), qe.setAttribute("aria-controls", "vui-more-panel"), r) {
+		a.append(Ge.seg, S, Ae, Te.seg, We, qe, He);
 		let e = document.createElement("div");
-		e.style.cssText = "display:flex;align-items:center;gap:6px;", e.append(Ne, ke), qe.append(d, f, we, T, V, E, D, h, g, ze, Be, y, x, Ee, Oe, Ve.seg, e);
-	} else a.append(Ke.seg, St(), d, f, y, x, S, St(), T, V, E, D, St(), Te.seg, we, Ee, Oe, St(), Me, Y, St(), Ve.seg, Ge, He, St(), Ue), J.append(je, Re, h, g, ze, Be);
+		e.style.cssText = "display:flex;align-items:center;gap:6px;", e.append(Me, ke), Ke.append(d, f, we, T, V, E, D, h, g, Re, ze, y, x, Ee, Oe, Be.seg, e);
+	} else a.append(Ge.seg, St(), d, f, y, x, S, St(), T, V, E, D, St(), Te.seg, we, Ee, Oe, St(), je, X, St(), Be.seg, We, Ve, St(), He), Y.append(Ae, Le, h, g, Re, ze);
+	let Je = document.createElement("div");
+	Je.className = "vui-inspect";
 	let Ye = document.createElement("div");
-	Ye.className = "vui-inspect";
+	Ye.className = "ik";
 	let Xe = document.createElement("div");
-	Xe.className = "ik";
+	Xe.className = "it";
 	let Ze = document.createElement("div");
-	Ze.className = "it";
+	Ze.className = "ii";
 	let Qe = document.createElement("div");
-	Qe.className = "ii";
-	let $e = document.createElement("div");
-	$e.className = "ir";
-	let et = s("▸ Next", () => e.inspectNext && e.inspectNext(), "Follow the next object (Tab)"), tt = s("✕", () => e.inspect(), "Exit inspect (Esc)");
-	$e.append(et, tt), Ye.append(Xe, Ze, Qe, $e);
-	let nt = document.createElement("button");
-	nt.className = "vui-show", nt.innerHTML = "⌃ Controls", nt.title = "Show controls (M)", nt.addEventListener("click", () => ut(!1));
+	Qe.className = "ir";
+	let $e = s("▸ Next", () => e.inspectNext && e.inspectNext(), "Follow the next object (Tab)"), et = s("✕", () => e.inspect(), "Exit inspect (Esc)");
+	Qe.append($e, et), Je.append(Ye, Xe, Ze, Qe);
+	let tt = document.createElement("button");
+	tt.className = "vui-show", tt.innerHTML = "⌃ Controls", tt.title = "Show controls (M)", tt.addEventListener("click", () => ut(!1));
+	let nt = document.createElement("div");
+	nt.className = "vui-style", a.setAttribute("role", "toolbar"), a.setAttribute("aria-label", "Global controls"), O.setAttribute("role", "toolbar"), O.setAttribute("aria-label", "Tools"), O.setAttribute("aria-orientation", "vertical"), j.setAttribute("role", "group"), j.setAttribute("aria-label", "Tool properties"), ce.setAttribute("role", "group"), ce.setAttribute("aria-label", "Save and load worlds");
 	let rt = document.createElement("div");
-	rt.className = "vui-style", a.setAttribute("role", "toolbar"), a.setAttribute("aria-label", "Global controls"), O.setAttribute("role", "toolbar"), O.setAttribute("aria-label", "Tools"), O.setAttribute("aria-orientation", "vertical"), j.setAttribute("role", "group"), j.setAttribute("aria-label", "Tool properties"), ce.setAttribute("role", "group"), ce.setAttribute("aria-label", "Save and load worlds");
-	let it = document.createElement("div");
-	it.className = "vui-live", it.setAttribute("role", "status"), it.setAttribute("aria-live", "polite"), document.body.append(o, qe, a, nt, rt, Ye, O, j, ce, it, J);
-	let at = n, ot = null, X = null;
-	if (r && at) {
-		ot = document.createElement("div"), ot.className = "vui-sheet", ot.setAttribute("role", "group"), ot.setAttribute("aria-label", "Editor tools and properties");
+	rt.className = "vui-live", rt.setAttribute("role", "status"), rt.setAttribute("aria-live", "polite"), document.body.append(o, Ke, a, tt, nt, Je, O, j, ce, rt, Y);
+	let it = n, at = null, ot = null;
+	if (r && it) {
+		at = document.createElement("div"), at.className = "vui-sheet", at.setAttribute("role", "group"), at.setAttribute("aria-label", "Editor tools and properties");
 		let e = document.createElement("button");
 		e.className = "vui-sheet-grip", e.title = "Expand / collapse", e.setAttribute("aria-label", "Expand or collapse the editor sheet"), e.setAttribute("aria-expanded", "true");
 		let t = document.createElement("div");
@@ -12726,32 +12726,32 @@ function Fl({ controls: e, state: t, show: n, coarse: r }) {
 		let n = document.createElement("div");
 		n.className = "vui-sheet-tools";
 		let r = document.createElement("div");
-		r.className = "vui-sheet-body", n.append(O), r.append(j), ot.append(e, t, n, r), e.addEventListener("click", () => {
+		r.className = "vui-sheet-body", n.append(O), r.append(j), at.append(e, t, n, r), e.addEventListener("click", () => {
 			navigator.vibrate?.(8);
-			let t = ot.classList.toggle("peek");
+			let t = at.classList.toggle("peek");
 			e.setAttribute("aria-expanded", String(!t));
-		}), document.body.append(ot), X = document.createElement("button"), X.className = "vui-fab on", X.textContent = "⌘K", X.title = "Command palette", X.setAttribute("aria-label", "Open the command palette"), X.addEventListener("click", () => {
-			navigator.vibrate?.(10), We.open();
-		}), document.body.append(X);
+		}), document.body.append(at), ot = document.createElement("button"), ot.className = "vui-fab on", ot.textContent = "⌘K", ot.title = "Command palette", ot.setAttribute("aria-label", "Open the command palette"), ot.addEventListener("click", () => {
+			navigator.vibrate?.(10), Ue.open();
+		}), document.body.append(ot);
 	}
 	let st = !1;
 	ut(r);
 	let Z = null;
 	function ct() {
 		let e = t();
-		Te.btns.forEach((t) => t.classList.toggle("on", t.dataset.val === e.post)), Ee.classList.toggle("on", !!e.vector), Ve.btns.forEach((t) => t.classList.toggle("on", t.dataset.val === e.cam)), h.textContent = p[e.weather] || "Clear", h.classList.toggle("on", e.weather !== "clear"), g.textContent = m[e.season] || "Spring", g.classList.toggle("on", (e.season || 0) > 0), _.textContent = e.office ? "Exit" : "Office", _.classList.toggle("on", !!e.office), y.textContent = v[e.officeSkin] || "Skin", y.classList.toggle("on", e.officeSkin && e.officeSkin !== "3d"), x.textContent = b[e.officeProps] || "Props", x.classList.toggle("on", e.officeProps === "painted" && e.officeSkin && e.officeSkin !== "3d"), je.textContent = e.auto ? "❚❚" : "▶", je.classList.toggle("on", e.auto), Oe.textContent = De[e.era] || "Era", Oe.classList.toggle("on", e.era && e.era !== "native"), S.textContent = e.inspect ? "Exit" : "Inspect", S.classList.toggle("on", !!e.inspect), w.textContent = e.world ? "Exit" : "World", w.classList.toggle("on", !!e.world), E.textContent = C[e.worldPreset] || "Valley", T.style.display = e.world ? "" : "none", V.style.display = e.world ? "" : "none", E.style.display = e.world ? "" : "none", D.style.display = e.world ? "" : "none";
+		Te.btns.forEach((t) => t.classList.toggle("on", t.dataset.val === e.post)), Ee.classList.toggle("on", !!e.vector), Be.btns.forEach((t) => t.classList.toggle("on", t.dataset.val === e.cam)), h.textContent = p[e.weather] || "Clear", h.classList.toggle("on", e.weather !== "clear"), g.textContent = m[e.season] || "Spring", g.classList.toggle("on", (e.season || 0) > 0), _.textContent = e.office ? "Exit" : "Office", _.classList.toggle("on", !!e.office), y.textContent = v[e.officeSkin] || "Skin", y.classList.toggle("on", e.officeSkin && e.officeSkin !== "3d"), x.textContent = b[e.officeProps] || "Props", x.classList.toggle("on", e.officeProps === "painted" && e.officeSkin && e.officeSkin !== "3d"), Ae.textContent = e.auto ? "❚❚" : "▶", Ae.classList.toggle("on", e.auto), Oe.textContent = De[e.era] || "Era", Oe.classList.toggle("on", e.era && e.era !== "native"), S.textContent = e.inspect ? "Exit" : "Inspect", S.classList.toggle("on", !!e.inspect), w.textContent = e.world ? "Exit" : "World", w.classList.toggle("on", !!e.world), E.textContent = C[e.worldPreset] || "Valley", T.style.display = e.world ? "" : "none", V.style.display = e.world ? "" : "none", E.style.display = e.world ? "" : "none", D.style.display = e.world ? "" : "none";
 		let n = e.currentMode, r = n === "city", i = n === "world", a = n === "office", o = r || i, s = e.audienceModes || [
 			"city",
 			"world",
 			"office",
 			"hoard"
 		];
-		Ke.btns.forEach((e) => {
+		Ge.btns.forEach((e) => {
 			let t = e.dataset.val;
 			e.style.display = s.includes(t) ? "" : "none", e.classList.toggle("on", t === n);
 		}), d.style.display = r ? "" : "none", f.style.display = r ? "" : "none", S.style.display = r ? "" : "none", y.style.display = a ? "" : "none", x.style.display = a ? "" : "none", h.style.display = o ? "" : "none", g.style.display = o ? "" : "none";
 		let c = i ? e.sculpt ? "World editor — editing" : "World" : a ? "Office" : n === "hoard" ? "Hoard" : "City";
-		c !== Z && (Z = c, it.textContent = `${c} mode — controls updated`), ze.classList.toggle("on", !!e.shadows), Be.classList.toggle("on", !!e.theme), D.classList.toggle("on", !!e.sculpt), A(e.tools), O.classList.toggle("open", !!e.sculpt), k && k.forEach((t) => t.classList.toggle("on", t.dataset.id === e.editTool)), j.classList.toggle("open", !!e.sculpt), ot && ot.classList.toggle("on", !!e.sculpt);
+		c !== Z && (Z = c, rt.textContent = `${c} mode — controls updated`), Re.classList.toggle("on", !!e.shadows), ze.classList.toggle("on", !!e.theme), D.classList.toggle("on", !!e.sculpt), A(e.tools), O.classList.toggle("open", !!e.sculpt), k && k.forEach((t) => t.classList.toggle("on", t.dataset.id === e.editTool)), j.classList.toggle("open", !!e.sculpt), at && at.classList.toggle("on", !!e.sculpt);
 		let l = e.editTool, u = l === "paint", H = l === "scatter", se = l === "place", le = l === "sculpt";
 		M.textContent = {
 			place: "✚ Place",
@@ -12770,70 +12770,70 @@ function Fl({ controls: e, state: t, show: n, coarse: r }) {
 				t.value = e, t.textContent = e, de.append(t);
 			}
 		}
-		ye.textContent = e.saveStatus || "", we.classList.toggle("on", !!e.realistic), Ae || (ke.value = String(e.t));
+		ye.textContent = e.saveStatus || "", we.classList.toggle("on", !!e.realistic), J || (ke.value = String(e.t));
 	}
 	ct();
 	let lt = setInterval(ct, 200);
 	function ut(e) {
-		if (!at) {
-			a.style.display = "none", nt.classList.remove("on"), o.classList.remove("open"), qe.classList.remove("open"), rt.classList.remove("on"), He.setAttribute("aria-expanded", "false"), Je.setAttribute("aria-expanded", "false");
+		if (!it) {
+			a.style.display = "none", tt.classList.remove("on"), o.classList.remove("open"), Ke.classList.remove("open"), nt.classList.remove("on"), Ve.setAttribute("aria-expanded", "false"), qe.setAttribute("aria-expanded", "false");
 			return;
 		}
-		st = e, a.style.display = e ? "none" : "flex", nt.classList.toggle("on", e), e && (o.classList.remove("open"), qe.classList.remove("open"), rt.classList.remove("on"), He.setAttribute("aria-expanded", "false"), Je.setAttribute("aria-expanded", "false"));
+		st = e, a.style.display = e ? "none" : "flex", tt.classList.toggle("on", e), e && (o.classList.remove("open"), Ke.classList.remove("open"), nt.classList.remove("on"), Ve.setAttribute("aria-expanded", "false"), qe.setAttribute("aria-expanded", "false"));
 	}
 	function dt() {
 		ut(!st);
 	}
 	function ft() {
-		if (!qe.classList.contains("open")) return;
+		if (!Ke.classList.contains("open")) return;
 		let e = a.getBoundingClientRect();
-		qe.style.top = Math.round(e.bottom + 8) + "px", qe.style.bottom = "auto";
+		Ke.style.top = Math.round(e.bottom + 8) + "px", Ke.style.bottom = "auto";
 	}
 	let pt = () => ft();
 	window.addEventListener("resize", pt);
 	let mt = null, ht = null;
 	function gt(e) {
-		if (!at || st) {
-			rt.classList.remove("on"), mt = null;
+		if (!it || st) {
+			nt.classList.remove("on"), mt = null;
 			return;
 		}
 		if (!e) {
-			rt.classList.remove("on"), mt = "";
+			nt.classList.remove("on"), mt = "";
 			return;
 		}
-		e !== mt && (mt = e, rt.textContent = e, rt.classList.add("on"), clearTimeout(ht), ht = setTimeout(() => rt.classList.remove("on"), 2e3));
+		e !== mt && (mt = e, nt.textContent = e, nt.classList.add("on"), clearTimeout(ht), ht = setTimeout(() => nt.classList.remove("on"), 2e3));
 	}
 	let _t = null;
 	function vt(e) {
-		if (!at || !e) {
-			Ye.classList.remove("open"), _t = null;
+		if (!it || !e) {
+			Je.classList.remove("open"), _t = null;
 			return;
 		}
 		let t = e.hint ? `hint:${e.hint}` : `${e.kind}|${e.info}`;
-		t !== _t && (_t = t, e.hint ? (Xe.textContent = "INSPECT", Ze.textContent = "Free-fly", Qe.textContent = e.hint, et.style.display = "") : (Xe.textContent = e.kind, Ze.textContent = e.label || e.kind, Qe.textContent = e.info || "", et.style.display = ""), Ye.classList.add("open"));
+		t !== _t && (_t = t, e.hint ? (Ye.textContent = "INSPECT", Xe.textContent = "Free-fly", Ze.textContent = e.hint, $e.style.display = "") : (Ye.textContent = e.kind, Xe.textContent = e.label || e.kind, Ze.textContent = e.info || "", $e.style.display = ""), Je.classList.add("open"));
 	}
 	[
 		a,
 		o,
-		qe,
+		Ke,
+		tt,
 		nt,
-		rt,
-		Ye,
+		Je,
 		O,
 		j,
 		ce,
-		J,
-		ot,
+		Y,
+		at,
 		i
 	].forEach((e) => e && e.querySelectorAll && e.querySelectorAll("button[title]:not([aria-label])").forEach((e) => e.setAttribute("aria-label", e.title)));
 	function yt(e) {
-		it && e && (it.textContent = "", it.textContent = String(e));
+		rt && e && (rt.textContent = "", rt.textContent = String(e));
 	}
 	function bt(e) {
-		X && X.classList.toggle("on", !!e);
+		ot && ot.classList.toggle("on", !!e);
 	}
 	function xt(e) {
-		nt && nt.classList.toggle("on", !!e);
+		tt && tt.classList.toggle("on", !!e);
 	}
 	return {
 		toggle: dt,
@@ -12845,7 +12845,7 @@ function Fl({ controls: e, state: t, show: n, coarse: r }) {
 		setFabVisible: bt,
 		setPillVisible: xt,
 		destroy() {
-			clearInterval(lt), window.removeEventListener("resize", pt), a.remove(), o.remove(), qe.remove(), nt.remove(), rt.remove(), Ye.remove(), O.remove(), j.remove(), ce.remove(), it.remove(), J.remove(), ot && ot.remove(), X && X.remove(), We.destroy(), i.remove(), clearTimeout(ht);
+			clearInterval(lt), window.removeEventListener("resize", pt), a.remove(), o.remove(), Ke.remove(), tt.remove(), nt.remove(), Je.remove(), O.remove(), j.remove(), ce.remove(), rt.remove(), Y.remove(), at && at.remove(), ot && ot.remove(), Ue.destroy(), i.remove(), clearTimeout(ht);
 		}
 	};
 	function St() {
@@ -13549,14 +13549,14 @@ function Qu({ url: t, gltf: n, states: r, loopOnce: i, fade: a, extraClips: o = 
 				fy: 0,
 				fz: 0
 			};
-		}, ge = q(d.footL), _e = q(d.footR), ve = ge.foot && ge.foot.parent && _e.foot && _e.foot.parent ? [ge, _e] : null, ye = null, be = 0, xe = 0, Se = 0, Ce = 0, we = 1, Te = 0, Ee = cu(), De = cu(), Oe = ge, ke = _e, Ae = {
+		}, ge = q(d.footL), _e = q(d.footR), ve = ge.foot && ge.foot.parent && _e.foot && _e.foot.parent ? [ge, _e] : null, ye = null, be = 0, xe = 0, Se = 0, Ce = 0, we = 1, Te = 0, Ee = cu(), De = cu(), Oe = ge, ke = _e, J = {
 			headLook: { ...Au.headLook },
 			hitReact: { ...Au.hitReact },
 			recoil: { ...Au.recoil },
 			swing: { ...Au.swing },
 			lunge: { ...Au.lunge },
 			reload: { ...Au.reload }
-		}, je = {
+		}, Ae = {
 			object: n,
 			position: n.position,
 			quaternion: n.quaternion,
@@ -13589,7 +13589,7 @@ function Qu({ url: t, gltf: n, states: r, loopOnce: i, fade: a, extraClips: o = 
 				M = Math.cos(r) * e - Math.sin(r) * t >= 0 ? 1 : -1;
 			},
 			setLayerParams(e = {}) {
-				e.headLook && Object.assign(Ae.headLook, e.headLook), e.hitReact && Object.assign(Ae.hitReact, e.hitReact), e.recoil && Object.assign(Ae.recoil, e.recoil), e.swing && Object.assign(Ae.swing, e.swing), e.lunge && Object.assign(Ae.lunge, e.lunge), e.reload && Object.assign(Ae.reload, e.reload);
+				e.headLook && Object.assign(J.headLook, e.headLook), e.hitReact && Object.assign(J.hitReact, e.hitReact), e.recoil && Object.assign(J.recoil, e.recoil), e.swing && Object.assign(J.swing, e.swing), e.lunge && Object.assign(J.lunge, e.lunge), e.reload && Object.assign(J.reload, e.reload);
 			},
 			recoil() {
 				N = 0;
@@ -13607,7 +13607,7 @@ function Qu({ url: t, gltf: n, states: r, loopOnce: i, fade: a, extraClips: o = 
 				return I >= 0;
 			},
 			reloadDur() {
-				return Ae.reload.dur;
+				return J.reload.dur;
 			},
 			setLocomotion(t, n = null) {
 				if (z = t < 0 ? 0 : t > 1 ? 1 : t, V = n, !R) {
@@ -13719,8 +13719,8 @@ function Qu({ url: t, gltf: n, states: r, loopOnce: i, fade: a, extraClips: o = 
 				return t.scale.setScalar(r / s), t.position.set(i[0], i[1], i[2]), t.rotation.set(a[0], a[1], a[2]), o.add(t), !0;
 			},
 			_applyLayers(e) {
-				if (K && (ne = J(ne, te, te > 0 ? 14 : 9, e), K.setEffectiveWeight(ne), ne < .01 && te === 0 && (K.stop(), K = null, ee = null, ne = 0)), R) {
-					W && U && H.time >= U.duration - .02 && (W = !1), G = J(G, +!!W, W ? 20 : 9, e), H && (H.setEffectiveWeight(G), G < .02 && !W && (H.stop(), H = null, U = null)), B = J(B, z, h, e);
+				if (K && (ne = Y(ne, te, te > 0 ? 14 : 9, e), K.setEffectiveWeight(ne), ne < .01 && te === 0 && (K.stop(), K = null, ee = null, ne = 0)), R) {
+					W && U && H.time >= U.duration - .02 && (W = !1), G = Y(G, +!!W, W ? 20 : 9, e), H && (H.setEffectiveWeight(G), G < .02 && !W && (H.stop(), H = null, U = null)), B = Y(B, z, h, e);
 					let t = B, r = Math.max(0, 1 - G - ne), i = 0, a = 0, o = 0;
 					t < .5 ? (i = 1 - t * 2, a = t * 2) : (a = 2 - t * 2, o = t * 2 - 1);
 					let s = g > 0 && V != null, c = n.scale.x || 1, l = s ? eu(V, g * c, v, y) : .85 + .5 * t, u = s ? eu(V, _ * c, v, y) : 1;
@@ -13728,76 +13728,76 @@ function Qu({ url: t, gltf: n, states: r, loopOnce: i, fade: a, extraClips: o = 
 				}
 				if (ce) {
 					let t = +(!se && !W && !ye && z < .08);
-					if (le = J(le, t, t ? 2.4 : 6, e), le > .01) {
+					if (le = Y(le, t, t ? 2.4 : 6, e), le > .01) {
 						ue += e;
 						let t = le, n = Math.sin(ue * .7);
 						de && (Q.setFromAxisAngle(Ou, .85 * t), de.quaternion.multiply(Q)), O && (Q.setFromAxisAngle(Ou, .85 * t), O.quaternion.multiply(Q)), E && (Q.setFromAxisAngle(ku, n * .04 * t), E.quaternion.multiply(Q), Q.setFromAxisAngle(Ou, -.14 * t), E.quaternion.multiply(Q));
 					}
 				}
 				if (ye || be > .001) {
-					be = J(be, xe, xe > 0 ? 14 : 9, e), Se += e, fu(De, ye, lu(Ce, we), Se, Te);
+					be = Y(be, xe, xe > 0 ? 14 : 9, e), Se += e, fu(De, ye, lu(Ce, we), Se, Te);
 					let t = be;
 					for (let t = 0; t < su.length; t++) {
 						let n = su[t];
-						Ee[n] = J(Ee[n], De[n], 12, e);
+						Ee[n] = Y(Ee[n], De[n], 12, e);
 					}
 					t > .004 && (E && (Q.setFromAxisAngle(Ou, Ee.spineX * t), E.quaternion.multiply(Q), Q.setFromAxisAngle(ku, Ee.spineZ * t), E.quaternion.multiply(Q)), C && (Q.setFromAxisAngle(Ou, Ee.headX * t), C.quaternion.multiply(Q)), de && (Q.setFromAxisAngle(Ou, Ee.armLX * t), de.quaternion.multiply(Q), Q.setFromAxisAngle(ku, Ee.armLZ * t), de.quaternion.multiply(Q)), O && (Q.setFromAxisAngle(Ou, Ee.armRX * t), O.quaternion.multiply(Q), Q.setFromAxisAngle(ku, Ee.armRZ * t), O.quaternion.multiply(Q)), ie && (Q.setFromAxisAngle(Ou, Ee.foreRX * t), ie.quaternion.multiply(Q)), Oe.upleg && (Q.setFromAxisAngle(Ou, Ee.upLegLX * t), Oe.upleg.quaternion.multiply(Q), Q.setFromAxisAngle(ku, Ee.upLegLZ * t), Oe.upleg.quaternion.multiply(Q)), ke.upleg && (Q.setFromAxisAngle(Ou, Ee.upLegRX * t), ke.upleg.quaternion.multiply(Q), Q.setFromAxisAngle(ku, Ee.upLegRZ * t), ke.upleg.quaternion.multiply(Q)), Oe.knee && (Q.setFromAxisAngle(Ou, Ee.kneeLX * t), Oe.knee.quaternion.multiply(Q)), ke.knee && (Q.setFromAxisAngle(Ou, Ee.kneeRX * t), ke.knee.quaternion.multiply(Q)));
 				}
 				if (re != null && (Eu.setFromQuaternion(n.quaternion, "YXZ"), Eu.y += nu(re - Eu.y) * Math.min(1, e * 11), n.quaternion.setFromEuler(Eu)), se && O && ae) {
-					if (oe = J(oe, 1, 14, e), O.updateWorldMatrix(!0, !1), O.getWorldPosition(Cu), wu.set(ae.x - Cu.x, ae.y - Cu.y, ae.z - Cu.z), wu.lengthSq() > 1e-6 && (wu.normalize(), O.parent.getWorldQuaternion(xu), Su.setFromUnitVectors(Tu, wu), xu.invert().multiply(Su), O.quaternion.slerp(xu, oe), ie && (Q.setFromAxisAngle(Ou, -.4 * oe), ie.quaternion.multiply(Q)), E)) {
+					if (oe = Y(oe, 1, 14, e), O.updateWorldMatrix(!0, !1), O.getWorldPosition(Cu), wu.set(ae.x - Cu.x, ae.y - Cu.y, ae.z - Cu.z), wu.lengthSq() > 1e-6 && (wu.normalize(), O.parent.getWorldQuaternion(xu), Su.setFromUnitVectors(Tu, wu), xu.invert().multiply(Su), O.quaternion.slerp(xu, oe), ie && (Q.setFromAxisAngle(Ou, -.4 * oe), ie.quaternion.multiply(Q)), E)) {
 						Eu.setFromQuaternion(n.quaternion, "YXZ");
 						let e = nu(Math.atan2(ae.x - n.position.x, ae.z - n.position.z) - Eu.y);
 						Q.setFromAxisAngle(Du, e * .3 * oe), E.quaternion.multiply(Q);
 					}
-				} else oe > .01 && (oe = J(oe, 0, 8, e));
+				} else oe > .01 && (oe = Y(oe, 0, 8, e));
 				if (C && k) {
 					Eu.setFromQuaternion(n.quaternion, "YXZ");
-					let t = k.x - n.position.x, r = k.z - n.position.z, i = ou(Eu.y, t, r, Ae.headLook.cone) * Ae.headLook.weight;
-					A = J(A, i, Ae.headLook.speed, e), w ? (Q.setFromAxisAngle(Du, A * .4), w.quaternion.multiply(Q), Q.setFromAxisAngle(Du, A * .6), C.quaternion.multiply(Q)) : (Q.setFromAxisAngle(Du, A), C.quaternion.multiply(Q));
+					let t = k.x - n.position.x, r = k.z - n.position.z, i = ou(Eu.y, t, r, J.headLook.cone) * J.headLook.weight;
+					A = Y(A, i, J.headLook.speed, e), w ? (Q.setFromAxisAngle(Du, A * .4), w.quaternion.multiply(Q), Q.setFromAxisAngle(Du, A * .6), C.quaternion.multiply(Q)) : (Q.setFromAxisAngle(Du, A), C.quaternion.multiply(Q));
 				}
 				if (j >= 0) {
 					j += e;
-					let t = j / Ae.hitReact.dur;
+					let t = j / J.hitReact.dur;
 					if (t >= 1) j = -1;
 					else {
-						let e = ru(t) * Ae.hitReact.amp;
-						E && (Q.setFromAxisAngle(Ou, -e * Ae.hitReact.lean), E.quaternion.multiply(Q), Q.setFromAxisAngle(Du, e * Ae.hitReact.lean * .5 * M), E.quaternion.multiply(Q)), D && (Q.setFromAxisAngle(ku, e * Ae.hitReact.arm), D.quaternion.multiply(Q)), O && (Q.setFromAxisAngle(ku, -e * Ae.hitReact.arm), O.quaternion.multiply(Q));
+						let e = ru(t) * J.hitReact.amp;
+						E && (Q.setFromAxisAngle(Ou, -e * J.hitReact.lean), E.quaternion.multiply(Q), Q.setFromAxisAngle(Du, e * J.hitReact.lean * .5 * M), E.quaternion.multiply(Q)), D && (Q.setFromAxisAngle(ku, e * J.hitReact.arm), D.quaternion.multiply(Q)), O && (Q.setFromAxisAngle(ku, -e * J.hitReact.arm), O.quaternion.multiply(Q));
 					}
 				}
 				if (N >= 0 && O) {
 					N += e;
-					let t = N / Ae.recoil.dur;
+					let t = N / J.recoil.dur;
 					if (t >= 1) N = -1;
 					else {
-						let e = ru(t) * Ae.recoil.amp;
-						Q.setFromAxisAngle(Ou, -e * Ae.recoil.arm), O.quaternion.multiply(Q), E && (Q.setFromAxisAngle(Ou, -e * Ae.recoil.arm * .3), E.quaternion.multiply(Q));
+						let e = ru(t) * J.recoil.amp;
+						Q.setFromAxisAngle(Ou, -e * J.recoil.arm), O.quaternion.multiply(Q), E && (Q.setFromAxisAngle(Ou, -e * J.recoil.arm * .3), E.quaternion.multiply(Q));
 					}
 				}
 				if (P >= 0 && O) {
 					P += e;
-					let t = P / Ae.swing.dur;
+					let t = P / J.swing.dur;
 					if (t >= 1) P = -1;
 					else {
-						let e = iu(t) * Ae.swing.amp;
-						Q.setFromAxisAngle(Ou, e * Ae.swing.arm), O.quaternion.multiply(Q), E && (Q.setFromAxisAngle(Du, e * .3), E.quaternion.multiply(Q), Q.setFromAxisAngle(Ou, Math.max(0, e) * .22), E.quaternion.multiply(Q)), D && (Q.setFromAxisAngle(Ou, -e * Ae.swing.arm * .28), D.quaternion.multiply(Q));
+						let e = iu(t) * J.swing.amp;
+						Q.setFromAxisAngle(Ou, e * J.swing.arm), O.quaternion.multiply(Q), E && (Q.setFromAxisAngle(Du, e * .3), E.quaternion.multiply(Q), Q.setFromAxisAngle(Ou, Math.max(0, e) * .22), E.quaternion.multiply(Q)), D && (Q.setFromAxisAngle(Ou, -e * J.swing.arm * .28), D.quaternion.multiply(Q));
 					}
 				}
 				if (F >= 0 && E) {
 					F += e;
-					let t = F / Ae.lunge.dur;
+					let t = F / J.lunge.dur;
 					if (t >= 1) F = -1;
 					else {
-						let e = ru(t) * Ae.lunge.amp;
-						Q.setFromAxisAngle(Ou, e * Ae.lunge.lean), E.quaternion.multiply(Q), C && (Q.setFromAxisAngle(Ou, e * Ae.lunge.head), C.quaternion.multiply(Q));
+						let e = ru(t) * J.lunge.amp;
+						Q.setFromAxisAngle(Ou, e * J.lunge.lean), E.quaternion.multiply(Q), C && (Q.setFromAxisAngle(Ou, e * J.lunge.head), C.quaternion.multiply(Q));
 					}
 				}
 				if (I >= 0 && O) {
 					I += e;
-					let t = I / Ae.reload.dur;
+					let t = I / J.reload.dur;
 					if (t >= 1) I = -1;
 					else {
-						let e = au(t) * Ae.reload.amp;
-						Q.setFromAxisAngle(Ou, e * Ae.reload.arm), O.quaternion.multiply(Q), D && (Q.setFromAxisAngle(Ou, e * Ae.reload.off), D.quaternion.multiply(Q)), E && (Q.setFromAxisAngle(Ou, e * Ae.reload.lean), E.quaternion.multiply(Q));
+						let e = au(t) * J.reload.amp;
+						Q.setFromAxisAngle(Ou, e * J.reload.arm), O.quaternion.multiply(Q), D && (Q.setFromAxisAngle(Ou, e * J.reload.off), D.quaternion.multiply(Q)), E && (Q.setFromAxisAngle(Ou, e * J.reload.lean), E.quaternion.multiply(Q));
 					}
 				}
 				if (fe && pe && ve) {
@@ -13817,7 +13817,7 @@ function Qu({ url: t, gltf: n, states: r, loopOnce: i, fade: a, extraClips: o = 
 					let i = ve[0].lockOn || ve[1].lockOn, a = ve[0].fy <= ve[1].fy ? ve[0] : ve[1];
 					for (let t of ve) {
 						let o = t.fy - me < fe.plantBand, s = t.lockOn && Math.hypot(t.lx - n, t.lz - r) > fe.maxStride, c = t.lockOn ? o && !s : o && t === a && !i;
-						c && !t.lockOn ? (t.lockOn = !0, t.lx = t.fx, t.ly = t.fy, t.lz = t.fz) : !c && t.lockOn && (t.lockOn = !1), t.w = J(t.w, +!!t.lockOn, t.lockOn ? fe.lockRate : fe.unlockRate, e), t.w > .01 && (ju.set(t.fx + (t.lx - t.fx) * t.w, t.fy + (t.ly - t.fy) * t.w, t.fz + (t.lz - t.fz) * t.w), fe.kneeFollow && t.articulated ? Zu(t, ju.x, ju.y, ju.z) : (Nu.copy(t.foot.parent.matrixWorld).invert(), Mu.copy(ju).applyMatrix4(Nu), t.foot.position.copy(Mu)));
+						c && !t.lockOn ? (t.lockOn = !0, t.lx = t.fx, t.ly = t.fy, t.lz = t.fz) : !c && t.lockOn && (t.lockOn = !1), t.w = Y(t.w, +!!t.lockOn, t.lockOn ? fe.lockRate : fe.unlockRate, e), t.w > .01 && (ju.set(t.fx + (t.lx - t.fx) * t.w, t.fy + (t.ly - t.fy) * t.w, t.fz + (t.lz - t.fz) * t.w), fe.kneeFollow && t.articulated ? Zu(t, ju.x, ju.y, ju.z) : (Nu.copy(t.foot.parent.matrixWorld).invert(), Mu.copy(ju).applyMatrix4(Nu), t.foot.position.copy(Mu)));
 					}
 				}
 			},
@@ -13840,7 +13840,7 @@ function Qu({ url: t, gltf: n, states: r, loopOnce: i, fade: a, extraClips: o = 
 				e >= 0 && x.splice(e, 1);
 			}
 		};
-		return c.applyLayers = je._applyLayers, je;
+		return c.applyLayers = Ae._applyLayers, Ae;
 	}
 	function D(e) {
 		for (let t = 0; t < x.length; t++) {
@@ -14382,9 +14382,9 @@ var Kd = 1, qd = ["city", "world"], Jd = [
 	toon: 8,
 	none: 1
 }, $d = {
-	iso: Ge.ISOMETRIC,
-	dimetric: Ge.DIMETRIC,
-	persp: Ge.PERSPECTIVE
+	iso: We.ISOMETRIC,
+	dimetric: We.DIMETRIC,
+	persp: We.PERSPECTIVE
 }, ef = new Set([
 	"v",
 	"engine",
@@ -14566,9 +14566,9 @@ function cf({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposur
 		return Math.max(n, r, 1e-4) * o;
 	}
 	let N = (e, t) => {
-		D.azG += e, D.polG = Y(D.polG - t, d, f);
+		D.azG += e, D.polG = X(D.polG - t, d, f);
 	}, P = (e) => {
-		D.distG = Y(D.distG * e, O, k);
+		D.distG = X(D.distG * e, O, k);
 	};
 	function F() {
 		if (!b) return;
@@ -14576,7 +14576,7 @@ function cf({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposur
 		b.position.sub(r), v.position.y = t.min.y - r.y, _.target.position.set(0, 0, 0), A.copy(n), j = M(), O = j * l, k = Math.max(O + .01, j * u), D.dist = D.distG = j, D.target.set(0, A.y * s, 0);
 	}
 	function I(e) {
-		a && (D.azG += a * e), D.az = J(D.az, D.azG, e, 6), D.pol = J(D.pol, D.polG, e, 6), D.dist = J(D.dist, D.distG, e, 6);
+		a && (D.azG += a * e), D.az = Y(D.az, D.azG, e, 6), D.pol = Y(D.pol, D.polG, e, 6), D.dist = Y(D.dist, D.distG, e, 6);
 		let t = Math.sin(D.pol), n = Math.cos(D.pol);
 		m.position.set(D.target.x + D.dist * t * Math.sin(D.az), D.target.y + D.dist * n, D.target.z + D.dist * t * Math.cos(D.az)), m.lookAt(D.target);
 	}
@@ -14585,7 +14585,7 @@ function cf({ renderer: t, backdrop: n = "#efe9df", envIntensity: r = 1, exposur
 		let n = j;
 		j = M();
 		let r = n > 0 ? j / n : 1;
-		O = j * l, k = Math.max(O + .01, j * u), D.distG = Y(D.distG * r, O, k), D.dist = Y(D.dist * r, O, k);
+		O = j * l, k = Math.max(O + .01, j * u), D.distG = X(D.distG * r, O, k), D.dist = X(D.dist * r, O, k);
 	}
 	let R = {};
 	function z() {
@@ -15956,7 +15956,7 @@ function Vf({ color: t = 16758114, intensity: n = 6, distance: r = 12, decay: i 
 }
 //#endregion
 //#region ../../node_modules/three/examples/jsm/geometries/RoundedBoxGeometry.js
-var Hf = new Ie();
+var Hf = new Fe();
 function Uf(e, t, n, r, i, a) {
 	let o = 2 * Math.PI * i / 4, s = Math.max(a - 2 * i, 0), c = Math.PI / 4;
 	Hf.copy(t), Hf[r] = 0, Hf.normalize();
@@ -15975,7 +15975,7 @@ var Wf = class e extends s {
 		}, a === 1) return;
 		let o = this.toNonIndexed();
 		this.index = null, this.attributes.position = o.attributes.position, this.attributes.normal = o.attributes.normal, this.attributes.uv = o.attributes.uv;
-		let s = new Ie(), c = new Ie(), l = new Ie(e, t, n).divideScalar(2).subScalar(i), u = this.attributes.position.array, d = this.attributes.normal.array, f = this.attributes.uv.array, p = u.length / 6, m = new Ie(), h = .5 / a;
+		let s = new Fe(), c = new Fe(), l = new Fe(e, t, n).divideScalar(2).subScalar(i), u = this.attributes.position.array, d = this.attributes.normal.array, f = this.attributes.uv.array, p = u.length / 6, m = new Fe(), h = .5 / a;
 		for (let r = 0, a = 0; r < u.length; r += 3, a += 2) switch (s.fromArray(u, r), c.copy(s), c.x -= Math.sign(c.x) * h, c.y -= Math.sign(c.y) * h, c.z -= Math.sign(c.z) * h, c.normalize(), u[r + 0] = l.x * Math.sign(s.x) + c.x * i, u[r + 1] = l.y * Math.sign(s.y) + c.y * i, u[r + 2] = l.z * Math.sign(s.z) + c.z * i, d[r + 0] = c.x, d[r + 1] = c.y, d[r + 2] = c.z, Math.floor(r / p)) {
 			case 0:
 				m.set(1, 0, 0), f[a + 0] = Uf(m, c, "z", "y", i, n), f[a + 1] = 1 - Uf(m, c, "y", "z", i, t);
@@ -16891,7 +16891,7 @@ function hp(e = {}) {
 //#region ../../node_modules/three/examples/jsm/postprocessing/ShaderPass.js
 var gp = class extends ts {
 	constructor(e, t = "tDiffuse") {
-		super(), this.textureID = t, this.uniforms = null, this.material = null, e instanceof Ce ? (this.uniforms = e.uniforms, this.material = e) : e && (this.uniforms = Pe.clone(e.uniforms), this.material = new Ce({
+		super(), this.textureID = t, this.uniforms = null, this.material = null, e instanceof Ce ? (this.uniforms = e.uniforms, this.material = e) : e && (this.uniforms = Ne.clone(e.uniforms), this.material = new Ce({
 			name: e.name === void 0 ? "unspecified" : e.name,
 			defines: Object.assign({}, e.defines),
 			uniforms: this.uniforms,
@@ -17136,7 +17136,7 @@ function Rp(e, t = {}) {
 }
 //#endregion
 //#region src/createVolumetricClouds.js
-var zp = /* @__PURE__ */ Be({
+var zp = /* @__PURE__ */ ze({
 	CLOUD_TIERS: () => Bp,
 	createVolumetricClouds: () => Vp
 }), Bp = {
@@ -17312,10 +17312,10 @@ var Up = {
 }, Kp = class {
 	constructor(e, t) {
 		if (this.renderer = e, this._pixelRatio = e.getPixelRatio(), t === void 0) {
-			let n = e.getSize(new Fe());
-			this._width = n.width, this._height = n.height, t = new Re(this._width * this._pixelRatio, this._height * this._pixelRatio, { type: x }), t.texture.name = "EffectComposer.rt1";
+			let n = e.getSize(new Pe());
+			this._width = n.width, this._height = n.height, t = new Le(this._width * this._pixelRatio, this._height * this._pixelRatio, { type: x }), t.texture.name = "EffectComposer.rt1";
 		} else this._width = t.width, this._height = t.height;
-		this.renderTarget1 = t, this.renderTarget2 = t.clone(), this.renderTarget2.texture.name = "EffectComposer.rt2", this.writeBuffer = this.renderTarget1, this.readBuffer = this.renderTarget2, this.renderToScreen = !0, this.passes = [], this.copyPass = new gp(Up), this.copyPass.material.blending = se, this.timer = new Ae();
+		this.renderTarget1 = t, this.renderTarget2 = t.clone(), this.renderTarget2.texture.name = "EffectComposer.rt2", this.writeBuffer = this.renderTarget1, this.readBuffer = this.renderTarget2, this.renderToScreen = !0, this.passes = [], this.copyPass = new gp(Up), this.copyPass.material.blending = se, this.timer = new J();
 	}
 	swapBuffers() {
 		let e = this.readBuffer;
@@ -17355,7 +17355,7 @@ var Up = {
 	}
 	reset(e) {
 		if (e === void 0) {
-			let t = this.renderer.getSize(new Fe());
+			let t = this.renderer.getSize(new Pe());
 			this._pixelRatio = this.renderer.getPixelRatio(), this._width = t.width, this._height = t.height, e = this.renderTarget1.clone(), e.setSize(this._width * this._pixelRatio, this._height * this._pixelRatio);
 		}
 		this.renderTarget1.dispose(), this.renderTarget2.dispose(), this.renderTarget1 = e, this.renderTarget2 = e.clone(), this.writeBuffer = this.renderTarget1, this.readBuffer = this.renderTarget2;
@@ -17392,7 +17392,7 @@ var Up = {
 	fragmentShader: "\n\n		precision highp float;\n\n		uniform sampler2D tDiffuse;\n\n		#include <tonemapping_pars_fragment>\n		#include <colorspace_pars_fragment>\n\n		varying vec2 vUv;\n\n		void main() {\n\n			gl_FragColor = texture2D( tDiffuse, vUv );\n\n			// tone mapping\n\n			#ifdef LINEAR_TONE_MAPPING\n\n				gl_FragColor.rgb = LinearToneMapping( gl_FragColor.rgb );\n\n			#elif defined( REINHARD_TONE_MAPPING )\n\n				gl_FragColor.rgb = ReinhardToneMapping( gl_FragColor.rgb );\n\n			#elif defined( CINEON_TONE_MAPPING )\n\n				gl_FragColor.rgb = CineonToneMapping( gl_FragColor.rgb );\n\n			#elif defined( ACES_FILMIC_TONE_MAPPING )\n\n				gl_FragColor.rgb = ACESFilmicToneMapping( gl_FragColor.rgb );\n\n			#elif defined( AGX_TONE_MAPPING )\n\n				gl_FragColor.rgb = AgXToneMapping( gl_FragColor.rgb );\n\n			#elif defined( NEUTRAL_TONE_MAPPING )\n\n				gl_FragColor.rgb = NeutralToneMapping( gl_FragColor.rgb );\n\n			#elif defined( CUSTOM_TONE_MAPPING )\n\n				gl_FragColor.rgb = CustomToneMapping( gl_FragColor.rgb );\n\n			#endif\n\n			// color space\n\n			#ifdef SRGB_TRANSFER\n\n				gl_FragColor = sRGBTransferOETF( gl_FragColor );\n\n			#endif\n\n		}"
 }, Yp = class extends ts {
 	constructor() {
-		super(), this.isOutputPass = !0, this.uniforms = Pe.clone(Jp.uniforms), this.material = new _e({
+		super(), this.isOutputPass = !0, this.uniforms = Ne.clone(Jp.uniforms), this.material = new _e({
 			name: Jp.name,
 			uniforms: this.uniforms,
 			vertexShader: Jp.vertexShader,
@@ -18593,7 +18593,10 @@ function yh(t = {}) {
 		probeY: .02,
 		mantle: .3,
 		mantleUp: .22,
-		mantleDrop: .3
+		mantleDrop: .3,
+		jumpUp: 1,
+		jumpOut: 1,
+		rejump: .25
 	}, t.cling || {}), N = {
 		x: t.x || 0,
 		y: t.y || 0,
@@ -18611,12 +18614,12 @@ function yh(t = {}) {
 		refire: 0,
 		hang: 0,
 		rose: !1
-	}, P = t.yaw || 0, F = 0, I = !1, L = 0, R = 0, z = !1, B = 0, V = 0, H = 0, U = 0, W = 0, G = -Infinity, K = 0, ee = 0, te = !1, ne = !1, re = !1, ie = 0, ae = 0, oe = 0, se = 0, ce = !1, le = 0, ue = 0, de = 0, fe = new e.Euler();
-	function pe(e, t, n) {
+	}, P = t.yaw || 0, F = 0, I = !1, L = 0, R = 0, z = !1, B = 0, V = 0, H = 0, U = 0, W = 0, G = -Infinity, K = 0, ee = 0, te = !1, ne = !1, re = !1, ie = 0, ae = 0, oe = 0, se = 0, ce = !1, le = 0, ue = 0, de = 0, fe = 0, pe = 0, me = new e.Euler();
+	function he(e, t, n) {
 		let r = i.heightAt ? i.heightAt(e, t) : 0, a = i.surfaceAt ? i.surfaceAt(e, t, n, s) : -Infinity;
 		return a > r ? a : r;
 	}
-	let me = vh({
+	let q = vh({
 		eyeHeight: a,
 		moveSpeed: c,
 		sprintSpeed: l,
@@ -18645,7 +18648,7 @@ function yh(t = {}) {
 		x: N.x,
 		z: N.z,
 		yaw: N.yaw
-	}), he = t.grapple || null, q = t.grappleProfile || null, ge = {
+	}), ge = t.grapple || null, _e = t.grappleProfile || null, ve = {
 		steer: 0,
 		lift: 0,
 		throttle: 0,
@@ -18653,54 +18656,55 @@ function yh(t = {}) {
 		fire: !1,
 		aimPoint: null
 	};
-	function _e() {
-		me.setPosition(N.x, N.z), me.setVelocity(N.vx, N.vz);
+	function ye() {
+		q.setPosition(N.x, N.z), q.setVelocity(N.vx, N.vz);
 	}
-	function ve(e, t) {
+	function be(e, t) {
 		P -= e * S, F = n(F - t * S, -w, C);
 	}
-	function ye(e, n = {}) {
+	function xe(e, n = {}) {
 		e > 0 || (e = 0);
 		let r = !!(n.sprint || (n.boost || 0) > .5), a = n.web !== void 0, o = !!n.jump, c = o && !z;
-		z = o, N.refire = Math.max(0, (N.refire || 0) - e);
+		z = o, N.refire = Math.max(0, (N.refire || 0) - e), pe = Math.max(0, pe - e);
 		let l = a ? !!n.web : !1, u = l && !ne;
 		ne = l;
 		let y = a ? u : !!n.fire;
-		he && he.attach && y && !N.anchor && (ge.aimPoint = n.aimPoint || null, ge.fire = !0, ge.boost = n.boost || 0, ge.steer = n.steer || 0, ge.lift = n.lift || 0, ge.throttle = 0, he.attach(N, ge, i) && (re = a, ie++));
+		ge && ge.attach && y && !N.anchor && (ve.aimPoint = n.aimPoint || null, ve.fire = !0, ve.boost = n.boost || 0, ve.steer = n.steer || 0, ve.lift = n.lift || 0, ve.throttle = 0, ge.attach(N, ve, i) && (re = a, ie++));
 		let b = !1;
-		if (a && c && N.anchor && he && he.release && (se = N.y, oe = he.release(N, t.release || void 0), re = !1, ae++, b = !0, _e()), he && he.reach && q && q.aimMode === "point" ? N.aimInRange = !!he.reach(N, n.aimPoint || null) : N.aimInRange = void 0, te = !!N.anchor, te) ge.steer = n.steer == null ? n.x || 0 : n.steer, ge.lift = n.lift || 0, ge.throttle = 0, ge.boost = n.boost || 0, ge.fire = a ? re : !!n.fire, ge.latched = a, ge.aimPoint = n.aimPoint || null, he.step(N, ge, e, i), N.anchor || (re = !1), _e(), me.setYaw(N.yaw), I = !1, L = 0, B *= 1 - Math.min(1, e * 4), U += e, ce = !1, N.y > G && (G = N.y);
+		if (a && c && N.anchor && ge && ge.release && (se = N.y, oe = ge.release(N, t.release || void 0), re = !1, ae++, b = !0, ye()), ge && ge.reach && _e && _e.aimMode === "point" ? N.aimInRange = !!ge.reach(N, n.aimPoint || null) : N.aimInRange = void 0, te = !!N.anchor, te) ve.steer = n.steer == null ? n.x || 0 : n.steer, ve.lift = n.lift || 0, ve.throttle = 0, ve.boost = n.boost || 0, ve.fire = a ? re : !!n.fire, ve.latched = a, ve.aimPoint = n.aimPoint || null, ge.step(N, ve, e, i), N.anchor || (re = !1), ye(), q.setYaw(N.yaw), I = !1, L = 0, B *= 1 - Math.min(1, e * 4), U += e, ce = !1, N.y > G && (G = N.y);
 		else {
-			let a = N.y, o = ce, l = n.lift || 0;
-			if (ce = !1, M.enabled && i.segmentHit && l !== 0) {
+			let a = N.y, o = ce, l = n.lift || 0, u = !1;
+			if (ce = !1, M.enabled && i.segmentHit && l !== 0 && pe <= 0) {
 				let t = Math.sin(P), n = Math.cos(P), r = N.y + M.probeY;
-				if (i.segmentHit(N.x, r, N.z, N.x + t * M.reach, r, N.z + n * M.reach, M.probeR) < 1) return ce = !0, o || le++, de += e, N.vy = l * M.climbRate, N.y += N.vy * e, N.vx *= .12, N.vz *= .12, me.setPosition(N.x, N.z), me.setVelocity(N.vx, N.vz), me.setYaw(P), I = !1, L = 0, U += e, R = 0, N.grounded = !1, N.airborne = !1, N.clinging = !0, N.speed = Math.hypot(N.vx, N.vy, N.vz), fe.set(0, N.yaw, 0, "YXZ"), N.quat.setFromEuler(fe), Se(e), N;
+				if (i.segmentHit(N.x, r, N.z, N.x + t * M.reach, r, N.z + n * M.reach, M.probeR) < 1) if (c && !b) N.vy = Math.max(N.vy, p * M.jumpUp), N.vx -= t * p * M.jumpOut, N.vz -= n * p * M.jumpOut, ye(), pe = M.rejump, K = N.y, G = N.y, U = 0, fe++, b = !0, u = !0;
+				else return ce = !0, o || le++, de += e, N.vy = l * M.climbRate, N.y += N.vy * e, N.vx *= .12, N.vz *= .12, q.setPosition(N.x, N.z), q.setVelocity(N.vx, N.vz), q.setYaw(P), I = !1, L = 0, U += e, R = 0, N.grounded = !1, N.airborne = !1, N.clinging = !0, N.speed = Math.hypot(N.vx, N.vy, N.vz), me.set(0, N.yaw, 0, "YXZ"), N.quat.setFromEuler(me), we(e), N;
 			}
-			if (o && l > 0 && i.surfaceAt) {
+			if (o && !u && l > 0 && i.surfaceAt) {
 				let t = Math.sin(P), n = Math.cos(P), r = N.x + t * M.mantle, a = N.z + n * M.mantle, o = i.surfaceAt(r, a, N.y + M.mantleUp, s);
-				if (o > -Infinity && o <= N.y + M.mantleUp && o >= N.y - M.mantleDrop) return N.x = r, N.z = a, N.y = o + v, me.setPosition(r, a), me.setVelocity(0, 0), N.vx = 0, N.vy = 0, N.vz = 0, I = !0, L = m, U = 0, G = -Infinity, H++, ue++, N.grounded = !0, N.airborne = !1, N.clinging = !1, N.speed = 0, fe.set(0, N.yaw, 0, "YXZ"), N.quat.setFromEuler(fe), Se(e), N;
+				if (o > -Infinity && o <= N.y + M.mantleUp && o >= N.y - M.mantleDrop) return N.x = r, N.z = a, N.y = o + v, q.setPosition(r, a), q.setVelocity(0, 0), N.vx = 0, N.vy = 0, N.vz = 0, I = !0, L = m, U = 0, G = -Infinity, H++, ue++, N.grounded = !0, N.airborne = !1, N.clinging = !1, N.speed = 0, me.set(0, N.yaw, 0, "YXZ"), N.quat.setFromEuler(me), we(e), N;
 			}
-			N.vy -= f * e, N.vy < -g && (N.vy = -g), N.y += N.vy * e, me.setYaw(P), me.update(e, {
+			N.vy -= f * e, N.vy < -g && (N.vy = -g), N.y += N.vy * e, q.setYaw(P), q.update(e, {
 				x: n.x || 0,
 				y: n.y || 0,
 				sprint: r,
 				control: I ? 1 : d,
-				airDrag: t.airDrag == null ? q && q.airDrag != null ? q.airDrag : .06 : t.airDrag
-			}), N.x = me.x, N.z = me.z;
-			let u = pe(N.x, N.z, Math.max(a, N.y) + _) + v;
-			N.y <= u && N.vy <= 0 ? (I || (H++, W = U, ee = G - K), N.y = u, N.vy = 0, I = !0, L = m, U = 0, G = -Infinity) : I && N.y > u + 1e-4 ? (I = !1, L = m, K = a, G = a) : I || (L = Math.max(0, L - e), U += e, N.y > G && (G = N.y)), R = c && !b ? h : Math.max(0, R - e), R > 0 && (I || L > 0) && (N.vy = p, K = N.y, G = N.y, I = !1, L = 0, R = 0, U = 0, V++), N.vx = me.vx, N.vz = me.vz, N.speed = Math.hypot(N.vx, N.vy, N.vz), me.moving && (N.yaw = P), me.moving && I ? B += e : B *= 1 - Math.min(1, e * 4);
+				airDrag: t.airDrag == null ? _e && _e.airDrag != null ? _e.airDrag : .06 : t.airDrag
+			}), N.x = q.x, N.z = q.z;
+			let y = he(N.x, N.z, Math.max(a, N.y) + _) + v;
+			N.y <= y && N.vy <= 0 ? (I || (H++, W = U, ee = G - K), N.y = y, N.vy = 0, I = !0, L = m, U = 0, G = -Infinity) : I && N.y > y + 1e-4 ? (I = !1, L = m, K = a, G = a) : I || (L = Math.max(0, L - e), U += e, N.y > G && (G = N.y)), R = c && !b ? h : Math.max(0, R - e), R > 0 && (I || L > 0) && (N.vy = p, K = N.y, G = N.y, I = !1, L = 0, R = 0, U = 0, V++), N.vx = q.vx, N.vz = q.vz, N.speed = Math.hypot(N.vx, N.vy, N.vz), q.moving && (N.yaw = P), q.moving && I ? B += e : B *= 1 - Math.min(1, e * 4);
 		}
-		return te || (N.pitch = 0, N.bank = 0, fe.set(0, N.yaw, 0, "YXZ"), N.quat.setFromEuler(fe)), N.grounded = I, N.airborne = !I && !te && !ce, N.swinging = te, N.clinging = ce, Se(e), N;
+		return te || (N.pitch = 0, N.bank = 0, me.set(0, N.yaw, 0, "YXZ"), N.quat.setFromEuler(me)), N.grounded = I, N.airborne = !I && !te && !ce, N.swinging = te, N.clinging = ce, we(e), N;
 	}
-	let be = {
+	let Se = {
 		x: 0,
 		y: 0,
 		z: 0
-	}, xe = {
+	}, Ce = {
 		x: 0,
 		y: 0,
 		z: 0
 	};
-	function Se(e) {
+	function we(e) {
 		if (T.distMax == null) {
 			E = T.dist;
 			return;
@@ -18708,15 +18712,15 @@ function yh(t = {}) {
 		let t = n(Math.hypot(N.vx, N.vz) / Math.max(.001, T.distAtSpeed), 0, 1), r = T.dist + (T.distMax - T.dist) * t;
 		E += (r - E) * (1 - Math.exp(-T.distRate * (e > 0 ? e : 0)));
 	}
-	function Ce(e) {
+	function Te(e) {
 		let t = Math.cos(F);
 		return e.x = Math.sin(P) * t, e.y = Math.sin(F), e.z = Math.cos(P) * t, e;
 	}
-	function we(e) {
-		let t = pe(e.x, e.z, e.y) + y;
+	function Ee(e) {
+		let t = he(e.x, e.z, e.y) + y;
 		return e.y < t && (e.y = t), e;
 	}
-	let Te = Math.SQRT1_2, Ee = [
+	let De = Math.SQRT1_2, Oe = [
 		[
 			1,
 			0,
@@ -18748,33 +18752,33 @@ function yh(t = {}) {
 			-1
 		],
 		[
-			Te,
+			De,
 			0,
-			Te
+			De
 		],
 		[
-			Te,
+			De,
 			0,
-			-Te
+			-De
 		],
 		[
-			-Te,
+			-De,
 			0,
-			Te
+			De
 		],
 		[
-			-Te,
+			-De,
 			0,
-			-Te
+			-De
 		]
 	];
-	function De(e) {
+	function ke(e) {
 		let t = b;
 		if (!(t > 0) || !i.segmentHit) return e;
 		for (let n = 0; n < 2; n++) {
 			let n = !1;
-			for (let r = 0; r < Ee.length; r++) {
-				let a = Ee[r], o = i.segmentHit(e.x, e.y, e.z, e.x + a[0] * t, e.y + a[1] * t, e.z + a[2] * t, 0);
+			for (let r = 0; r < Oe.length; r++) {
+				let a = Oe[r], o = i.segmentHit(e.x, e.y, e.z, e.x + a[0] * t, e.y + a[1] * t, e.z + a[2] * t, 0);
 				if (o >= 1) continue;
 				let s = t * (1 - o);
 				e.x -= a[0] * s, e.y -= a[1] * s, e.z -= a[2] * s, n = !0;
@@ -18783,9 +18787,9 @@ function yh(t = {}) {
 		}
 		return e;
 	}
-	let Oe = (e) => De(we(e));
-	function ke(e = be, t = xe) {
-		if (Ce(t), A === "first") return e.x = N.x, e.y = N.y + a + Math.sin(B * D.bobRate) * D.bob * (me.moving && I ? 1 : 0), e.z = N.z, Oe(e);
+	let J = (e) => ke(Ee(e));
+	function Ae(e = Se, t = Ce) {
+		if (Te(t), A === "first") return e.x = N.x, e.y = N.y + a + Math.sin(B * D.bobRate) * D.bob * (q.moving && I ? 1 : 0), e.z = N.z, J(e);
 		let n = -Math.cos(P), r = Math.sin(P), o = N.x, s = N.y + T.height, c = N.z, l = T.side;
 		if (i.segmentHit && l !== 0) {
 			let e = i.segmentHit(o, s, c, o + n * l, s, c + r * l, T.springR);
@@ -18796,23 +18800,23 @@ function yh(t = {}) {
 			let e = i.segmentHit(u, d, f, u - t.x * p, d - t.y * p, f - t.z * p, T.springR);
 			e < 1 && (p *= Math.max(0, e));
 		}
-		return p < T.minDist ? (e.x = N.x, e.y = N.y + a, e.z = N.z, Oe(e)) : (e.x = u - t.x * p, e.y = d - t.y * p, e.z = f - t.z * p, Oe(e));
+		return p < T.minDist ? (e.x = N.x, e.y = N.y + a, e.z = N.z, J(e)) : (e.x = u - t.x * p, e.y = d - t.y * p, e.z = f - t.z * p, J(e));
 	}
-	function Ae(e) {
+	function je(e) {
 		let t = n(Math.hypot(N.vx, N.vz) / Math.max(.001, O.atSpeed), 0, 1), r = O.base + (O.max - O.base) * t;
 		return k += (r - k) * (1 - Math.exp(-O.rate * (e > 0 ? e : 0))), k;
 	}
 	return {
-		update: ye,
-		addLook: ve,
-		cameraPose: ke,
-		lookDir: Ce,
-		cameraFov: Ae,
+		update: xe,
+		addLook: be,
+		cameraPose: Ae,
+		lookDir: Te,
+		cameraFov: je,
 		setPosition(e, t, n) {
-			N.x = e, N.z = n, me.setPosition(e, n), N.y = t ?? pe(e, n, Infinity) + v, N.vx = 0, N.vy = 0, N.vz = 0, N.anchor = null, N.rope = 0, N.refire = 0, I = !1, L = 0, R = 0, U = 0, G = -Infinity, K = N.y, re = !1, ne = !1, ce = !1;
+			N.x = e, N.z = n, q.setPosition(e, n), N.y = t ?? he(e, n, Infinity) + v, N.vx = 0, N.vy = 0, N.vz = 0, N.anchor = null, N.rope = 0, N.refire = 0, I = !1, L = 0, R = 0, U = 0, G = -Infinity, K = N.y, re = !1, ne = !1, ce = !1, pe = 0;
 		},
 		setYaw(e) {
-			P = e, N.yaw = e, me.setYaw(e);
+			P = e, N.yaw = e, q.setYaw(e);
 		},
 		recenterPitch() {
 			F = 0;
@@ -18824,13 +18828,13 @@ function yh(t = {}) {
 			return A = A === "first" ? "third" : "first", A;
 		},
 		setColliders(e) {
-			me.setColliders(e);
+			q.setColliders(e);
 		},
 		setAabbs(e) {
-			me.setAabbs(e);
+			q.setAabbs(e);
 		},
 		state: N,
-		walker: me,
+		walker: q,
 		get view() {
 			return A;
 		},
@@ -18855,8 +18859,11 @@ function yh(t = {}) {
 		get clingTime() {
 			return de;
 		},
+		get wallJumps() {
+			return fe;
+		},
 		get moving() {
-			return me.moving;
+			return q.moving;
 		},
 		get x() {
 			return N.x;
@@ -18909,7 +18916,7 @@ function yh(t = {}) {
 		get coyote() {
 			return L;
 		},
-		groundAt: pe
+		groundAt: he
 	};
 }
 //#endregion
@@ -20220,14 +20227,14 @@ function Zh({ el: e, smooth: t = 6, reducedMotion: n, onProgress: r, clampOversc
 	let a = e || (typeof document < "u" ? document.scrollingElement || document.documentElement : null), o = typeof window < "u" && window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null, s = () => n === !0 || n === void 0 && !!(o && o.matches), c = 0, l = 0, u = () => a ? Math.max(1, a.scrollHeight - a.clientHeight) : 1, d = () => {
 		if (!a) return 0;
 		let e = a.scrollTop / u();
-		return i ? Y(e, 0, 1) : e;
+		return i ? X(e, 0, 1) : e;
 	};
 	l = c = d();
 	function f(e) {
-		return l = d(), s() || t <= 0 ? c = l : (c = J(c, l, t, e), Math.abs(l - c) < 1e-4 && (c = l)), r && r(c, l), c;
+		return l = d(), s() || t <= 0 ? c = l : (c = Y(c, l, t, e), Math.abs(l - c) < 1e-4 && (c = l)), r && r(c, l), c;
 	}
 	function p(e, { immediate: t = !1 } = {}) {
-		let n = Y(e, 0, 1);
+		let n = X(e, 0, 1);
 		a && (a.scrollTop = n * u()), l = n, t && (c = n);
 	}
 	return {
@@ -20272,14 +20279,14 @@ function Qh(e, { connectorWeight: t = 0 } = {}) {
 	};
 }
 function $h(e, t) {
-	let n = Y(t, 0, 1), r = e - .5;
+	let n = X(t, 0, 1), r = e - .5;
 	return (1 - n) * e + n * (4 * r * r * r + .5);
 }
 function eg(e, t) {
-	t = Y(t, 0, 1);
+	t = X(t, 0, 1);
 	let { segments: n, sectionCount: r } = e, i = 0;
 	for (let e = 0; e < n.length; e++) n[e].start <= t && (i = e);
-	let a = n[i], o = a.end - a.start || 1, s = Y((t - a.start) / o, 0, 1), c = a.kind === "section" && a.section.linger ? $h(s, a.section.linger) : s, l = a.kind === "section" ? a.sectionIndex : Y(s > .5 ? a.sectionIndex + 1 : a.sectionIndex, 0, r - 1);
+	let a = n[i], o = a.end - a.start || 1, s = X((t - a.start) / o, 0, 1), c = a.kind === "section" && a.section.linger ? $h(s, a.section.linger) : s, l = a.kind === "section" ? a.sectionIndex : X(s > .5 ? a.sectionIndex + 1 : a.sectionIndex, 0, r - 1);
 	return {
 		segment: a,
 		segIndex: i,
@@ -20357,9 +20364,9 @@ function og({ sections: e = [], connectorWeight: t = 0, reducedMotion: n = !1, m
 	}), c.appendChild(h));
 	let _ = -1;
 	function v(t, r = t) {
-		let i = Y(t, 0, 1);
+		let i = X(t, 0, 1);
 		for (let e = 0; e < l; e++) {
-			let t = u.sectionSegments[e], r = t.end - t.start || 1, a = Y((i - t.start) / r, 0, 1), o = tg(a, i < t.start, i > t.end, e === 0, e === l - 1), s = f[e];
+			let t = u.sectionSegments[e], r = t.end - t.start || 1, a = X((i - t.start) / r, 0, 1), o = tg(a, i < t.start, i > t.end, e === 0, e === l - 1), s = f[e];
 			s.style.opacity = o, s.style.pointerEvents = o > .5 ? "auto" : "none";
 			let c = o <= .01;
 			s.inert !== c && (s.inert = c), s.setAttribute("aria-hidden", String(c));
@@ -20999,7 +21006,7 @@ function Eg({ parentWidth: e, parentHeight: t, width: n = 0, height: r = 0, anch
 }
 //#endregion
 //#region src/createSmoothScroll.js
-var Dg = (e, t, n) => e + (t - e) * n, Og = (e, t) => Y(e, 0, Math.max(0, t)), kg = (e, t) => t > 0 ? Y(e / t, 0, 1) : 0, Ag = (e, t, n) => n > 0 ? (t - e) / n : 0;
+var Dg = (e, t, n) => e + (t - e) * n, Og = (e, t) => X(e, 0, Math.max(0, t)), kg = (e, t) => t > 0 ? X(e / t, 0, 1) : 0, Ag = (e, t, n) => n > 0 ? (t - e) / n : 0;
 function jg({ smooth: e = 9, wheelMultiplier: t = 1, touchMultiplier: n = 1.4, reducedMotion: r } = {}) {
 	let i = typeof window < "u" && typeof document < "u", a = i ? document.scrollingElement || document.documentElement : null, o = i && window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null, s = () => r === !0 || r === void 0 && !!(o && o.matches), c = !1, l = 0, u = 0, d = 0, f = 0, p = 0, m = null, h = 0, g = 0, _ = 0, v = 0, y = null, b = {
 		scroll: [],
@@ -21054,7 +21061,7 @@ function jg({ smooth: e = 9, wheelMultiplier: t = 1, touchMultiplier: n = 1.4, r
 			let r = a.scrollTop;
 			Math.abs(r - u) > 3 && (l = u = r);
 			let i = l - u;
-			Math.abs(i) > .1 && (u = Og(J(u, l, e, n), S()), a.scrollTop = u), Math.abs(u - d) > .01 ? (f = Ag(d, u, n), p = Math.sign(u - d), d = u, C("scroll"), C("progress")) : f !== 0 && (f = 0, p = 0, C("scroll"), C("progress"));
+			Math.abs(i) > .1 && (u = Og(Y(u, l, e, n), S()), a.scrollTop = u), Math.abs(u - d) > .01 ? (f = Ag(d, u, n), p = Math.sign(u - d), d = u, C("scroll"), C("progress")) : f !== 0 && (f = 0, p = 0, C("scroll"), C("progress"));
 		} catch (e) {
 			typeof console < "u" && console.error("[createSmoothScroll] frame error (loop kept alive):", e);
 		}
@@ -24140,28 +24147,28 @@ function Lb(t, n, r, i = {}) {
 	function Te(e) {
 		we = e || 0;
 	}
-	let Ee = 1, De = i.edgeRest ?? .55, Oe = i.edgeOpacity ?? .62, ke = i.lift ?? .18, Ae = 1, je = 1, Me = 1;
-	function Ne() {
-		G.uniforms.uLift.value = ke, G.uniforms.uWidthScale.value = Ee * Ae, G.uniforms.uRest.value = Math.min(1, De * je), G.uniforms.uOpacity.value = Math.min(1, Oe * Me);
+	let Ee = 1, De = i.edgeRest ?? .55, Oe = i.edgeOpacity ?? .62, ke = i.lift ?? .18, J = 1, Ae = 1, je = 1;
+	function Me() {
+		G.uniforms.uLift.value = ke, G.uniforms.uWidthScale.value = Ee * J, G.uniforms.uRest.value = Math.min(1, De * Ae), G.uniforms.uOpacity.value = Math.min(1, Oe * je);
+	}
+	function Ne(e) {
+		Ee = e, Me();
 	}
 	function Pe(e) {
-		Ee = e, Ne();
+		De = e, Me();
 	}
 	function Fe(e) {
-		De = e, Ne();
+		Oe = e, Me();
 	}
-	function Ie(e) {
-		Oe = e, Ne();
+	function Ie({ lift: e, widthMul: t, restMul: n, opacityMul: r } = {}) {
+		e != null && (ke = e), t != null && (J = t), n != null && (Ae = n), r != null && (je = r), Me();
 	}
-	function Le({ lift: e, widthMul: t, restMul: n, opacityMul: r } = {}) {
-		e != null && (ke = e), t != null && (Ae = t), n != null && (je = n), r != null && (Me = r), Ne();
-	}
-	function Re() {
+	function Le() {
 		return {
 			lift: ke,
-			widthMul: Ae,
-			restMul: je,
-			opacityMul: Me,
+			widthMul: J,
+			restMul: Ae,
+			opacityMul: je,
 			uniforms: {
 				uLift: G.uniforms.uLift.value,
 				uWidthScale: G.uniforms.uWidthScale.value,
@@ -24170,26 +24177,26 @@ function Lb(t, n, r, i = {}) {
 			}
 		};
 	}
-	let ze = new Int32Array(te), Be = new Int32Array(ne), J = ce.endA, Y = ce.endB, Ve = 1, He = 0;
-	function Ue() {
-		let e = J.array, t = Y.array;
-		for (let n = 0; n < ze.length; n++) {
-			let r = k[ze[n]], i = k[Be[n]], a = n * 3;
+	let Re = new Int32Array(te), ze = new Int32Array(ne), Y = ce.endA, X = ce.endB, Be = 1, Ve = 0;
+	function He() {
+		let e = Y.array, t = X.array;
+		for (let n = 0; n < Re.length; n++) {
+			let r = k[Re[n]], i = k[ze[n]], a = n * 3;
 			e[a] = r.x, e[a + 1] = r.y, e[a + 2] = r.z, t[a] = i.x, t[a + 1] = i.y, t[a + 2] = i.z;
 		}
 		ce.commitEndpoints();
 		for (let e = 0; e < s; e++) {
-			let t = D[e] * Ve, n = k[e];
+			let t = D[e] * Be, n = k[e];
 			T.makeScale(t, t, t).setPosition(n.x, n.y, n.z), v && _[e] < .5 && T.makeScale(1e-6, 1e-6, 1e-6).setPosition(n.x, n.y, n.z), W.setMatrixAt(e, T);
 		}
-		W.instanceMatrix.needsUpdate = !0, He++;
+		W.instanceMatrix.needsUpdate = !0, Ve++;
 	}
-	function We(e) {
-		e !== Ve && (Ve = e, Ue());
+	function Ue(e) {
+		e !== Be && (Be = e, He());
 	}
-	let Ge = null, Ke = null, qe = Infinity, Je = () => Ge ?? Ke;
-	function Ye() {
-		let e = Je(), t = le.getAttribute("aDim"), n = t.array;
+	let We = null, Ge = null, Ke = Infinity, qe = () => We ?? Ge;
+	function Je() {
+		let e = qe(), t = le.getAttribute("aDim"), n = t.array;
 		for (let t = 0; t < n.length; t++) {
 			let r = ee[t * 2], i = ee[t * 2 + 1], a;
 			if (g != null) {
@@ -24204,41 +24211,41 @@ function Lb(t, n, r, i = {}) {
 		}
 		t.needsUpdate = !0;
 	}
-	function Xe(e) {
+	function Ye(e) {
 		if (!e) {
-			v && (_.fill(1), v = !1, Ye());
+			v && (_.fill(1), v = !1, Je());
 			return;
 		}
 		v = !0;
 		for (let t = 0; t < s; t++) _[t] = Math.max(0, Math.min(1, e(a[t].id, t)));
-		Ye(), Ue();
+		Je(), He();
 	}
-	function Ze(e) {
+	function Xe(e) {
 		let t = y.get(e);
 		return t == null ? 0 : v ? _[t] : 1;
 	}
+	function Ze(e) {
+		h = e, Je();
+	}
 	function Qe(e) {
-		h = e, Ye();
+		g = e && e.size ? new Set(e) : null, Je();
 	}
-	function $e(e) {
-		g = e && e.size ? new Set(e) : null, Ye();
-	}
-	function et() {
+	function $e() {
 		return g ? g.size : 0;
 	}
+	function et(e) {
+		let t = qe();
+		We = e, Ke = 0, qe() !== t && Je();
+	}
 	function tt(e) {
-		let t = Je();
-		Ge = e, qe = 0, Je() !== t && Ye();
+		if (e === Ge) return;
+		let t = qe();
+		Ge = e, qe() !== t && Je();
 	}
-	function nt(e) {
-		if (e === Ke) return;
-		let t = Je();
-		Ke = e, Je() !== t && Ye();
-	}
-	function rt(e, t) {
+	function nt(e, t) {
 		let n = !x(), r = we > 0 ? Math.floor(t * we) / we : t;
-		G.uniforms.uTime.value = r, G.uniforms.uFlow.value = +!!n, qe < Infinity && (qe += e);
-		let i = Math.min(qe / Eb, 1), o = Je(), l = Ge == null ? void 0 : y.get(Ge), u = o == null ? void 0 : y.get(o), h = u != null, b = h ? S.get(o) : null;
+		G.uniforms.uTime.value = r, G.uniforms.uFlow.value = +!!n, Ke < Infinity && (Ke += e);
+		let i = Math.min(Ke / Eb, 1), o = qe(), l = We == null ? void 0 : y.get(We), u = o == null ? void 0 : y.get(o), h = u != null, b = h ? S.get(o) : null;
 		for (let r = 0; r < s; r++) {
 			q[r] > he[r] && (q[r] = he[r] + (q[r] - he[r]) * Math.exp(-e / pb), q[r] - he[r] < .001 && (q[r] = he[r]));
 			let o = r === l, s = r === u, y = o ? 1 - i : 0, x = n ? Math.sin(t * bb * Math.PI * 2 + r) : 0, S = D[r] * (1 + mb * q[r] + hb * q[r] * x + .6 * y) * (v ? _[r] : 1), C = k[r];
@@ -24257,7 +24264,7 @@ function Lb(t, n, r, i = {}) {
 		}
 		B.instanceMatrix.needsUpdate = !0, V.instanceMatrix.needsUpdate = !0, B.instanceColor && (B.instanceColor.needsUpdate = !0), V.instanceColor && (V.instanceColor.needsUpdate = !0), m && (P.needsUpdate = !0);
 	}
-	function it(e = .4) {
+	function rt(e = .4) {
 		let t = z.uniforms.uSizeMul.value, n = z.uniforms.uScale.value;
 		for (let r = 0; r < s; r++) {
 			let i = Infinity, a = k[r];
@@ -24271,10 +24278,10 @@ function Lb(t, n, r, i = {}) {
 		}
 		N.needsUpdate = !0;
 	}
-	function at({ outlinePx: t = 0, rings: n = 0, contain: r = !1 } = {}) {
+	function it({ outlinePx: t = 0, rings: n = 0, contain: r = !1 } = {}) {
 		R.uniforms.uOutlinePx.value = t, z.uniforms.uRings.value = n, z.uniforms.uHaloCap.value = +!!r, r ? (z.blending = e.CustomBlending, z.blendEquation = e.MaxEquation, z.blendSrc = e.OneFactor, z.blendDst = e.OneFactor) : c !== "print" && (z.blending = e.AdditiveBlending), z.needsUpdate = !0, m = t > 0;
 	}
-	function ot() {
+	function at() {
 		A.dispose(), R.dispose(), z.dispose(), H.dispose(), U.dispose(), le.dispose(), G.dispose();
 	}
 	return {
@@ -24283,28 +24290,28 @@ function Lb(t, n, r, i = {}) {
 		nodeCore: B,
 		nodeHalo: V,
 		edgeMesh: de,
-		update: rt,
-		setSelected: tt,
-		setHover: nt,
+		update: nt,
+		setSelected: et,
+		setHover: tt,
 		setHeat: ye,
 		getHeat: be,
 		radiusOf: xe,
-		syncPositions: Ue,
-		setPickScale: We,
+		syncPositions: He,
+		setPickScale: Ue,
 		setNodeScale: Se,
 		setMinEdgeWidth: Ce,
 		setTimeQuantize: Te,
-		setEdgeWidthScale: Pe,
-		setEdgeRest: Fe,
-		setEdgeOpacity: Ie,
-		setEdgeCalm: Qe,
-		setReveal: Xe,
-		revealOf: Ze,
-		setSpotlight: $e,
+		setEdgeWidthScale: Ne,
+		setEdgeRest: Pe,
+		setEdgeOpacity: Fe,
+		setEdgeCalm: Ze,
+		setReveal: Ye,
+		revealOf: Xe,
+		setSpotlight: Qe,
 		get spotlight() {
 			return g ? [...g] : null;
 		},
-		spotlightSize: et,
+		spotlightSize: $e,
 		debugVisible: () => a.filter((e, t) => !v || _[t] > .5).map((e) => e.id),
 		debugEdgeDim: () => {
 			let e = le.getAttribute("aDim").array, t = Infinity, n = -Infinity, r = 0;
@@ -24316,8 +24323,8 @@ function Lb(t, n, r, i = {}) {
 				n: e.length
 			};
 		},
-		setEdgeStyle: Le,
-		getEdgeStyle: Re,
+		setEdgeStyle: Ie,
+		getEdgeStyle: Le,
 		kindColor: (e) => u[e] || db[c === "print" ? "print" : "glow"],
 		setState: ve,
 		setColorFloor: (e) => {
@@ -24326,8 +24333,8 @@ function Lb(t, n, r, i = {}) {
 		setHaloHueClamp: (e) => {
 			p = e;
 		},
-		setPixelNodeStyle: at,
-		recomputeHaloCaps: it,
+		setPixelNodeStyle: it,
+		recomputeHaloCaps: rt,
 		setBadgeSize: (e) => {
 			R.uniforms.uBadgePx.value = e;
 		},
@@ -24403,15 +24410,15 @@ function Lb(t, n, r, i = {}) {
 				a.needsUpdate = !0;
 			}
 		},
-		dispose: ot,
+		dispose: at,
 		get skippedDangling() {
 			return K;
 		},
 		get posUploads() {
-			return He;
+			return Ve;
 		},
 		get emphasisId() {
-			return Je();
+			return qe();
 		}
 	};
 }
@@ -26453,4 +26460,4 @@ function uS({ kind: e = "binary-search-tree", inserts: t, target: n, extracts: r
 	};
 }
 //#endregion
-export { fx as ALGORITHMS, My as ALGORITHM_KINDS, fh as ASTRONOMY_CREDITS, us as ATMOS_MM, gr as ATV_PROFILE, so as BIOMES, Ar as BIRD_PROFILE, Or as BOAT_PROFILE, Qp as BORTLE_MAX, Zp as BORTLE_MIN, yl as BUNDLE_FORMAT, bl as BUNDLE_VERSION, Ge as CAM, xf as CELL_COLORS, oc as CITY_LOOKS, ic as CITY_SURFACES, Bp as CLOUD_TIERS, yr as CRAFT_PROFILE, tl as DECREPIT_TOWERS, Vy as DEEP_CHARS, Jy as DEFAULT_RINGS, kt as ERA_ORDER, Ot as ERA_PRESETS, Kp as EffectComposer, Mr as FISH_PROFILE, Hs as FORGE_MIN_TEXELS, Ty as GRAPH_SPEC_VERSION, Fr as GRAPPLE_PROFILE, ls as GROUND_MM, zy as HEAT_TAU_DAYS, ec as HOARD_SURFACES, Ey as KINDS, Rn as LAYOUT, Tg as LAYOUT_ANCHORS, $p as LA_BORTLE, jt as LGR_PALETTES, Uy as MEDIA_GLYPHS, Yp as OutputPass, pm as PLANET_KEYS, fo as PRESET_KEYS, En as PROFILES, Dn as PROFILE_KEYS, kc as RECIPE_BIOMES, Dy as RELS, xy as RISO_INKS, Er as ROAD_PROFILE, qp as RenderPass, At as SCENE_ERA_ORDER, Kd as SCENE_SPEC_VERSION, Fn as SEABED, $f as SIM_DEFAULTS, Oy as SLOW_MS, mx as SORT_KINDS, Py as STATES, oS as STRUCTURES, uo as TERRAIN_PRESETS, $ as THEME, pd as THEMES, e as THREE, ll as URBAN_ERAS, Gt as VEC_FRAG_PARS, Wt as VEC_VERT_MAIN, Ut as VEC_VERT_PARS, El as VIDEO_TYPES, tc as WEAPON_SKINS, $l as ZOMBIE_LOOP_ONCE, Ql as ZOMBIE_STATES, Fx as ZOOM_DEFAULTS, Nx as aggregateEdges, Ve as angleDelta, Jc as applyGlint, Kc as applyGroundMacro, ql as applyLook, af as applySceneSpec, up as applyStreetGrid, md as applyThemeToRoot, Kt as attachVectorUniforms, xc as autoFrame, Yx as balancedKeys, wc as bankAngleFromCurvature, cx as binarySearch, Gx as bstContains, Wx as bstFromKeys, Kx as bstInOrder, Ux as bstInsert, Jx as bstSearchCost, sx as bubbleSort, Qh as buildChapterChain, nl as buildDecrepitProfile, Qn as buildGraph, nb as buildGraphSpec, rl as buildIntactProfile, qo as buildLakeGroup, wl as buildManifest, Lo as buildScatterGroup, bo as buildTerrainMesh, Ke as cameraNearRadius, Pr as carryMomentum, Cx as chartLayout, dl as cityProfileFromUrban, el as citySolidsToObstacles, Y as clamp, ky as classifyHealth, Hy as classifyMedia, Dx as clusterBy, jx as clusterCentroids, Ox as clusterIndex, Ax as clusterMembersOf, kx as clusterOfNode, Sg as computeNineSliceLayout, bg as computeTextLayout, ox as countOps, gg as create2DLayer, hg as create2DPicking, Bh as createAgentRng, zh as createAgentSim, Xl as createAimReticle, hy as createAmbientBed, Yb as createAmbientScheduler, tu as createAnimStateMachine, id as createAppShell, yp as createAtmosphereGrade, my as createAudioBus, O_ as createAurora, _h as createBallistics, Fg as createBeautyPresenter, dy as createBeforeAfter, jr as createBirdModel, kr as createBoatModel, Th as createBoxArena, e_ as createBuildIn, Zg as createCameraDirector, Cc as createCameraPath, ct as createCameraRig, jl as createCapture, Yo as createCatalog, Jv as createCathedralLight, Lv as createCaustics, Hp as createCelestial, Is as createCelestials, Sf as createCellField, yh as createCharacterController, Fh as createCharacterHorde, Qu as createCharacterRig, Tx as createChart, Un as createCity, $n as createCityLife, vc as createCityWorld, _a as createCloudField, Sa as createCockpit, Ls as createColliderWorld, x_ as createConstellation, Hm as createConstellations, Tf as createContactShadows, Ef as createCorpsePool, Vh as createCrowdTiers, Qf as createDebugOverlay, Ph as createDecals, pf as createDevMode, Of as createDiveController, l_ as createDuskSilk, __ as createEdgeField, to as createEditor, yc as createEngine, bn as createEngineCore, Tt as createEngineProfiler, ry as createFirstLight, vh as createFirstPersonWalker, Nr as createFishModel, gh as createFlowField, Wc as createForest, Yc as createGlintMaterial, yg as createGlyphAtlas, Sp as createGodRays, tx as createGraphAmbient, qb as createGraphAtmosphere, Vb as createGraphLabels, Xy as createGraphLayout, tp as createGraphSim, Lb as createGraphView, Ir as createGrappleModel, vr as createGroundModel, vf as createGyroLook, Xh as createHeroBody, Ig as createHeroDirector, Hg as createHeroWipe, Jn as createHiddenProp, ds as createHillaireSky, zl as createHints, jf as createIndirectField, ba as createInspector, pa as createLandmarkFactory, yv as createLattice, Uv as createLetterpress, Tv as createLiquidMetal, Mv as createLivingInk, Kl as createLockMarker, py as createLookReel, pv as createMaterialStudy, Fd as createMatrixGrid, dh as createMessier, wp as createMilkyWay, gd as createMorphTimeline, Cg as createNineSlicePanel, U_ as createObservatory, Rf as createParticles, $u as createPedestrians, Br as createPilotController, tv as createPixelMorph, La as createPlacedLife, Zl as createPointerLockAim, _y as createPositionalField, M_ as createProductMoment, cf as createProductStage, Gn as createProximityLatch, Dt as createQualityGovernor, Al as createRecorder, wy as createRiso, Dr as createRoadModel, yy as createRotor, Go as createScatter, hf as createSceneTransition, Zh as createScrollDirector, og as createScrollNarrative, dr as createSeatedLook, zf as createSfxKit, t_ as createShadowRig, sg as createShelfPacker, es as createSkyAtmosphere, dg as createSlotAllocator, jg as createSmoothScroll, Qm as createSolarSystem, Tr as createSpacecraftModel, ir as createSpriteAnim, pg as createSpriteBatcher, Ex as createStepPanel, fp as createStreetKit, rr as createStreetLights, hp as createStreetPlaces, St as createSunRig, Hl as createTargetLock, xg as createTextBlock, cg as createTextureAtlas, Gs as createTextureForge, Vf as createTorchLight, Bl as createTouchControls, bf as createTracePlayer, yf as createTracer, uS as createTreePanel, sp as createTriplanarForgeMaterial, Lm as createTrueStars, Gd as createTween, Fl as createViewerUI, Vp as createVolumetricClouds, qa as createWaterFlow, Kr as createWaterLife, ol as createWaterSurface, Xf as createWeaponKit, ha as createWeatherRig, ml as createWorldFromRecipe, Jo as createWorldLakes, J as damp, Tc as defaultRecipe, Xx as degenerateKeys, $c as deriveHarvest, vl as describeVocabulary, Ko as detectLakes, hd as easeInOutCubic, tb as extractExcerpt, Qy as extractLinks, $y as extractMarkdownLinks, Vt as fogCharm, sc as forgeCityMaterials, rc as forgeHoardMaterials, nf as fromURLParams, an as fullscreenVert, Hh as gaitBlend, Uh as gaitName, Co as generateScatter, po as generateTerrain, ph as getAttribution, fb as getKindColors, xp as godRayVisibility, Ky as hasMedia, tS as heapIsValid, rS as heapPop, nS as heapPush, dx as heapSort, aS as heapSortCost, By as heatFromAgeDays, Wh as heroPose, qy as indexNodes, Cl as isVersionCompatible, Eg as layoutBox, Jb as lcg, em as limitingMagnitude, or as loadSpriteSheet, bx as logTicks, mt as lowSunWashK, gx as makeCaseInput, ur as makeContactShadow, Mt as makePaletteTexture, Hn as makePalm, xx as makeScale, mr as makeVignette, gf as mapGyroToLook, Zx as measureBST, bc as measureBounds, px as measureComplexity, Wy as mediaGlyph, Gy as mediaGlyphCode, Nt as medianCut, Oc as mergeRecipes, lx as mergeSort, xn as mulberry32, Lx as nearestCluster, yx as niceTicks, Dc as normalizeRecipe, eb as noteToRecords, Us as nyquistFeatureFloor, Zy as parseFrontmatter, Sl as parseVersion, wh as percentileOf, Wn as pickStreetIntersection, Dl as pickVideoType, Qc as placeCoverBuildings, Lc as placeForest, If as planSpawn, bm as planetPosition, mf as postDiveFrag, pn as postPixelkitFrag, Gl as projectToScreen, ux as quickSort, _x as raceAlgorithms, rd as readAppFlags, eg as readChapterChain, xo as rebuildTerrainChunks, _l as recipeFromText, Ol as recorderExt, Zo as registerAssetCatalog, ax as renderNoteHtml, Ws as repeatFor, Wo as reprojectScatter, Vl as resolveAimPoint, ix as scanFileRefs, Vo as scatterAdd, Ho as scatterErase, Zc as scatterProps, Xc as scatterRuins, In as seabedY, Xo as seedWorldEditorCatalog, Sx as seriesToPoints, yn as showWebGLUnsupported, am as skyBrightnessSQM, rm as skyGlow, cm as skyGlowIntensity, Jt as spliceVectorVertex, Mx as summaryLayout, Px as summarySpec, xh as swingableHeight, Sh as swingableRope, cp as tilesPerUnit, Tn as tintTower, ar as toLuminanceTexture, rf as toURLParams, Ch as topAtPercentile, Bf as torchFlicker, qx as traceBST, iS as traceHeap, Hx as treeDepth, Vx as treeEdges, Bx as treeLayout, Ry as validateGraphSpec, Tl as validateManifest, tf as validateSceneSpec, xt as validateSunKeyframes, Pt as vectorOn, Lt as vectorShadow, It as vectorTint, Qt as vectorize, Zt as vectorizeTower, Rx as visibleSet, zt as weatherCloud, Bt as weatherCloudOff, Ht as weatherSeason, Rt as weatherSnow, jy as worstState, Ix as zoomState };
+export { fx as ALGORITHMS, My as ALGORITHM_KINDS, fh as ASTRONOMY_CREDITS, us as ATMOS_MM, gr as ATV_PROFILE, so as BIOMES, Ar as BIRD_PROFILE, Or as BOAT_PROFILE, Qp as BORTLE_MAX, Zp as BORTLE_MIN, yl as BUNDLE_FORMAT, bl as BUNDLE_VERSION, We as CAM, xf as CELL_COLORS, oc as CITY_LOOKS, ic as CITY_SURFACES, Bp as CLOUD_TIERS, yr as CRAFT_PROFILE, tl as DECREPIT_TOWERS, Vy as DEEP_CHARS, Jy as DEFAULT_RINGS, kt as ERA_ORDER, Ot as ERA_PRESETS, Kp as EffectComposer, Mr as FISH_PROFILE, Hs as FORGE_MIN_TEXELS, Ty as GRAPH_SPEC_VERSION, Fr as GRAPPLE_PROFILE, ls as GROUND_MM, zy as HEAT_TAU_DAYS, ec as HOARD_SURFACES, Ey as KINDS, Rn as LAYOUT, Tg as LAYOUT_ANCHORS, $p as LA_BORTLE, jt as LGR_PALETTES, Uy as MEDIA_GLYPHS, Yp as OutputPass, pm as PLANET_KEYS, fo as PRESET_KEYS, En as PROFILES, Dn as PROFILE_KEYS, kc as RECIPE_BIOMES, Dy as RELS, xy as RISO_INKS, Er as ROAD_PROFILE, qp as RenderPass, At as SCENE_ERA_ORDER, Kd as SCENE_SPEC_VERSION, Fn as SEABED, $f as SIM_DEFAULTS, Oy as SLOW_MS, mx as SORT_KINDS, Py as STATES, oS as STRUCTURES, uo as TERRAIN_PRESETS, $ as THEME, pd as THEMES, e as THREE, ll as URBAN_ERAS, Gt as VEC_FRAG_PARS, Wt as VEC_VERT_MAIN, Ut as VEC_VERT_PARS, El as VIDEO_TYPES, tc as WEAPON_SKINS, $l as ZOMBIE_LOOP_ONCE, Ql as ZOMBIE_STATES, Fx as ZOOM_DEFAULTS, Nx as aggregateEdges, Be as angleDelta, Jc as applyGlint, Kc as applyGroundMacro, ql as applyLook, af as applySceneSpec, up as applyStreetGrid, md as applyThemeToRoot, Kt as attachVectorUniforms, xc as autoFrame, Yx as balancedKeys, wc as bankAngleFromCurvature, cx as binarySearch, Gx as bstContains, Wx as bstFromKeys, Kx as bstInOrder, Ux as bstInsert, Jx as bstSearchCost, sx as bubbleSort, Qh as buildChapterChain, nl as buildDecrepitProfile, Qn as buildGraph, nb as buildGraphSpec, rl as buildIntactProfile, qo as buildLakeGroup, wl as buildManifest, Lo as buildScatterGroup, bo as buildTerrainMesh, Ge as cameraNearRadius, Pr as carryMomentum, Cx as chartLayout, dl as cityProfileFromUrban, el as citySolidsToObstacles, X as clamp, ky as classifyHealth, Hy as classifyMedia, Dx as clusterBy, jx as clusterCentroids, Ox as clusterIndex, Ax as clusterMembersOf, kx as clusterOfNode, Sg as computeNineSliceLayout, bg as computeTextLayout, ox as countOps, gg as create2DLayer, hg as create2DPicking, Bh as createAgentRng, zh as createAgentSim, Xl as createAimReticle, hy as createAmbientBed, Yb as createAmbientScheduler, tu as createAnimStateMachine, id as createAppShell, yp as createAtmosphereGrade, my as createAudioBus, O_ as createAurora, _h as createBallistics, Fg as createBeautyPresenter, dy as createBeforeAfter, jr as createBirdModel, kr as createBoatModel, Th as createBoxArena, e_ as createBuildIn, Zg as createCameraDirector, Cc as createCameraPath, ct as createCameraRig, jl as createCapture, Yo as createCatalog, Jv as createCathedralLight, Lv as createCaustics, Hp as createCelestial, Is as createCelestials, Sf as createCellField, yh as createCharacterController, Fh as createCharacterHorde, Qu as createCharacterRig, Tx as createChart, Un as createCity, $n as createCityLife, vc as createCityWorld, _a as createCloudField, Sa as createCockpit, Ls as createColliderWorld, x_ as createConstellation, Hm as createConstellations, Tf as createContactShadows, Ef as createCorpsePool, Vh as createCrowdTiers, Qf as createDebugOverlay, Ph as createDecals, pf as createDevMode, Of as createDiveController, l_ as createDuskSilk, __ as createEdgeField, to as createEditor, yc as createEngine, bn as createEngineCore, Tt as createEngineProfiler, ry as createFirstLight, vh as createFirstPersonWalker, Nr as createFishModel, gh as createFlowField, Wc as createForest, Yc as createGlintMaterial, yg as createGlyphAtlas, Sp as createGodRays, tx as createGraphAmbient, qb as createGraphAtmosphere, Vb as createGraphLabels, Xy as createGraphLayout, tp as createGraphSim, Lb as createGraphView, Ir as createGrappleModel, vr as createGroundModel, vf as createGyroLook, Xh as createHeroBody, Ig as createHeroDirector, Hg as createHeroWipe, Jn as createHiddenProp, ds as createHillaireSky, zl as createHints, jf as createIndirectField, ba as createInspector, pa as createLandmarkFactory, yv as createLattice, Uv as createLetterpress, Tv as createLiquidMetal, Mv as createLivingInk, Kl as createLockMarker, py as createLookReel, pv as createMaterialStudy, Fd as createMatrixGrid, dh as createMessier, wp as createMilkyWay, gd as createMorphTimeline, Cg as createNineSlicePanel, U_ as createObservatory, Rf as createParticles, $u as createPedestrians, Br as createPilotController, tv as createPixelMorph, La as createPlacedLife, Zl as createPointerLockAim, _y as createPositionalField, M_ as createProductMoment, cf as createProductStage, Gn as createProximityLatch, Dt as createQualityGovernor, Al as createRecorder, wy as createRiso, Dr as createRoadModel, yy as createRotor, Go as createScatter, hf as createSceneTransition, Zh as createScrollDirector, og as createScrollNarrative, dr as createSeatedLook, zf as createSfxKit, t_ as createShadowRig, sg as createShelfPacker, es as createSkyAtmosphere, dg as createSlotAllocator, jg as createSmoothScroll, Qm as createSolarSystem, Tr as createSpacecraftModel, ir as createSpriteAnim, pg as createSpriteBatcher, Ex as createStepPanel, fp as createStreetKit, rr as createStreetLights, hp as createStreetPlaces, St as createSunRig, Hl as createTargetLock, xg as createTextBlock, cg as createTextureAtlas, Gs as createTextureForge, Vf as createTorchLight, Bl as createTouchControls, bf as createTracePlayer, yf as createTracer, uS as createTreePanel, sp as createTriplanarForgeMaterial, Lm as createTrueStars, Gd as createTween, Fl as createViewerUI, Vp as createVolumetricClouds, qa as createWaterFlow, Kr as createWaterLife, ol as createWaterSurface, Xf as createWeaponKit, ha as createWeatherRig, ml as createWorldFromRecipe, Jo as createWorldLakes, Y as damp, Tc as defaultRecipe, Xx as degenerateKeys, $c as deriveHarvest, vl as describeVocabulary, Ko as detectLakes, hd as easeInOutCubic, tb as extractExcerpt, Qy as extractLinks, $y as extractMarkdownLinks, Vt as fogCharm, sc as forgeCityMaterials, rc as forgeHoardMaterials, nf as fromURLParams, an as fullscreenVert, Hh as gaitBlend, Uh as gaitName, Co as generateScatter, po as generateTerrain, ph as getAttribution, fb as getKindColors, xp as godRayVisibility, Ky as hasMedia, tS as heapIsValid, rS as heapPop, nS as heapPush, dx as heapSort, aS as heapSortCost, By as heatFromAgeDays, Wh as heroPose, qy as indexNodes, Cl as isVersionCompatible, Eg as layoutBox, Jb as lcg, em as limitingMagnitude, or as loadSpriteSheet, bx as logTicks, mt as lowSunWashK, gx as makeCaseInput, ur as makeContactShadow, Mt as makePaletteTexture, Hn as makePalm, xx as makeScale, mr as makeVignette, gf as mapGyroToLook, Zx as measureBST, bc as measureBounds, px as measureComplexity, Wy as mediaGlyph, Gy as mediaGlyphCode, Nt as medianCut, Oc as mergeRecipes, lx as mergeSort, xn as mulberry32, Lx as nearestCluster, yx as niceTicks, Dc as normalizeRecipe, eb as noteToRecords, Us as nyquistFeatureFloor, Zy as parseFrontmatter, Sl as parseVersion, wh as percentileOf, Wn as pickStreetIntersection, Dl as pickVideoType, Qc as placeCoverBuildings, Lc as placeForest, If as planSpawn, bm as planetPosition, mf as postDiveFrag, pn as postPixelkitFrag, Gl as projectToScreen, ux as quickSort, _x as raceAlgorithms, rd as readAppFlags, eg as readChapterChain, xo as rebuildTerrainChunks, _l as recipeFromText, Ol as recorderExt, Zo as registerAssetCatalog, ax as renderNoteHtml, Ws as repeatFor, Wo as reprojectScatter, Vl as resolveAimPoint, ix as scanFileRefs, Vo as scatterAdd, Ho as scatterErase, Zc as scatterProps, Xc as scatterRuins, In as seabedY, Xo as seedWorldEditorCatalog, Sx as seriesToPoints, yn as showWebGLUnsupported, am as skyBrightnessSQM, rm as skyGlow, cm as skyGlowIntensity, Jt as spliceVectorVertex, Mx as summaryLayout, Px as summarySpec, xh as swingableHeight, Sh as swingableRope, cp as tilesPerUnit, Tn as tintTower, ar as toLuminanceTexture, rf as toURLParams, Ch as topAtPercentile, Bf as torchFlicker, qx as traceBST, iS as traceHeap, Hx as treeDepth, Vx as treeEdges, Bx as treeLayout, Ry as validateGraphSpec, Tl as validateManifest, tf as validateSceneSpec, xt as validateSunKeyframes, Pt as vectorOn, Lt as vectorShadow, It as vectorTint, Qt as vectorize, Zt as vectorizeTower, Rx as visibleSet, zt as weatherCloud, Bt as weatherCloudOff, Ht as weatherSeason, Rt as weatherSnow, jy as worstState, Ix as zoomState };
