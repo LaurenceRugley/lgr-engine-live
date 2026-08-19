@@ -26,9 +26,17 @@
 import {
   THREE, createEngineCore, CAM,
   createBikeModel, BIKE_PROFILE,
-  createMotoTerrain, createBikeMesh, createMotoChaseCam, launchSpeed,
+  createMotoTerrain, createBikeMesh, createBikeGlbMesh, createMotoChaseCam, launchSpeed,
   generateScatter, buildScatterGroup, BIOMES,
+  createCharacterRig,
 } from '@lgr/engine-core';
+/* the ASSETS (A-MOTO-ASSET, 2026-08-19) — `?url` in the PROJECT, per pedestrians.js's rule (a ?url
+   inside the lib would base64-inline them into every bundle). Vite copies both into dist/assets/
+   content-hashed; they are runtime fetches, NOT entry JS (size-budget: moto_bike.glb has its own
+   fixed-file budget row; survivor.glb is the same shipped asset hoard2/swing-lab already fetch). */
+import motoBikeUrl from '@lgr/engine-core/assets/models/moto_bike.glb?url';
+import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
+import survivorRideUrl from '@lgr/engine-core/assets/models/survivor_ride.glb?url';   // the (B)-path seated pose clip
 
 const $ = (id) => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
@@ -128,8 +136,31 @@ buildTerrain();
    the model self-seeds every field it owns (vy/pitch/airborne/jumps/landing/…).
    --------------------------------------------------------------------------------------------- */
 const model = createBikeModel(BIKE);
-const bike = createBikeMesh({});
+/* TWO ARMS, ONE BUILD (the perf-question discipline): the Blender-pipeline GLB bike is the default;
+   `?bike=box` keeps the original box bike as the control arm — same build, same physics, only the
+   visual differs — and the GLB path falls back to that same box bike on a load failure (loudly,
+   inside createBikeGlbMesh). The physics cannot move either way: both meshes are pure consumers of
+   createBikeModel's state, and the probe's 16 checks ride the default arm as the proof. */
+const bike = Q.get('bike') === 'box' ? createBikeMesh({}) : createBikeGlbMesh({ url: motoBikeUrl });
 scene.add(bike.group);
+/* THE RIDER — survivor.glb seated via the poseHold seam, holding OUR OWN 'Ride' clip
+   (tools/blender/build_ride_clip.py, the pipeline's (B) path: authored on the survivor's real
+   armature because NO shipped clip contains a straddle — measured; the Jump-frame attempt floated
+   the body 0.8 u on the clip's own hips-rise). extraClips merges it into the rig's pool; poseHold
+   then holds its one frame — the same seam createHeroBody uses for airborne stills. The rig mounts
+   as a CHILD of the bike group, so pitch/lean/flip carry the body exactly the way the box bike's
+   capsule rider tilts. Load failure degrades to a riderless bike, loudly (createCrowdTiers.js:116). */
+let riderRig = null;
+if (bike.setRider) {
+  riderRig = createCharacterRig({
+    url: survivorUrl,
+    states: { idle: 'Idle', ride: 'Ride' },
+    extraClips: [survivorRideUrl],
+  });
+  riderRig.ready.then(() => {
+    bike.setRider(riderRig.spawn());
+  }).catch((e) => console.error('rider rig failed to load (the bike rides riderless):', e));
+}
 const state = { x: 0, y: 0, z: 0, yaw: 0, speed: 0, quat: new THREE.Quaternion() };
 
 function placeAt(p) {
@@ -334,6 +365,7 @@ function frame() {
   }
 
   bike.update(state, dt);
+  if (riderRig) riderRig.update(dt);          // steps the seated rider's mixer (poseHold's carrier)
   // the sun follows the bike, or a 120 u world's shadow map lands nowhere near you (swing-lab rule)
   key.position.set(state.x + 14, 22, state.z + 9);
   key.target.position.set(state.x, 0, state.z);
@@ -367,6 +399,11 @@ window.__moto = {
   state, profile: BIKE, terrain: () => T.stats,
   heightAt: (x, z) => T.heightAt(x, z),
   ramp: () => T.ramp, view: () => view,
+  /* A-MOTO-ASSET receipts: which visual arm is actually on screen ('glb' | 'box' | 'loading' —
+     the box control arm reports 'box'), and whether the seated rider handle mounted. */
+  bikeMode: () => bike.mode || 'box',
+  riderMounted: () => !!(riderRig && riderRig.count > 0),
+  bike,                                   // the visual object itself (pose/mount tuning, receipts)
 };
 window.__motoStats = stats;
 window.__input = { get keys() { return [...held]; } };
