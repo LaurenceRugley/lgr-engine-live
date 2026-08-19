@@ -76,6 +76,22 @@
       backdrop-filter: blur(6px); pointer-events: none; text-align: center; max-width: 92vw;
     }
     #hint b { color: #e8d5b8; font-weight: 700; }
+
+    /* ---- THE TRICK POPUP (A-TRICKS): centre-stage callout — gold mid-air (announced, unbanked),
+       green on a clean bank, red when the landing scrubbed it. Same chrome family as #hint. ---- */
+    #trick-pop {
+      position: fixed; left: 50%; top: 26%; transform: translate(-50%, 6px) scale(0.94);
+      z-index: 31; pointer-events: none; text-align: center;
+      background: rgba(14,11,7,0.78); border: 1px solid #2a2018; border-radius: 6px;
+      padding: 8px 18px; backdrop-filter: blur(6px);
+      opacity: 0; transition: opacity .18s ease, transform .18s ease;
+    }
+    #trick-pop.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+    #trick-pop b { display: block; font-size: 20px; font-weight: 700; letter-spacing: 0.14em; }
+    #trick-pop span { display: block; font-size: 11px; margin-top: 2px; letter-spacing: 0.08em; color: #b3a68d; }
+    #trick-pop.announce b { color: #e8c66a; }
+    #trick-pop.bank-clean b { color: #7fd6a2; }
+    #trick-pop.bank-dirty b { color: #e06c60; }
     @media (max-width: 760px) { #dock { display: none; } #hud { font-size: 10px; min-width: 0; } }
   </style>
 </head>
@@ -96,6 +112,8 @@
     <div class="row"><span class="k">pitch · slope</span><span class="v" id="v-pitch">0° · 0°</span></div>
     <div class="row"><span class="k">last landing</span><span class="v" id="v-land">—</span></div>
     <div class="row"><span class="k">clean rate</span><span class="v" id="v-clean">—</span></div>
+    <div class="row"><span class="k">trick</span><span class="v off" id="v-trick">—</span></div>
+    <div class="row"><span class="k">score · best</span><span class="v" id="v-score">0 · best 0</span></div>
     <hr />
     <div class="row"><span class="k">airtime / min</span><span class="v" id="v-apm">—</span></div>
     <div class="row"><span class="k">launches / min</span><span class="v" id="v-lpm">—</span></div>
@@ -131,7 +149,9 @@
     </div>
   </div>
 
-  <div id="hint"><b>W</b> throttle · <b>A/D</b> steer · crest a dune at speed to fly · in the air <b>↓</b> leans back — hold it off the big ramp (<b>G</b>) for a backflip · <b>V</b> camera</div>
+  <div id="trick-pop"></div>
+
+  <div id="hint"><b>W</b> throttle · <b>A/D</b> steer · crest a dune at speed to fly · in the air <b>↓</b> leans back — hold it off the big ramp (<b>G</b>) for a backflip · land it round to BANK the points · <b>V</b> camera</div>
 
   <script type="module" src="./main.js"></script>
 </body>

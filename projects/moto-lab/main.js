@@ -27,6 +27,7 @@ import {
   THREE, createEngineCore, CAM,
   createBikeModel, BIKE_PROFILE,
   createMotoTerrain, createBikeMesh, createBikeGlbMesh, createMotoChaseCam, launchSpeed,
+  createTrickScorer,
   generateScatter, buildScatterGroup, BIOMES,
   createCharacterRig,
 } from '@lgr/engine-core';
@@ -215,12 +216,20 @@ const stats = {
   t: 0, travel: 0, lastX: 0, lastZ: 0, top: 0, sustained: 0, susT: 0,
   minClear: Infinity, landings: 0, cleans: 0, fps: 0,
 };
+/* THE TRICK SCORER (A-TRICKS) — the ability lives in engine-core (createTrickScorer, sport-
+   agnostic); this file only WIRES it (one update per frame, below) and STYLES it (the popup +
+   two readout rows). It is a pure READER of the bike's state — the node suite pins that a run
+   with it produces a byte-identical body to a run without it. */
+const scorer = createTrickScorer();
 function resetStats() {
   stats.t = 0; stats.travel = 0; stats.lastX = state.x; stats.lastZ = state.z;
   stats.top = 0; stats.sustained = 0; stats.susT = 0; stats.minClear = Infinity;
   stats.landings = 0; stats.cleans = 0;
   state.jumps = 0; state.airTotal = 0; state.airtime = 0;
   if (state.landing) state.landing = { err: 0, kept: 1, clean: true, count: 0 };
+  /* the scorer resets WITH the landing counter it is keyed to — resetting one without the other
+     would leave the scorer waiting for a count the fresh world will never reach. */
+  scorer.reset();
 }
 let lastLandCount = 0;
 
@@ -231,6 +240,25 @@ const set = (id, v, cls) => { const e = $(id); if (!e) return; e.textContent = v
 function flash(msg) { const h = $('hint'); if (!h) return; h.innerHTML = `<b>${msg}</b>`; clearTimeout(flash._t); flash._t = setTimeout(() => { h.innerHTML = HINT; }, 1800); }
 const HINT = $('hint') && $('hint').innerHTML;
 const deg = (r) => (r * 180 / Math.PI).toFixed(0);
+/* THE TRICK POPUP — project DOM over engine events (the flash() pattern, centre-stage). Two looks:
+   the mid-air ANNOUNCE (gold — the trick is earned, not yet banked) and the landing BANK (green
+   clean / red scrubbed — the landing's kept fraction is the popup's own number, so the HUD says
+   exactly what the physics decided). Events are consumed the frame they happen; the element is
+   retriggered by a class flip, not rebuilt. */
+const POP = $('trick-pop');
+function popTrick(ev) {
+  if (!POP) return;
+  if (ev.type === 'trick') {
+    POP.className = 'announce';
+    POP.innerHTML = `<b>${ev.name.toUpperCase()}${ev.revs > 1 ? ' ×' + ev.revs : ''}</b><span>${ev.points}</span>`;
+  } else if (ev.type === 'bank') {
+    POP.className = ev.clean ? 'bank-clean' : 'bank-dirty';
+    POP.innerHTML = `<b>+${ev.points}</b><span>${ev.clean ? 'CLEAN — banked 100%' : `SCRUBBED — banked ${(ev.kept * 100).toFixed(0)}%`}${ev.combo > 1 ? ` · combo ×${ev.combo}` : ''}</span>`;
+  }
+  POP.classList.add('show');
+  clearTimeout(popTrick._t);
+  popTrick._t = setTimeout(() => POP.classList.remove('show'), 1500);
+}
 let hudT = 0;
 function updateHud(dt) {
   hudT += dt; if (hudT < 0.1) return; hudT = 0;
@@ -250,6 +278,11 @@ function updateHud(dt) {
   set('v-land', L && L.count ? `${deg(L.err)}° off · kept ${(L.kept * 100).toFixed(0)}%` : '—',
     L && L.count ? (L.clean ? 'on' : 'bad') : '');
   set('v-clean', stats.landings ? `${stats.cleans}/${stats.landings} (${(100 * stats.cleans / stats.landings).toFixed(0)}%)` : '—');
+  /* the score rows read the scorer's own receipts — one implementation, HUD and probe alike */
+  const tk = scorer.read();
+  set('v-trick', tk.pending && tk.pending.name ? `${tk.pending.name} ${tk.pending.progress.toFixed(2)} rev` : '—',
+    tk.pending && tk.pending.revs > 0 ? 'on' : (tk.pending && tk.pending.name ? '' : 'off'));
+  set('v-score', `${tk.total} · best ${tk.best}`, tk.total > 0 ? 'on' : '');
   const mins = Math.max(1e-6, stats.t / 60);
   set('v-apm', `${((state.airTotal || 0) / mins).toFixed(1)} s/min`);
   set('v-lpm', `${((state.jumps || 0) / mins).toFixed(1)}`);
@@ -363,6 +396,9 @@ function frame() {
     lastLandCount = state.landing.count;
     stats.landings++; if (state.landing.clean) stats.cleans++;
   }
+  /* the trick scorer rides along — a pure reader AFTER the step (announce mid-air, bank on the
+     verdict). The returned events array is the scorer's reused scratch: consume, never retain. */
+  for (const ev of scorer.update(state)) popTrick(ev);
 
   bike.update(state, dt);
   if (riderRig) riderRig.update(dt);          // steps the seated rider's mixer (poseHold's carrier)
@@ -404,6 +440,10 @@ window.__moto = {
   bikeMode: () => bike.mode || 'box',
   riderMounted: () => !!(riderRig && riderRig.count > 0),
   bike,                                   // the visual object itself (pose/mount tuning, receipts)
+  /* A-TRICKS receipts: the scorer's own read() — total/best/banks/hash/last{points,kept,clean,
+     tricks}/pending. The probe asserts last.kept === state.landing.kept (the same float, page-side)
+     rather than re-deriving anything from pixels. */
+  tricks: () => scorer.read(),
 };
 window.__motoStats = stats;
 window.__input = { get keys() { return [...held]; } };
