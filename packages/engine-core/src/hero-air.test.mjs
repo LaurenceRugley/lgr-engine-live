@@ -9,7 +9,10 @@
    ============================================================ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeAirPose, airPose, riseFall, breathe, climbCycle, AIR_MODES, AIR_POSE_KEYS } from './hero-air.js';
+import {
+  makeAirPose, airPose, riseFall, breathe, climbCycle, AIR_MODES, AIR_POSE_KEYS,
+  CRAWL, CRAWL_LIMBS, CRAWL_PHASE, crawlPhaseRate, crawlLimb,
+} from './hero-air.js';
 
 const P = () => makeAirPose();
 
@@ -133,22 +136,93 @@ test('CLING is a SPLAY, not a reach — both arms up and wide, knees out', () =>
   assert.ok(c.spineX > 0.1, 'chest pressed in toward the wall');
 });
 
-test('CLING climbs: the four-limb cycle is ANTI-symmetric, and its amplitude is the climb effort', () => {
-  // WHY: a static splay is still a decal. A climbing body reaches with one arm while the other holds,
-  // driven by the opposite knee — so at any instant the left and right offsets must have OPPOSITE
-  // signs about the base. And a player who is not pressing the climb key should barely move.
-  const climbing = P();
-  airPose(climbing, 'cling', 0, 0.35, 1);              // clock chosen off the cycle's zero crossing
-  const dArmL = climbing.armLX - (-1.20), dArmR = climbing.armRX - (-1.20);
-  assert.ok(Math.abs(dArmL) > 0.1, 'the reaching arm has actually moved');
-  assert.ok(dArmL * dArmR < 0, 'and the two arms move in OPPOSITE directions — a cycle, not a shrug');
-  const dLegL = climbing.upLegLX - 0.30, dLegR = climbing.upLegRX - 0.30;
-  assert.ok(dLegL * dLegR < 0, 'the knees alternate with them');
-  // hanging still: same clock, climb 0 → the same cycle at a fraction of the amplitude.
+test('CLING climbs a DIAGONAL gait: left hand with RIGHT knee, phase-driven, effort-scaled (A-CRAWL)', () => {
+  // WHY: the owner's ask is a crawl, and a crawl is a trot — opposite hand/foot pairs move together,
+  // because that is the only four-limb gait that keeps two contacts under the body. The old cycle
+  // alternated SAME-side limbs (a camel's pace) and ran on the wall clock; this pins the diagonal
+  // pairing AND that the alternation is a function of the crawl PHASE, not of time — the same phase
+  // the wall-contact targets read, so the silhouette and the pins can never disagree.
+  const base = P();
+  airPose(base, 'cling', 0, 0, 1, Math.PI / 2);        // cos(π/2) = 0 → the gait's neutral crossing
+  const reach = P();
+  airPose(reach, 'cling', 0, 0, 1, 0);                 // cos(0) = 1 → LH+RF pair fully committed
+  const dArmL = reach.armLX - base.armLX, dArmR = reach.armRX - base.armRX;
+  assert.ok(dArmL < -0.1, 'the LEFT arm reaches (more overhead = more negative)');
+  assert.ok(dArmL * dArmR < 0, 'and the arms alternate — a cycle, not a shrug');
+  const dLegL = reach.upLegLX - base.upLegLX, dLegR = reach.upLegRX - base.upLegRX;
+  assert.ok(dLegR > 0.1, 'the RIGHT knee drives up with the left hand — the DIAGONAL pair');
+  assert.ok(dLegL * dLegR < 0, 'while the left leg holds low — its turn comes half a cycle later');
+  // half a cycle on: the same shape, mirrored — the counter-pair's turn.
+  const counter = P();
+  airPose(counter, 'cling', 0, 0, 1, Math.PI);
+  assert.ok((counter.armLX - base.armLX) * dArmL < 0, 'phase +π swaps which arm reaches');
+  // a body that stops climbing barely alternates (effort scales the amplitude)…
   const hanging = P();
-  airPose(hanging, 'cling', 0, 0.35, 0);
-  assert.ok(Math.abs(hanging.armLX + 1.20) < Math.abs(dArmL) * 0.5, 'hanging still is a weight-shift, not a climb');
-  assert.notEqual(hanging.armLX, -1.20, 'but it is still ALIVE — a hanging body is not a photograph');
+  airPose(hanging, 'cling', 0, 0.35, 0, 0);
+  assert.ok(Math.abs(hanging.armLX - base.armLX) < Math.abs(dArmL) * 0.5, 'hanging is a weight-shift, not a climb');
+  // …but is not a photograph: the breath term still moves it between two instants.
+  const hanging2 = P();
+  airPose(hanging2, 'cling', 0, 0.75, 0, 0);
+  assert.notEqual(hanging.armLX, hanging2.armLX, 'a hanging body still breathes');
+});
+
+test('CLING effort is |climb| and the head follows the DIRECTION — signed climb (A-CRAWL)', () => {
+  // WHY: S climbs DOWN. The gait's amplitude must be the same going down as up (|climb|), or the
+  // descent reads as a weaker animation rather than the same one reversed — and the head is the one
+  // joint that should NOT be symmetric: you look where you are going (up on a climb, levelling out on
+  // a descent), continuously in `climb` so the eased angles never pop at the sign flip.
+  const up = P(), down = P();
+  airPose(up, 'cling', 0, 0, 1, 0.7);
+  airPose(down, 'cling', 0, 0, -1, 0.7);
+  assert.equal(up.armLX, down.armLX, 'same effort, same reach — the direction lives in the phase, not the amplitude');
+  assert.ok(down.headX > up.headX + 0.2, 'descending, the chin comes down toward where the body is going');
+});
+
+/* ---- the crawl gait's pure pieces (A-CRAWL) ---- */
+
+test('crawlPhaseRate is an ODOMETER: sign follows vy, zero when hanging, safe on a bad stride', () => {
+  // WHY: this one function IS "still while hanging, cycling while climbing, reversed with S". A
+  // clock-driven phase (the old climbCycle) fails all three at once.
+  assert.equal(crawlPhaseRate(0, 0.6), 0, 'hanging: the gait stops dead');
+  assert.ok(crawlPhaseRate(1.15, 0.6) > 0, 'climbing up runs the cycle forward');
+  assert.equal(crawlPhaseRate(-1.15, 0.6), -crawlPhaseRate(1.15, 0.6), 'S is the SAME gait in reverse');
+  assert.ok(Math.abs(crawlPhaseRate(1.15, 0.6) * 0.6 / (Math.PI * 2) - 1.15) < 1e-12, 'one full cycle per stride climbed');
+  assert.equal(crawlPhaseRate(1, 0), 0, 'a zero stride is a mis-config, not a divide-by-zero');
+});
+
+test('crawlLimb: planted ON the plane through the stance half, lifted ONLY while returning', () => {
+  // WHY: contact is the whole complaint — A-AIR's limbs waved NEAR the wall. The stance half (sin φ > 0)
+  // must carry ZERO lift so the solver pins the limb to the plane, and the return half must lift it or
+  // the hand drags THROUGH the wall on its way back up.
+  const o = { u: 0, lift: 0 };
+  crawlLimb(o, Math.PI / 2, 1);
+  assert.equal(o.lift, 0, 'mid-stance: pressed to the plane');
+  crawlLimb(o, -Math.PI / 2, 1);
+  assert.ok(o.lift > 0.9, 'mid-return: fully lifted off it');
+  crawlLimb(o, 0, 1);
+  assert.equal(o.u, 1, 'plants at the TOP of its travel…');
+  crawlLimb(o, Math.PI, 1);
+  assert.equal(o.u, -1, '…and leaves the stance at the bottom — the slide the body climbs past');
+});
+
+test('crawlLimb settles when the climb stops — climbEase collapses every lift to the plane', () => {
+  // WHY: the phase freezes wherever the player releases the key. Without this a limb caught mid-return
+  // hangs in the air forever — a climber frozen like a film still instead of one holding on.
+  const o = { u: 0, lift: 0 };
+  for (let i = 0; i < 24; i++) {
+    crawlLimb(o, (i / 24) * Math.PI * 2, 0);
+    assert.equal(o.lift, 0, `φ=${(i / 24 * 360).toFixed(0)}°: every limb is ON the wall when hanging`);
+  }
+});
+
+test('CRAWL_PHASE is the diagonal pairing table, and the limb list agrees with it', () => {
+  // WHY: three consumers read this table (the additive pose, the contact targets, the tests) — if the
+  // pairing drifted, hands and feet would gait against each other and the trot becomes a stumble.
+  assert.deepEqual(CRAWL_LIMBS, ['handL', 'handR', 'footL', 'footR']);
+  assert.equal(CRAWL_PHASE[0], CRAWL_PHASE[3], 'left hand and RIGHT foot share a phase');
+  assert.equal(CRAWL_PHASE[1], CRAWL_PHASE[2], 'right hand and LEFT foot share the other');
+  assert.equal(Math.abs(CRAWL_PHASE[0] - CRAWL_PHASE[1]), Math.PI, 'and the two pairs are half a cycle apart');
+  assert.ok(CRAWL.stride > 0 && CRAWL.lift > 0 && CRAWL.insetHand > 0, 'the gait constants are sane');
 });
 
 test('every declared mode produces a non-trivial pose — no mode is secretly inert', () => {

@@ -39,7 +39,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE, strideTimeScale } from './character-anim.js';
 import { flinchEnvelope, headYawDelta, wrapPi, swingEnvelope, dipEnvelope } from './character-layers.js';
-import { makeAirPose, airPose, riseFall, AIR_POSE_KEYS } from './hero-air.js';
+import { makeAirPose, airPose, riseFall, AIR_POSE_KEYS, CRAWL, CRAWL_PHASE, crawlPhaseRate, crawlLimb } from './hero-air.js';
 import { resolveRig } from './character-rig-profiles.js';
 import { applyNightFill, collectMaterials } from './character-night-fill.js';
 import { damp } from './math.js';
@@ -82,6 +82,28 @@ export const LAYER_DEFAULTS = {
 // this ships the plant the metric demands. Presentation-only (bone transform after the mixer; the sim owns the
 // body position) → determinism-safe. Module scratch (runs synchronously at the tail of one _applyLayers).
 const _ikTgt = new THREE.Vector3(), _ikLocal = new THREE.Vector3(), _ikMat = new THREE.Matrix4();
+// A-CRAWL (2026-08-19) wall-contact scratch — module-level like every other layer's (the contact pass
+// runs synchronously inside one _applyLayers, one limb at a time, so a shared pair is safe + alloc-free).
+const _cR = new THREE.Vector3(), _cE = new THREE.Vector3();
+/* A-CRAWL — a limb chain's total world length (root→mid + mid→end), measured ONCE off the live bones
+   and cached on the chain (`clen`). Measured rather than configured because it is the one number every
+   crawl amplitude is expressed in (hero-air.js CRAWL is all in chain-lengths), and the same rig lands
+   at a different world size per consumer (createHeroBody scales the GLB to the level's own height).
+   Bone-to-bone distances are pose-invariant, so when this runs within a frame does not matter; it does
+   assume the object's SCALE is settled, which it is by the first frame any air layer can run (the
+   consumer scales at ready-time, before its first update). Articulated chains only — a flat rig
+   (Quaternius Foot→Root) has no limb length worth speaking of and returns 0. */
+function _chainLenOf(ch) {
+  if (ch.clen > 0) return ch.clen;
+  if (!ch.articulated) return 0;
+  ch.upleg.updateWorldMatrix(true, false); ch.upleg.getWorldPosition(_cR);
+  ch.knee.updateWorldMatrix(true, false); ch.knee.getWorldPosition(_cE);
+  let l = _cR.distanceTo(_cE);
+  ch.foot.updateWorldMatrix(true, false); ch.foot.getWorldPosition(_cR);
+  l += _cE.distanceTo(_cR);
+  ch.clen = l > 1e-5 ? l : 0;
+  return ch.clen;
+}
 // A8-2 two-bone knee-follow scratch (module-level, synchronous, alloc-free — one leg solved at a time).
 const _kR = new THREE.Vector3(), _kM = new THREE.Vector3(), _kE = new THREE.Vector3();
 const _kThigh = new THREE.Vector3(), _kShin = new THREE.Vector3(), _kAxis = new THREE.Vector3();
@@ -263,7 +285,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       const knee = foot && foot.parent && foot.parent.isBone ? foot.parent : null;
       const upleg = knee && knee.parent && knee.parent.isBone ? knee.parent : null;
       const articulated = !!(knee && upleg && knee !== _ikHips && upleg !== _ikHips && knee !== foot && upleg !== knee);
-      return { foot, knee, upleg, articulated, lockOn: false, lx: 0, ly: 0, lz: 0, w: 0, fx: 0, fy: 0, fz: 0 };
+      return { foot, knee, upleg, articulated, lockOn: false, lx: 0, ly: 0, lz: 0, w: 0, fx: 0, fy: 0, fz: 0, clen: 0 };
     };
     const _ikLegL = _legChain(B.footL);   // canonical footL (Quaternius FootL / mixamo LeftFoot)
     const _ikLegR = _legChain(B.footR);   // canonical footR
@@ -282,6 +304,37 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
     let _airMode = null, _airW = 0, _airWant01 = 0, _airT = 0, _airVy = 0, _airVRef = 1, _airClimb = 0;
     const _airCur = makeAirPose(), _airWant = makeAirPose();
     const _airLegL = _ikLegL, _airLegR = _ikLegR;   // same chains; the air layer only ROTATES them
+    /* ── A-CRAWL (2026-08-19) WALL-CONTACT state. The cling stops waving NEAR the wall and puts its
+       hands and feet ON it: while `setAirMotion` reports mode 'cling' with a wall plane, the pass at
+       the tail of _applyLayers solves each limb chain (the SAME `_solveTwoBone` the foot-lock trusts)
+       to a target on that plane, gaited by the distance-locked crawl phase (hero-air.js CRAWL).
+       THE ARM CHAINS ARE WALKED DOWN FROM THE CANONICAL UPPER ARMS (armL/armR → first Bone child →
+       its first Bone child = shoulder→forearm→wrist), the mirror of how `_legChain` walks UP from the
+       feet — and for the same doctrinal reason (see LAYER_BONES.air in character-rig-profiles.js): a
+       canonical 'hand' role would make resolveRig warn on every rig that lacks one for a layer it
+       never runs. A chain that does not resolve is a graceful no-op limb, exactly like the flat legs.
+       `_airPhase` is the crawl gait's signed phase (radians; integrated from vy so it stops when the
+       body hangs and runs backwards on a descent) · `_airClimbEase` the eased |climb| that settles
+       lifted limbs back onto the plane when the climb stops · `_contactW` the pass's own eased weight
+       (in fast — a grab is a beat; out FASTER — a wall-jump must not leave hands pinned to a wall the
+       body has already left) · `_contactRep` the live receipt a probe/HUD reads: each end joint's
+       measured distance OFF the plane this frame (u; -1 = that limb has no articulated chain). */
+    const _armChainOf = (arm) => {
+      const fore = arm ? arm.children.find((c) => c.isBone) : null;
+      const hand = fore ? fore.children.find((c) => c.isBone) : null;
+      return { foot: hand || null, knee: fore || null, upleg: arm || null, articulated: !!(arm && fore && hand), clen: 0 };
+    };
+    const _airArmL = _armChainOf(B.armL), _airArmR = _armChainOf(B.armR);
+    let _airPhase = 0, _airClimbEase = 0, _contactW = 0;
+    let _airWallOn = false, _airWallNx = 0, _airWallNz = 0, _airWallPx = 0, _airWallPz = 0;
+    const _crawlOff = { u: 0, lift: 0 };            // crawlLimb's out-param (spawn-owned, zero-alloc per frame)
+    const _contactRep = { active: false, w: 0, handL: -1, handR: -1, footL: -1, footR: -1 };
+    const _crawlLimbs = [
+      { ch: _airArmL, hand: true, off: CRAWL_PHASE[0], key: 'handL' },
+      { ch: _airArmR, hand: true, off: CRAWL_PHASE[1], key: 'handR' },
+      { ch: _airLegL, hand: false, off: CRAWL_PHASE[2], key: 'footL' },
+      { ch: _airLegR, hand: false, off: CRAWL_PHASE[3], key: 'footR' },
+    ];
     const lp = {
       headLook: { ...LAYER_DEFAULTS.headLook }, hitReact: { ...LAYER_DEFAULTS.hitReact },
       recoil: { ...LAYER_DEFAULTS.recoil }, swing: { ...LAYER_DEFAULTS.swing }, lunge: { ...LAYER_DEFAULTS.lunge },
@@ -384,18 +437,36 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
            vy    — the body's vertical world speed; the sign and magnitude ARE the animation (tuck on the
                    way up, spread on the way down, legs pumping the pendulum on a swing)
            vRef  — the speed at which that shape is fully expressed, in the caller's world units/second
-           climb — 0..1, how hard a clinging body is climbing; scales the four-limb wall cycle
+           climb — SIGNED since A-CRAWL: -1..1, how hard a clinging body is climbing and which way
+                   (+ up, − down). |climb| scales the four-limb cycle; the sign runs the crawl phase
+                   forwards or backwards, so a descent is the same gait played in reverse.
+           wall  — A-CRAWL, cling only: { nx, nz, px, pz } = the wall's outward unit normal (horizontal)
+                   and a world point ON the plane. With it the contact pass pins hands and feet to that
+                   plane; without it the cling stays the additive-only splay (the graceful degrade for a
+                   consumer whose controller does not publish its cling ray).
          DEFAULT OFF AND EXACTLY NO-OP: a consumer that never calls this leaves `_airMode` null, `_airW`
          at 0, and the whole block below is one `if` that fails. The horde, the city crowd and hoard2 are
          byte-identical (`npm run tier-guard` is the check that says so, not this comment). */
-      setAirMotion(mode, { vy = 0, vRef = 1, climb = 0 } = {}) {
+      setAirMotion(mode, { vy = 0, vRef = 1, climb = 0, wall = null } = {}) {
         _airMode = mode || null;
         _airWant01 = _airMode ? 1 : 0;
         _airVy = vy; _airVRef = vRef;
-        _airClimb = climb < 0 ? 0 : climb > 1 ? 1 : climb;
+        _airClimb = climb < -1 ? -1 : climb > 1 ? 1 : climb;
+        _airWallOn = !!(_airMode === 'cling' && wall && wall.nx != null && wall.nz != null);
+        if (_airWallOn) {
+          // kept as the LAST wall while the contact weight eases out, so a wall-jump's release eases
+          // AWAY FROM the plane it left instead of toward a zeroed one at the origin.
+          _airWallNx = wall.nx; _airWallNz = wall.nz;
+          _airWallPx = wall.px || 0; _airWallPz = wall.pz || 0;
+        }
       },
       get airWeight() { return _airW; },      // the EASED weight in force — a probe/HUD receipt, not a flag
       get airMode() { return _airMode; },
+      // A-CRAWL receipts. `airPhase` proves the gait is distance-locked (still while hanging, negative
+      // rate on a descent); `contactReport` is the money number — each end joint's measured distance
+      // off the wall plane, LIVE (read-only by contract; the layer rewrites it every contact frame).
+      get airPhase() { return _airPhase; },
+      get contactReport() { return _contactRep; },
       // A1: a SMOOTHED body heading (slerped in _applyLayers) — the caller passes the target yaw instead of
       // snapping object.rotation.y, so turns read smooth. Pass null to go back to caller-driven yaw.
       setHeading(yaw) { _headingTarget = yaw; },
@@ -426,7 +497,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
       // A-AIR: the air layer is reset here too. A pooled slot that recycled mid-fall would otherwise
       // re-arm carrying the previous occupant's spread-eagle in `_airCur` and ease OUT of it on frame one.
-      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
+      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; _airPhase = 0; _airClimbEase = 0; _contactW = 0; _airWallOn = false; _contactRep.active = false; _contactRep.w = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
@@ -519,7 +590,18 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
           // moment you leave the ground is a beat, the moment you land should settle rather than snap.
           _airW = damp(_airW, _airWant01, _airWant01 > 0 ? 14 : 9, dt);
           _airT += dt;
-          airPose(_airWant, _airMode, riseFall(_airVy, _airVRef), _airT, _airClimb);
+          /* A-CRAWL — the gait phase is an ODOMETER, not a clock: it integrates vy over the crawl's
+             stride (in this rig's OWN measured leg length, so one tuning fits every scale), which is
+             the entire mechanism behind "still while hanging, cycling while climbing, reversed on S".
+             `_airClimbEase` is the eased effort that settles lifted limbs back onto the plane when the
+             climb stops — eased here (10/s) rather than read raw because a keyboard lift axis is a
+             square wave and the lift amplitude must not be. */
+          if (_airMode === 'cling') {
+            const legL = _chainLenOf(_airLegL) || _chainLenOf(_airLegR);
+            if (legL > 0) _airPhase += crawlPhaseRate(_airVy, CRAWL.stride * legL) * dt;
+          }
+          _airClimbEase = damp(_airClimbEase, _airMode === 'cling' ? (_airClimb < 0 ? -_airClimb : _airClimb) : 0, 10, dt);
+          airPose(_airWant, _airMode, riseFall(_airVy, _airVRef), _airT, _airClimb, _airPhase);
           // Ease the ANGLES too (see the state block above) — 12/s, so a jump→fall flip at the apex is
           // a fast melt rather than a pop, and a mode released mid-arc drifts home instead of cutting.
           const k = _airW;
@@ -539,6 +621,10 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
               _q.setFromAxisAngle(_AX_Z, _airCur.armRZ * k); boneArmR.quaternion.multiply(_q);
             }
             if (boneArmForeR) { _q.setFromAxisAngle(_AX_X, _airCur.foreRX * k); boneArmForeR.quaternion.multiply(_q); }
+            // A-CRAWL: the LEFT elbow, reached through the arm chain (no canonical foreArmL role — same
+            // doctrine as the legs). Only the cling writes foreLX; it pre-bends the elbow so the contact
+            // solver's pole (nearest-current-bend) folds the arm the way a climber's folds, not backwards.
+            if (_airArmL.knee) { _q.setFromAxisAngle(_AX_X, _airCur.foreLX * k); _airArmL.knee.quaternion.multiply(_q); }
             /* THE LEGS — the half no shipped layer had ever moved, and the half that carries a tuck, a
                splay and a climb. `upleg`/`knee` are null on a flat rig (the Quaternius zombie), so this
                is a no-op there rather than a throw: the same graceful degradation every layer above has. */
@@ -705,6 +791,67 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
               }
             }
           }
+        }
+        /* ── A-CRAWL WALL CONTACT (2026-08-19) — hands and feet land ON the wall plane, gaited. ------
+           This is the pass that turns A-AIR's "spread-eagled NEAR the wall" into "crawling ON it": for
+           each of the four limb chains, build a target on the cling ray's wall plane — the chain root
+           projected onto the plane, offset up/down by the crawl gait, sideways to the limb's own side,
+           and off the plane by the planted inset plus the reaching limb's lift — then run the SAME
+           analytic two-bone solve the A8-2 foot-lock trusts, so elbows and knees bend to reach it with
+           both bone lengths preserved. All four targets read ONE signed phase through CRAWL_PHASE, so
+           the diagonal pairs (LH+RF, then RH+LF) move together by construction.
+           RUNS LAST, after every clip and layer (including the foot-lock: last writer wins, and while
+           clinging the wall owns the feet — the floor's plant is meaningless on a vertical face).
+           THE BLEND IS THE FOOT-LOCK'S OWN TRICK: the target is lerped from the limb's CURRENT posed
+           end position toward the wall target by the eased weight, so weight 0 solves to where the limb
+           already is (an exact no-op) and there is no second blending mechanism to keep honest.
+           Weight out is FASTER than in (18 vs 14): on a wall-jump the body leaves the plane at
+           jumpSpeed, and a slow-fading pin would visibly drag the hands back toward a wall the body
+           has already left — the leap must not fight the crawl (the wallJumped gate's presentation
+           half). The stale plane is kept during the ease-out ON PURPOSE (see setAirMotion): easing
+           away from the real wall reads as the push-off; easing toward a cleared one reads as a twitch.
+           COST, stated: ~10 updateWorldMatrix walks + 4 two-bone solves per CLINGING hero per frame —
+           the same order as one aim-IK plus one foot-lock, and exactly zero when not clinging (the
+           whole pass is one failed `if`). Measured in tools/hero-perf-ab.mjs's cling room. */
+        {
+          const wantContact = (_airWallOn && _airMode === 'cling' && _airW > 0.3) ? 1 : 0;
+          if (wantContact || _contactW > 0.004) {
+            _contactW = damp(_contactW, wantContact, wantContact ? 14 : 18, dt);
+            _contactRep.active = _contactW > 0.004;
+            _contactRep.w = _contactW;
+            const wBase = _contactW * _airW;
+            if (_contactRep.active && wBase > 0.004) {
+              const nx = _airWallNx, nz = _airWallNz;    // n̂: OUT of the wall, unit, horizontal
+              const tqx = nz, tqz = -nx;                 // t̂ = up × n̂ — the along-wall horizontal
+              const px = _airWallPx, pz = _airWallPz;    // a world point on the plane
+              for (let i = 0; i < _crawlLimbs.length; i++) {
+                const d = _crawlLimbs[i], ch = d.ch;
+                const L = _chainLenOf(ch);
+                if (!(L > 0)) { _contactRep[d.key] = -1; continue; }
+                crawlLimb(_crawlOff, _airPhase + d.off, _airClimbEase);
+                ch.upleg.updateWorldMatrix(true, false); ch.upleg.getWorldPosition(_cR);
+                ch.foot.updateWorldMatrix(true, false); ch.foot.getWorldPosition(_cE);
+                // the chain root, projected onto the plane along n̂…
+                const sd = (_cR.x - px) * nx + (_cR.z - pz) * nz;
+                // …then stood off it by the planted inset (a palm/foot's own depth — the JOINT stays
+                // off the surface so the MESH lands on it) plus the reaching limb's gait lift…
+                const off = (d.hand ? CRAWL.insetHand : CRAWL.insetFoot) * L + _crawlOff.lift * CRAWL.lift * L;
+                // …shifted to the limb's own side of the body (sign read off the root itself, so left
+                // limbs go body-left with no handedness table)…
+                const lat = (((_cR.x - object.position.x) * tqx + (_cR.z - object.position.z) * tqz) >= 0 ? 1 : -1) * CRAWL.lat * L;
+                const tx = _cR.x - nx * sd + nx * off + tqx * lat;
+                const tz = _cR.z - nz * sd + nz * off + tqz * lat;
+                // …and up/down the wall by the limb's rest reach plus the gait's cosine travel.
+                const ty = _cR.y + ((d.hand ? CRAWL.uHand : CRAWL.uFoot) + _crawlOff.u * CRAWL.uAmp) * L;
+                _ikTgt.set(_cE.x + (tx - _cE.x) * wBase, _cE.y + (ty - _cE.y) * wBase, _cE.z + (tz - _cE.z) * wBase);
+                _solveTwoBone(ch, _ikTgt.x, _ikTgt.y, _ikTgt.z);
+                // the receipt: the end joint's MEASURED distance off the plane after the solve — the
+                // number the ledger's acceptance quotes, computed where it cannot drift from the code.
+                ch.foot.updateWorldMatrix(true, false); ch.foot.getWorldPosition(_cE);
+                _contactRep[d.key] = (_cE.x - px) * nx + (_cE.z - pz) * nz;
+              }
+            }
+          } else if (_contactRep.active) { _contactRep.active = false; _contactRep.w = 0; }
         }
       },
       setState(name, opts = {}) {

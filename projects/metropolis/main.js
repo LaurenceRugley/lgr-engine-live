@@ -1594,6 +1594,9 @@ window.__hero = {
   get airMode() { return hero.airMode; },
   get airWeight() { return +hero.airWeight.toFixed(4); },
   get poseWeight() { return +hero.poseWeight.toFixed(4); },
+  // A-CRAWL receipts — identical to the lab's so one harness reads either project (the A-AIR rule).
+  get airPhase() { return +hero.airPhase.toFixed(4); },
+  get contact() { const c = hero.contact; return c ? { active: c.active, w: +c.w.toFixed(3), handL: +c.handL.toFixed(4), handR: +c.handR.toFixed(4), footL: +c.footL.toFixed(4), footR: +c.footR.toFixed(4) } : null; },
   handPoint() { const v = new THREE.Vector3(); hero.webAnchorPoint(v); return { x: v.x, y: v.y, z: v.z }; },
   bonePos(name) {
     const v = new THREE.Vector3();

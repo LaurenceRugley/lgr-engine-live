@@ -77,6 +77,7 @@
 import * as THREE from 'three';
 import { createCharacterRig } from './createCharacterRig.js';
 import { gaitBlend, gaitName, heroPose } from './hero-body-pose.js';
+import { damp } from './math.js';
 
 // The clip map for the shipped survivor.glb. A different GLB overrides `states`; a key whose clip is
 // absent degrades to a no-op inside the rig (findClip returns null), never a throw.
@@ -93,6 +94,7 @@ export const HERO_AIR_POSE = { jump: 0.28, fall: 0.60, swing: 0.52, cling: 0.44 
 const _v = new THREE.Vector3();
 const _box = new THREE.Box3();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+const _qFace = new THREE.Quaternion();   // A-CRAWL: the wall-facing target (scratch; one hero per frame)
 
 export function createHeroBody({
   url, gltf, states = SURVIVOR_STATES, extraClips = [],
@@ -196,6 +198,11 @@ export function createHeroBody({
   let hiddenOn = null;           // tri-state: null = never applied, so the first update always writes
   let visible = true;
   let pose = 'ground', gait = 0;
+  // A-CRAWL: the eased weight of "face the wall you are crawling on", and the REUSED options bag the
+  // per-frame setAirMotion call fills (the old inline literal was a hot-path allocation — invariant #7).
+  let faceW = 0;
+  const _airOpt = { vy: 0, vRef: 1, climb: 0, wall: null };
+  const _wallOpt = { nx: 0, nz: 0, px: 0, pz: 0 };
 
   const ready = !rig ? Promise.resolve(null) : rig.ready.then(() => {
     handle = rig.spawn({ castShadow });
@@ -257,6 +264,10 @@ export function createHeroBody({
     get airMotion() { return !!MOTION; },
     get airWeight() { return handle ? handle.airWeight : 0; },
     get airMode() { return handle ? handle.airMode : null; },
+    // A-CRAWL receipts: the distance-locked gait phase (still while hanging, reversed on a descent)
+    // and the live wall-contact report (per-limb measured distance off the plane; null before the GLB).
+    get airPhase() { return handle ? handle.airPhase : 0; },
+    get contact() { return handle ? handle.contactReport : null; },
     /* THE HELD POSE'S OWN EASED WEIGHT, exposed for one specific reason: it is the CONFOUND in any
        measurement of whether a pose is moving. While `poseHold` is easing in (14/s) the limbs travel a
        long way purely because the body is crossfading from its walk into the air pose — so a limb-travel
@@ -302,6 +313,42 @@ export function createHeroBody({
          Free, it is a plain yaw, and first person overrides it with the LOOK yaw (see above). */
       if (first && lookYaw != null && !s.swinging) { _e.set(0, lookYaw, 0, 'YXZ'); o.quaternion.setFromEuler(_e); }
       else if (s.quat) o.quaternion.copy(s.quat);
+      /* A-CRAWL: A CRAWLING BODY SQUARES UP TO ITS WALL. While clinging, `state.quat` is a yaw the
+         controller derived from MOTION — i.e. whichever way you last WALKED, frozen the moment you
+         stopped — and a crawl read sideways-on is a body glued to a wall it is not facing. The cling
+         ray implies the facing (you climb where you look, so the wall's outward normal is published on
+         the state — character.js A-CRAWL), and the body eases toward its reverse. Slerped by an eased
+         weight rather than snapped, in both directions: the grab is a beat (12/s), the release hands
+         the yaw back to the controller's own quat without a pop (10/s). The LOOK is untouched — this
+         orients the costume, never the camera. */
+      const crawlWall = pose === 'cling' && MOTION && s.clingNx != null;
+      faceW = damp(faceW, crawlWall ? 1 : 0, crawlWall ? 12 : 10, dt);
+      if (faceW > 0.002 && s.clingNx != null) {
+        _e.set(0, Math.atan2(-s.clingNx, -s.clingNz), 0, 'YXZ');
+        _qFace.setFromEuler(_e);
+        o.quaternion.slerp(_qFace, faceW);
+        /* A-CRAWL HUG — slide the RENDERED body up against its wall. MEASURED (crawl-smoke, lab):
+           a clinging collider hangs wherever the grab damped it, `clingDist` 0.239 u from the facade
+           on a 0.30 u body — nearly a body-height of air, so the limb chains (arms ≈ 0.11 u) were
+           CLAMPED at full reach ~0.10 u short of the plane and no inset could ever land. The cure is
+           the `fpBackOff` precedent, in the other direction: move the COSTUME, never the collider —
+           the controller's position, the camera pivot, every probe receipt and the determinism trace
+           are all untouched, exactly as this module's header promises. `hug` is the body's rendered
+           centre-line distance to the wall: ~0.30 × height puts the chest a torso's own depth off the
+           facade, which leaves the shoulders inside arm's reach of the plane so the contact pass can
+           express its inset instead of its clamp. Eased by the same faceW, so the grab pulls in as
+           the body squares up and a release hands the true position back without a pop. */
+        /* THIRD PERSON ONLY, and that is a measurement, not caution: in first person the eye stays at
+           the collider while the hug slides the torso toward the wall — projected on the live page,
+           that put the hips and hands within ±0.05 u of the CAMERA PLANE (view-space z ≈ +0.002 on a
+           0.02 near plane), so the whole body fell to the near clip and the FP frame showed bare
+           facade. Unslid, the body hangs under the eye exactly as A-BODY's FP capture proved legible. */
+        const hugPull = first ? 0 : (s.clingDist || 0) - height * 0.30;
+        if (hugPull > 0) {
+          o.position.x -= s.clingNx * hugPull * faceW;
+          o.position.z -= s.clingNz * hugPull * faceW;
+        }
+      }
       o.visible = visible && !(first && fpMode === 'off');
 
       /* THE GAIT ALWAYS RUNS, even in the air. It is what the body returns TO when the held pose
@@ -332,12 +379,26 @@ export function createHeroBody({
       /* THE AIRBORNE MOTION LAYER — one call, every frame, releasing itself on the ground. `vy` carries
          both meanings the layer needs and the controller already separates them for us: airborne it is
          gravity's own number (so the shape follows the arc), and on a wall `character.js` writes
-         `state.vy = lift * climbRate`, so its magnitude over climbRate is the climb effort 0..1. */
+         `state.vy = lift * climbRate`, so vy/climbRate IS the climb effort — SIGNED since A-CRAWL,
+         because the sign is the crawl's direction (S runs the gait backwards).
+         THE WALL travels with the same call: the controller publishes the cling ray's verdict
+         (`clingNx/Nz` = the outward normal, `clingDist` = body→surface along the ray), and the plane
+         point is reconstructed from the STATE's own x/z rather than the rendered body's — the rendered
+         body slides backward `backOff` in first person, and hands pinned to a plane derived from the
+         slid position would hover off the real facade by exactly that much. */
       if (MOTION) {
-        handle.setAirMotion(pose === 'ground' ? null : pose, {
-          vy: s.vy || 0, vRef: MOTION.vRef,
-          climb: pose === 'cling' ? Math.min(1, Math.abs(s.vy || 0) / (MOTION.climbRate || 1)) : 0,
-        });
+        _airOpt.vy = s.vy || 0; _airOpt.vRef = MOTION.vRef;
+        if (pose === 'cling') {
+          const c = (s.vy || 0) / (MOTION.climbRate || 1);
+          _airOpt.climb = c < -1 ? -1 : c > 1 ? 1 : c;
+          if (s.clingNx != null) {
+            _wallOpt.nx = s.clingNx; _wallOpt.nz = s.clingNz;
+            const wd = s.clingDist || 0;
+            _wallOpt.px = s.x - s.clingNx * wd; _wallOpt.pz = s.z - s.clingNz * wd;
+            _airOpt.wall = _wallOpt;
+          } else _airOpt.wall = null;   // a controller that predates the cling-ray receipt → splay only
+        } else { _airOpt.climb = 0; _airOpt.wall = null; }
+        handle.setAirMotion(pose === 'ground' ? null : pose, _airOpt);
       }
 
       rig.update(dt);          // steps the mixer + the procedural layers for this one body

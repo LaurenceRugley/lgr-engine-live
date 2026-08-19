@@ -530,6 +530,15 @@ export function createCharacterController(opts = {}) {
             clinging = true;
             if (!wasClinging) climbs++;
             clingT += dt;
+            /* A-CRAWL (2026-08-19): PUBLISH THE WALL THE RAY JUST FOUND. The cling ray already knows
+               everything a crawl animation needs — its direction is the look (you climb where you
+               look), so the facade's outward normal is its reverse, and `t` is how far along the
+               reach the surface sits. Three numbers on the state, written only on clinging frames
+               (readers gate on `state.clinging`; they go stale, not null, after a release — same
+               contract as `yaw`, which also holds its last value). `createHeroBody` turns them into
+               the wall PLANE its hands and feet get pinned to; nothing else reads them yet. */
+            state.clingNx = -cfx; state.clingNz = -cfz;
+            state.clingDist = t * cling.reach;
             /* Hold position against the facade and climb under the lift axis. Zeroing the horizontal
                velocity is what makes it read as ADHESION rather than a very slow slide — pilot.js's
                own wording and its own factor. The walker is told BOTH halves (position then velocity),

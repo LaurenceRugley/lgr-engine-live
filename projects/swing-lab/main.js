@@ -1244,6 +1244,10 @@ window.__hero = {
   get airMode() { return hero.airMode; },
   get airWeight() { return +hero.airWeight.toFixed(4); },
   get poseWeight() { return +hero.poseWeight.toFixed(4); },
+  /* A-CRAWL receipts, same rule as the A-AIR pair above: "the hands are ON the wall" is a distance and
+     "the gait reversed with S" is a phase derivative — both checkable numbers, neither a screenshot. */
+  get airPhase() { return +hero.airPhase.toFixed(4); },
+  get contact() { const c = hero.contact; return c ? { active: c.active, w: +c.w.toFixed(3), handL: +c.handL.toFixed(4), handR: +c.handR.toFixed(4), footL: +c.footL.toFixed(4), footR: +c.footR.toFixed(4) } : null; },
   /* the rope's ACTUAL origin this frame, so "does the web leave the hand" is a distance and not an
      impression. Allocates one Vector3 per CALL — a probe read, never a frame path. */
   handPoint() { const v = new THREE.Vector3(); hero.webAnchorPoint(v); return { x: v.x, y: v.y, z: v.z }; },
