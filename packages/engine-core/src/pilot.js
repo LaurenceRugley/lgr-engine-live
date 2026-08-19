@@ -788,9 +788,22 @@ export const BIKE_PROFILE = {
   turnRate: 2.6,          // rad/s at speed (the ATV's law, slightly quicker — it is lighter)
   gravity: 5.4,           // u/s² — the GRAPPLE/character constant, so a moto world and a walker world agree
   airPitchRate: 3.6,      // rad/s of air rotation authority — 2π in 1.75 s: the backflip budget
+  /* A-WHIP (2026-08-19, phase 3): the second air axis. 2π in 1.90 s — a full 360 fits the derived
+     ramp's ~2.14 s of air, and (deliberately) so does a flip AND a 360 held TOGETHER: pitch and yaw
+     are separate hands (arrows vs A/D), so the combo the scorer already pays is finally DRIVABLE.
+     Slightly under airPitchRate because the whip is the easier rotation (no gravity asymmetry). */
+  airYawRate: 3.3,        // rad/s of air yaw (whip/spin) authority — 0 restores the frozen-yaw phase-1 air
   airDrag: 0.12,          // proportional (1/s) — you keep ~90% of speed through a 1 s flight (hang-time feel)
   launchMinSpeed: 0.3,    // u/s below which the launch test is off (a parked bike nudged at a lip stays a parked bike)
   cleanAngle: 0.5,        // rad of pitch-vs-slope mismatch that still lands clean (~29° — forgiving)
+  /* A-WHIP: the yaw half of the verdict — the SAME 29° forgiveness cone as pitch (one philosophy,
+     two axes; inside it the cross-wheel momentum component is ≤ sin(0.5) ≈ 0.48 of speed, which the
+     knobby-tyre phase-1 forgiveness absorbs). The SCRUB normalisation is π/2, NOT π (a stated
+     asymmetry, not a drift): yawErr wraps to [0, π] where π = landing BACKWARDS, and a bike fully
+     crossed-up (90°) has already lost its rolling direction entirely — so the floor arrives at π/2
+     and everything past it IS the floor. "Scrubbed, never wrecked" stays phase-1's contract; a real
+     crash state is phase-4 vocabulary (the ledger's open question, on the record). */
+  cleanYawAngle: 0.5,     // rad of yaw-vs-heading mismatch that still lands square (~29°)
   scrub: 0.75, keepMin: 0.30,   // a botched landing scrubs toward keepMin·speed, never a wreck (phase 1)
   landPitchTau: 10,       // 1/s — how fast the chassis re-seats onto the slope after touchdown
   bankMax: 0.42, bankTau: 0.16, // bikes LEAN — most of the cornering read
@@ -817,7 +830,12 @@ export function createBikeModel(profile = BIKE_PROFILE) {
     if (typeof state.airborne !== 'boolean') { state.airborne = false; state.y = H(state.x, state.z); }
     if (typeof state.airtime !== 'number') { state.airtime = 0; state.airTotal = 0; state.jumps = 0; }
     if (typeof state.upY !== 'number') { state.upX = 0; state.upY = 1; state.upZ = 0; }   // the damped chassis normal — STATE, so two bikes never share one model's smoothing
-    if (!state.landing) state.landing = { err: 0, kept: 1, clean: true, count: 0 };
+    /* A-WHIP: `headYaw` is the TRAVEL heading — momentum's line, not the chassis'. On the ground the
+       two are one number (wheels grip: you travel where you point). The air splits them: the launch
+       edge freezes headYaw (a ballistic body cannot steer its momentum) and the whip rotates the
+       BODY yaw underneath it. Landing re-unifies them the wheels' way — see the touchdown verdict. */
+    if (typeof state.headYaw !== 'number') state.headYaw = state.yaw;
+    if (!state.landing) state.landing = { err: 0, yawErr: 0, kept: 1, clean: true, count: 0 };
     const g = P('gravity');
     const maxS = P('maxSpeed') * bk(profile, axes, 'speed');
     const th = axes.throttle || 0;
@@ -835,6 +853,7 @@ export function createBikeModel(profile = BIKE_PROFILE) {
          requires yaw to DECREASE on positive steer. The bike therefore takes the SPACECRAFT's
          sign — the one craft whose chase feel is flown daily — and keeps the uniform D−A wiring. */
       state.yaw -= axes.steer * P('turnRate') * (0.35 + 0.65 * speedFrac) * dirSign * dt;
+      state.headYaw = state.yaw;                  // A-WHIP: grounded, the wheels make one line of the two
       // throttle forward; S brakes hard to a stop, then paddle-reverses; released → coast (momentum)
       if (th > 0) state.speed += th * P('accel') * bk(profile, axes, 'accel') * dt;
       else if (th < 0) {
@@ -876,6 +895,7 @@ export function createBikeModel(profile = BIKE_PROFILE) {
         state.airborne = true;
         state.jumps++;
         state.airtime = 0;
+        state.headYaw = state.yaw;                // A-WHIP: momentum's line is set at the lip; the whip rotates the body under it
         state.vy -= g * dt;                       // gravity owns vy from here (first ballistic step)
         /* FLOORED at the ground on the launch frame — the accel test can fire while the surface is
            still RISING (a convex kink mid-upslope), where the raw ballistic step lands ~1.6 mm
@@ -914,27 +934,46 @@ export function createBikeModel(profile = BIKE_PROFILE) {
       state.vy -= g * dt;
       state.speed -= state.speed * P('airDrag') * dt;
       /* THE LEAN AXIS: lift −1 (lean BACK / S) pitches the nose UP and over — the backflip
-         direction; lift +1 noses down. Yaw/steer deliberately dead in the air (phase 2). */
+         direction; lift +1 noses down. */
       state.pitch += -(axes.lift || 0) * P('airPitchRate') * dt;
-      const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
+      /* THE WHIP AXIS (A-WHIP, phase 3 — the seam tricks.js named): steer gains its AIR meaning.
+         Same sign as the ground turn (D whips screen-right — the spacecraft convention, OPEN #34
+         untouched), its own rate constant, and — the physics that makes it a WHIP rather than a
+         turn — it rotates the BODY, not the momentum: position keeps integrating along headYaw
+         (frozen at the lip), so the bike travels its launch line while the chassis spins under it.
+         With steer 0 this whole branch is arithmetic-identical to the phase-1 frozen-yaw air
+         (yaw === headYaw, sin/cos equal), which is the re-baseline claim made checkable. */
+      state.yaw -= (axes.steer || 0) * P('airYawRate') * dt;
+      const s = Math.sin(state.headYaw), c = Math.cos(state.headYaw);
       state.x += s * state.speed * dt;
       state.z += c * state.speed * dt;
       const yN = state.y + state.vy * dt;
       const g1 = H(state.x, state.z);
       if (yN <= g1) {
-        /* ── TOUCHDOWN — the verdict. Slope pitch ALONG THE HEADING from the full central-
-           difference gradient (both axes — an early draft sampled only z and was wrong for every
-           diagonal heading); the error is WRAPPED so a completed flip (2π) reads as 0 — land it
-           round and it is a clean landing, which is the entire contract of the trick. */
+        /* ── TOUCHDOWN — the verdict. Slope pitch ALONG THE BODY'S OWN HEADING (state.yaw — the
+           line the wheels roll on, which after a whip is NOT the travel line) from the full
+           central-difference gradient (both axes — an early draft sampled only z and was wrong for
+           every diagonal heading); the error is WRAPPED so a completed flip (2π) reads as 0 — land
+           it round and it is a clean landing, which is the entire contract of the trick. */
+        const sb = Math.sin(state.yaw), cb = Math.cos(state.yaw);
         const dhdx = (H(state.x + EPS, state.z) - H(state.x - EPS, state.z)) / (2 * EPS);
         const dhdz = (H(state.x, state.z + EPS) - H(state.x, state.z - EPS)) / (2 * EPS);
-        const slopeAlong = s * dhdx + c * dhdz;
+        const slopeAlong = sb * dhdx + cb * dhdz;
         const slopePitch = Math.atan(slopeAlong);              // rise per unit travelled; + = uphill = nose up
         const err = Math.abs(wrapPi(state.pitch - slopePitch));
-        const clean = err <= P('cleanAngle');
-        const kept = clean ? 1 : Math.max(P('keepMin'), 1 - P('scrub') * (err - P('cleanAngle')) / (Math.PI - P('cleanAngle')));
+        /* A-WHIP: the yaw term — pitch-only RETIRES here (the A-TRICKS seam, second item). Land
+           SQUARE (wheels along the travel line) = clean; the wrap forgives a completed 360 exactly
+           as it forgives a completed flip, and π (backwards) is the worst — not a wrapped-clean. */
+        const yawErr = Math.abs(wrapPi(state.yaw - state.headYaw));
+        const cleanP = err <= P('cleanAngle');
+        const cleanY = yawErr <= P('cleanYawAngle');
+        const keptP = cleanP ? 1 : Math.max(P('keepMin'), 1 - P('scrub') * (err - P('cleanAngle')) / (Math.PI - P('cleanAngle')));
+        /* yaw scrub reaches the keepMin floor at π/2 (fully crossed) — see cleanYawAngle's note. */
+        const keptY = cleanY ? 1 : Math.max(P('keepMin'), 1 - P('scrub') * (yawErr - P('cleanYawAngle')) / (Math.PI / 2 - P('cleanYawAngle')));
+        const clean = cleanP && cleanY;
+        const kept = Math.min(keptP, keptY);       // the WORST axis governs — one landing, one number
         state.speed *= kept;
-        state.landing = { err, kept, clean, count: state.landing.count + 1 };
+        state.landing = { err, yawErr, kept, clean, count: state.landing.count + 1 };
         state.lastAir = state.airtime;
         state.airborne = false;
         state.y = g1;
@@ -943,6 +982,7 @@ export function createBikeModel(profile = BIKE_PROFILE) {
            one frame of acceleration and phantom-relaunch the bike off every descent it lands on. */
         state.vy = state.speed * slopeAlong;
         state.pitch = wrapPi(state.pitch);         // unwind the flip count; the ground damp takes it from here
+        state.headYaw = state.yaw;                 // A-WHIP: wheels grip — the body's line IS the travel line again
         /* seed the damped normal from the bike's ACTUAL air attitude, so the re-seat eases from
            where the body really is rather than snapping through level first. */
         _up.set(0, 1, 0).applyQuaternion(state.quat);
@@ -950,8 +990,13 @@ export function createBikeModel(profile = BIKE_PROFILE) {
       } else {
         state.y = yN;
       }
-      // attitude in the air: yaw + the rider's pitch, bank easing out (+pitch = nose up ⇒ euler.x = −pitch)
-      state.bank = damp(state.bank, 0, 1 / P('bankTau'), dt);
+      /* attitude in the air: yaw + the rider's pitch (+pitch = nose up ⇒ euler.x = −pitch).
+         A-WHIP: the bank now LAYS INTO the whip (same sign law as the ground carve, full
+         expression — no speedFrac in the air) instead of easing to 0, so the whip READS as the
+         bike laying over, not a flat lazy-susan spin. steer 0 → target 0 → the phase-1 ease-out,
+         byte for byte. */
+      const whipLean = clamp(-(axes.steer || 0) * P('bankMax'), -P('bankMax'), P('bankMax'));
+      state.bank = damp(state.bank, whipLean, 1 / P('bankTau'), dt);
       _e.set(-state.pitch, state.yaw, state.bank, 'YXZ');
       state.quat.setFromEuler(_e);
     }

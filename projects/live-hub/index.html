@@ -11,7 +11,12 @@
        in lgr-webgl-lab/projects/live-hub/ (versioned + leak-checked). Mobile-first — the owner tests on a phone.
        SHOWCASE REFRESH (2026-08-01): added the three shipped lgrwebstudios.com products as first-class
        entries, surfaced all four hoard2 worlds + the A21 metropolis city-generator map, added a real
-       thumbnail to every card (img/ — small, pre-compressed JPEGs so the page stays fast on a phone). -->
+       thumbnail to every card (img/ — small, pre-compressed JPEGs so the page stays fast on a phone).
+       PLAYABLE LABS (2026-08-19): swing-lab (the character playground + its ?level=city outbreak city)
+       and moto-lab (the trick-scored dirtbike) joined the deploy set without ever getting cards — the
+       hub is supposed to be the one place everything is reachable from, so they get them, with fresh
+       mid-swing / mid-backflip captures at the card's own 720x405. The NEW badge moved with them;
+       Metropolis keeps its tag line minus the no-longer-true "Newest". -->
   <style>
     :root {
       --bg: #0b0e0c; --bg2: #12161230; --ink: #eaf0e2; --muted: #9aa891; --line: #ffffff1a;
@@ -172,7 +177,7 @@
       <!-- METROPOLIS — the newest build; the engine's full stack in one place -->
       <section class="card" style="--edge: var(--accent4)">
         <img class="thumb" src="img/metropolis.jpg" alt="Metropolis at golden hour — a harbour city seen from the air, thousands of lit windows, streetlamps glowing along the avenues, the sea burning orange to the horizon" loading="lazy" width="720" height="405">
-        <span class="tag new">Newest · six bodies, one seam</span>
+        <span class="tag">Six bodies, one seam</span>
         <h2>Metropolis</h2>
         <p>The whole engine in one place, and six ways to be in it: <b>fly</b> over the harbour, <b>drive</b> its streets, <b>walk</b> at eye level, take the <b>helm of a boat</b>, ride the air <b>as a gull</b> — then bring the gull down onto the water and keep going <b>as a fish</b>. Click any tower and the camera dives <b>through the glass</b> into a warm office interior, the living city still moving outside the window. Scrub the day from pre-dawn to midnight, roll in rain, snow or fog, and switch on a real-astronomy sky for the actual stars above that date.</p>
         <div class="fact"><b>The interesting part:</b> all six bodies share one movement contract, and each one's character is a <i>law</i> rather than a set of numbers. The car's turning circle grows with the square of its speed — so at full boost it physically cannot make a ninety-degree turn in a city street, and you have to lift off before the junction. The gull is always falling: climbing spends airspeed and diving buys it back, so a hard banked turn costs you altitude. The fish never falls at all, pivots on the spot the way a body with no inertia does, and treats the surface as a ceiling it can break — the breach arc is genuinely ballistic, not an animation.</div>
@@ -181,6 +186,38 @@
         <div class="actions">
           <a class="btn" href="metropolis/">Open Metropolis →</a>
           <a class="btn ghost" href="metropolis/?profile=neoTokyo">Neo-Tokyo palette</a>
+        </div>
+      </section>
+
+      <!-- SWING LAB — the character playground. Card added 2026-08-19; the room shipped 2026-08-09
+           (A-LAB) and grew the city level, the crawl and the wall-jump across seven arcs without the
+           hub ever hearing about it. Thumb is the ?level=city level (the better picture) — a real
+           mid-swing capture at 720x405, chrome hidden, per the house pattern. -->
+      <section class="card" style="--edge: var(--accent)">
+        <img class="thumb" src="img/swing-city.jpg" alt="The Swing Lab's city level — the hero mid-swing on a web line over a street canyon of setback towers" loading="lazy" width="720" height="405">
+        <span class="tag new">Character playground</span>
+        <h2>The Swing Lab</h2>
+        <p>The room the web-swinging character got built in: <b>lock</b> a target, <b>throw a web</b> at it, ride the arc, and <b>launch off the top</b> — chain webs down the street without touching the ground. Walk to any facade and hold W to <b>spider-crawl</b> straight up it, hands and feet planted on the wall in a diagonal gait, then <b>wall-jump</b> off mid-climb. The lab's own proportions are derived from the swing's pendulum arithmetic; the <b>city level</b> swaps in a full generated skyline with a zombie outbreak spreading through up to 600 civilians on the streets below you.</p>
+        <div class="fact"><b>The interesting part:</b> the city is swingable <i>by construction</i> — ask the generator for 70% of towers to clear the swing's arc-bottom rule and the finished skyline counts exactly 70.0% (252/360). The webs agree: 77% of attaches land on the setbacks, cornices and rooftop plant the silhouette pass built. And the outbreak never reads the player, so the same city falls the same way whether you swing through it or stand and watch.</div>
+        <div class="controls"><b>Controls:</b> <b>LMB</b> lock a target · <b>RMB</b> web it · WASD steer the arc · <b>W/S</b> reel · <b>Space</b> launch off the swing (jump on the ground) · hold <b>W</b> at a wall to crawl up it (<b>S</b> climbs down · <b>Space</b> leaps off) · <b>V</b> camera.</div>
+        <div class="actions">
+          <a class="btn" href="swing-lab/?level=city">Swing the city →</a>
+          <a class="btn ghost" href="swing-lab/">The lab room →</a>
+        </div>
+      </section>
+
+      <!-- MOTO LAB — the trick-scored dirtbike. Card added 2026-08-19, same gap as the swing-lab's:
+           A-MOTO shipped 2026-08-18, entered the deploy set, and was reachable from nowhere. Thumb is
+           a real mid-backflip capture (apex, wheels over) at 720x405, chrome hidden. -->
+      <section class="card" style="--edge: var(--accent3)">
+        <img class="thumb" src="img/moto.jpg" alt="The Moto Lab — the dirtbike and rider inverted mid-backflip at the top of the arc over the ramp lane" loading="lazy" width="720" height="405">
+        <span class="tag new">Motocross · trick physics</span>
+        <h2>The Moto Lab</h2>
+        <p>A dirtbike over dunes solved from the bike's own physics — every crest of the shipped terrain (74 of 74) <b>launches</b> at design speed, because the wavelengths are derived from the launch inequality rather than sculpted and hoped about. Hold <b>↓</b> in the air to lay it back into a <b>backflip</b>, come round to level, and the landing <b>banks your points</b>: a clean touchdown keeps them all, a botch scrubs them by exactly the speed the crash cost.</p>
+        <div class="fact"><b>The interesting part:</b> the trick scorer never computes a physics number. The landing multiplier <i>is</i> the same float the bike model wrote at touchdown — +154 for the clean ramp backflip, +99 when the same flip over-rotates and the landing keeps 64% of its speed. The HUD can never promise a trick the landing doesn't pay.</div>
+        <div class="controls"><b>Controls:</b> <b>W</b> throttle · <b>S</b> brake · <b>A/D</b> lean-steer · in the air <b>↓</b> leans back (hold it for the backflip), <b>↑</b> noses down · <b>G</b> the big ramp · <b>V</b> camera · <b>R</b> respawn.</div>
+        <div class="actions">
+          <a class="btn" href="moto-lab/">Ride the dunes →</a>
         </div>
       </section>
 
@@ -276,8 +313,12 @@
       <a class="ext" href="https://sky.lgrwebstudios.com" target="_blank" rel="noopener">Live Sky</a> ·
       <a class="ext" href="https://studio.lgrwebstudios.com" target="_blank" rel="noopener">Image Studio</a> ·
       <a class="ext" href="https://learn.lgrwebstudios.com" target="_blank" rel="noopener">The Descent</a> ·
+      <a href="showcase-lab/">showcase</a> · <a href="metropolis/">metropolis</a> ·
+      <a href="swing-lab/?level=city">swing lab</a> · <a href="moto-lab/">moto lab</a> ·
       <a href="live/">city</a> · <a href="hoard/">hoard</a> · <a href="hoard2/?seed=1337">hoard v2</a> ·
-      <a href="hoard2/?seed=1337&amp;map=metropolis">metropolis</a> · <a href="hoard/cavern.html">cavern</a> ·
+      <!-- "metropolis" here used to point at the hoard2 WORLD while the metropolis PROJECT had no
+           footer link at all (and showcase-lab none either) — the 2026-08-19 sweep's finding. -->
+      <a href="hoard2/?seed=1337&amp;map=metropolis">hoard v2 metropolis</a> · <a href="hoard/cavern.html">cavern</a> ·
       <a href="office/">office</a> · <a href="cs-viz/sort-race.html">sort race</a> · <a href="cs-viz/event-loop.html">event loop</a> · <a href="cs-viz/graph-wave.html">graph wave</a>
     </footer>
   </div>

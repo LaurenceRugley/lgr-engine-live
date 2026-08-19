@@ -481,13 +481,14 @@ export function createMotoChaseCam({
    a breathing ride loop is the stated upgrade path (same script, u-dependent tracks).
    C++ anchor: the GLB is a serialized scene subtree; find-by-name returns node pointers we keep —
    no per-frame lookups, no allocation in update(). */
-export function createBikeGlbMesh({ url, tint = null, steerGain = 0.9, wheelR = 0.16 } = {}) {
+export function createBikeGlbMesh({ url, tint = null, steerGain = 0.9, wheelR = 0.16, leanPoseSpan = 0.42 } = {}) {
   if (!url) throw new Error('createBikeGlbMesh: `url` is required — import it from \'@lgr/engine-core/assets/models/moto_bike.glb?url\' (kept out of the module so the lib build does not inline it; see pedestrians.js)');
   const group = new THREE.Group();
   let mode = 'loading';
   let inner = null;                       // the box-bike fallback delegate (mode 'box')
   let forks = null, wheelF = null, wheelR_ = null;
   let rider = null, riderPose = null;
+  let sockets = null;                     // A-WHIP: { handL, handR, footL, footR } grip/peg nodes from the GLB
   // the raked steer axis, fork-local, from the generator's STEER_AXIS_THREE receipt (0, 0.8944,
   // −0.4472): up and leaned back — head sits behind the front axle, as built.
   const STEER_AXIS = new THREE.Vector3(0, 0.8944, -0.4472).normalize();
@@ -495,6 +496,12 @@ export function createBikeGlbMesh({ url, tint = null, steerGain = 0.9, wheelR = 
   const applyRider = () => {
     if (!rider || mode !== 'glb') return;
     if (rider.object.parent !== group) group.add(rider.object);
+    /* A-WHIP MOUNT-IK: pin hands to the grip sockets and feet to the pegs — the sockets are
+       NODES of the bike GLB (grips are children of bike_forks, so steering carries the hands by
+       scene-graph parenting; build_moto_bike.py's RECEIPT sockets line is the guarantee). Both
+       halves optional and loud-degrading: an old GLB without sockets, or a handle without the
+       ability, keeps the plain held pose — mounted, just not pinned. */
+    if (sockets && rider.setMountIK) rider.setMountIK(sockets);
   };
 
   const ready = new Promise((res) => {
@@ -504,6 +511,13 @@ export function createBikeGlbMesh({ url, tint = null, steerGain = 0.9, wheelR = 
       wheelF = root.getObjectByName('bike_wheel_f');
       wheelR_ = root.getObjectByName('bike_wheel_r');
       if (!forks || !wheelF || !wheelR_) throw new Error('moto_bike.glb is missing a named node (bike_forks/bike_wheel_f/bike_wheel_r) — re-run tools/blender/build_moto_bike.py and read its RECEIPT lines');
+      /* A-WHIP rider sockets (empties in the GLB). All four or none — a partial set means a
+         broken regeneration, and pinning two limbs while two float reads worse than the plain
+         pose; degrade whole, loudly (the createCrowdTiers.js:116 convention). */
+      const gL = root.getObjectByName('bike_grip_l'), gR = root.getObjectByName('bike_grip_r');
+      const pL = root.getObjectByName('bike_peg_l'), pR = root.getObjectByName('bike_peg_r');
+      if (gL && gR && pL && pR) sockets = { handL: gL, handR: gR, footL: pL, footR: pR };
+      else console.warn('moto bike GLB has no rider sockets (bike_grip_*/bike_peg_*) — the rider keeps the plain held pose; re-run tools/blender/build_moto_bike.py for mount-IK');
       root.traverse((o) => {
         if (o.isMesh) {
           o.castShadow = true; o.receiveShadow = false;
@@ -533,6 +547,8 @@ export function createBikeGlbMesh({ url, tint = null, steerGain = 0.9, wheelR = 
     group,
     ready,
     get mode() { return mode; },
+    get rider() { return rider; },          // the mounted handle (probe receipts: mountReport lives on it)
+    get hasSockets() { return !!sockets; }, // A-WHIP: whether the GLB carried grip/peg nodes (probe receipt)
     /* Mount a character-rig handle on the seat. pos is the hip anchor over the seat (the
        generator's MOUNT_SEAT_THREE receipt); rot pitches the torso toward the bars. The pose is
        re-asserted every update — poseHold is a pure function of (clip, t01), so this is state-free. */
@@ -561,9 +577,21 @@ export function createBikeGlbMesh({ url, tint = null, steerGain = 0.9, wheelR = 
       const w = (state.speed / wheelR) * dt;
       wheelF.rotation.x += w;
       wheelR_.rotation.x += w;
-      // bars follow the damped lean; in the air bank eases to 0, so the bars re-centre themselves
+      // bars follow the damped lean; in the air the bank now follows the WHIP (A-WHIP), so the
+      // bars lay into a spin exactly as they carve a corner — one lean, one read
       forks.quaternion.setFromAxisAngle(STEER_AXIS, steerGain * (state.bank || 0));
-      if (rider && riderPose) rider.poseHold(riderPose.name, riderPose.t01, riderPose.weight);
+      if (rider && riderPose) {
+        /* A-WHIP: the held pose becomes a LEAN DIAL. The Ride clip is authored as a lean-blend
+           (u=0 full LEFT lean → 0.5 neutral → 1 full RIGHT; build_ride_clip.py), and poseHold's
+           t01 is a pure function of its argument — so scrubbing it by the model's own damped
+           bank IS the body language: carve right, the torso hangs right; whip left, it throws
+           left, eased exactly as the bank eases (no second smoothing). bank>0 = bike rolls
+           LEFT (the model's +roll about forward), so t01 runs opposite: 0.5 − 0.5·bank/span.
+           On the old static clip this scrub is a byte-exact no-op (all frames one pose). */
+        const lean = Math.max(-1, Math.min(1, (state.bank || 0) / leanPoseSpan));
+        const t01 = Math.max(0, Math.min(1, riderPose.t01 - 0.5 * lean));
+        rider.poseHold(riderPose.name, t01, riderPose.weight);
+      }
     },
     dispose() {
       if (inner) { inner.dispose(); return; }

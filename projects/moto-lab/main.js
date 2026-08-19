@@ -275,13 +275,22 @@ function updateHud(dt) {
   set('v-jumps', String(state.jumps || 0));
   set('v-pitch', `${deg(state.pitch || 0)}° · ${deg(Math.atan((T.heightAt(state.x, state.z + 0.45) - T.heightAt(state.x, state.z - 0.45)) / 0.9))}°`);
   const L = state.landing;
-  set('v-land', L && L.count ? `${deg(L.err)}° off · kept ${(L.kept * 100).toFixed(0)}%` : '—',
+  /* A-WHIP: the landing row reads BOTH axes — pitch° · yaw° off (the verdict's own two errors) */
+  set('v-land', L && L.count ? `${deg(L.err)}°·${deg(L.yawErr || 0)}° off · kept ${(L.kept * 100).toFixed(0)}%` : '—',
     L && L.count ? (L.clean ? 'on' : 'bad') : '');
   set('v-clean', stats.landings ? `${stats.cleans}/${stats.landings} (${(100 * stats.cleans / stats.landings).toFixed(0)}%)` : '—');
-  /* the score rows read the scorer's own receipts — one implementation, HUD and probe alike */
+  /* the score rows read the scorer's own receipts — one implementation, HUD and probe alike.
+     A-WHIP: the trick row carries both live streams (flip rev · spin rev) when both are turning. */
   const tk = scorer.read();
-  set('v-trick', tk.pending && tk.pending.name ? `${tk.pending.name} ${tk.pending.progress.toFixed(2)} rev` : '—',
-    tk.pending && tk.pending.revs > 0 ? 'on' : (tk.pending && tk.pending.name ? '' : 'off'));
+  let trickTxt = '—';
+  if (tk.pending) {
+    const parts = [];
+    if (tk.pending.name) parts.push(`${tk.pending.name} ${tk.pending.progress.toFixed(2)} rev`);
+    if (tk.pending.yawName) parts.push(`${tk.pending.yawName} ${tk.pending.yawProgress.toFixed(2)} rev`);
+    if (parts.length) trickTxt = parts.join(' · ');
+  }
+  set('v-trick', trickTxt,
+    tk.pending && (tk.pending.revs > 0 || tk.pending.yawRevs > 0) ? 'on' : (tk.pending && (tk.pending.name || tk.pending.yawName) ? '' : 'off'));
   set('v-score', `${tk.total} · best ${tk.best}`, tk.total > 0 ? 'on' : '');
   const mins = Math.max(1e-6, stats.t / 60);
   set('v-apm', `${((state.airTotal || 0) / mins).toFixed(1)} s/min`);
@@ -376,7 +385,11 @@ function frame() {
   frameStart();
 
   /* ONE W/S axis, two meanings the STATE decides (throttle grounded, lean airborne) — both are
-     sent every frame and the model reads the one its phase owns. steer = D − A, uniform. */
+     sent every frame and the model reads the one its phase owns. steer = D − A, uniform — and
+     A-WHIP gives THAT axis its air meaning too (turn on dirt, whip in the air): the owner's
+     "maybe a modifier button" resolved to NO modifier, because A/D was measured DEAD airborne
+     (the old model never read steer in the air), so the plain keys were free and the whole key
+     map stays one-axis-per-hand. The MODEL decides what each axis means; the page just sends. */
   AXES.throttle = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
   AXES.steer = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
   AXES.lift = (held.has('ArrowUp') ? 1 : 0) - (held.has('ArrowDown') ? 1 : 0);   // ↓ leans back → the flip
@@ -407,7 +420,30 @@ function frame() {
   key.target.position.set(state.x, 0, state.z);
   key.target.updateMatrixWorld();
 
-  cam.pose(state, view, dt, T.heightAt, _camPos, _camDir);
+  /* A-WHIP probe seam: a capture harness may pin the eye — the rider close-ups need side-on
+     framings the chase cannot reach (the A-CRAWL "true side-on is unreachable from the published
+     seams" gap, solved here as a dev seam, not a player camera). Two shapes:
+       { x,y,z,tx,ty,tz }                       — absolute world eye + aim (a still frame);
+       { rel:1, bearing, dist, height, aimY }   — BIKE-RELATIVE, recomputed every frame (bearing
+         is radians around the body from its own yaw), because a still eye photographs scenery
+         at 7.5 u/s — the harness's first two runs proved it. Ground-clamped like the chase. */
+  const ov = window.__camOverride;
+  if (ov) {
+    if (ov.rel) {
+      /* `azimuth` (absolute world bearing) beats `bearing` (body-relative): a whip shot wants to
+         hang astern of the FLIGHT line while the body spins through a full 360 under it. */
+      const a = ov.azimuth != null ? ov.azimuth : state.yaw + (ov.bearing || 0);
+      const ex = state.x + Math.sin(a) * (ov.dist || 1.5), ez = state.z + Math.cos(a) * (ov.dist || 1.5);
+      const ey = Math.max(state.y + (ov.height || 0.55), T.heightAt(ex, ez) + 0.15);
+      _camPos.set(ex, ey, ez);
+      _camDir.set(state.x - ex, state.y + (ov.aimY != null ? ov.aimY : 0.42) - ey, state.z - ez).normalize();
+    } else {
+      _camPos.set(ov.x, ov.y, ov.z);
+      _camDir.set(ov.tx - ov.x, ov.ty - ov.y, ov.tz - ov.z).normalize();
+    }
+  } else {
+    cam.pose(state, view, dt, T.heightAt, _camPos, _camDir);
+  }
   rig.setEye(_camPos, _camDir);
   rig.update(dt);
 
@@ -431,6 +467,7 @@ requestAnimationFrame(frame);
    swing-ledger's technique #5 (a harness must prove its input ARRIVED, per run).
    --------------------------------------------------------------------------------------------- */
 window.__engine = core;
+window.__camOverride = null;
 window.__moto = {
   state, profile: BIKE, terrain: () => T.stats,
   heightAt: (x, z) => T.heightAt(x, z),
@@ -439,6 +476,11 @@ window.__moto = {
      the box control arm reports 'box'), and whether the seated rider handle mounted. */
   bikeMode: () => bike.mode || 'box',
   riderMounted: () => !!(riderRig && riderRig.count > 0),
+  /* A-WHIP receipts: the mount-IK's own measured joint→socket distances (engine-computed, the
+     A-CRAWL contactReport pattern — the probe asserts these, never re-derives from pixels),
+     and whether the GLB carried the grip/peg sockets at all. */
+  mountReport: () => (bike.rider && bike.rider.mountReport ? { ...bike.rider.mountReport } : null),
+  hasSockets: () => !!bike.hasSockets,
   bike,                                   // the visual object itself (pose/mount tuning, receipts)
   /* A-TRICKS receipts: the scorer's own read() — total/best/banks/hash/last{points,kept,clean,
      tricks}/pending. The probe asserts last.kept === state.landing.kept (the same float, page-side)

@@ -1,11 +1,13 @@
 /* ============================================================
-   tricks.js — TRICK DETECTION + SCORING, as a pure consumer of a body's state.  (ARC A-TRICKS, 2026-08-19)
+   tricks.js — TRICK DETECTION + SCORING, as a pure consumer of a body's state.  (ARC A-TRICKS, 2026-08-19 · whips A-WHIP, 2026-08-19)
    ------------------------------------------------------------
    The scoring half of the moto brief ("flips earn points, clean landings bank them, botches scrub
    them"), built ENGINE-FIRST and sport-agnostic: `createTrickScorer` consumes any body that speaks
-   the bike's air contract — { airborne, pitch, landing:{ kept, clean, count }, lastAir } — and a
-   future skate/snowboard body reuses it unchanged. moto-lab only WIRES it (one update call per
-   frame after model.step) and STYLES it (the popup + readout rows are project DOM).
+   the bike's air contract — { airborne, pitch, landing:{ kept, clean, count }, lastAir }, plus the
+   OPTIONAL whip vocabulary { yaw, headYaw } (A-WHIP: present → yaw spins score too; absent → the
+   scorer behaves byte-identically to its pitch-only self) — and a future skate/snowboard body
+   reuses it unchanged. moto-lab only WIRES it (one update call per frame after model.step) and
+   STYLES it (the popup + readout rows are project DOM).
 
    THE ONE RULE THAT MAKES THE SCORE HONEST: the scorer never computes a physics number. The landing
    multiplier IS `state.landing.kept` — the same float createBikeModel wrote when the wheels hit —
@@ -40,13 +42,27 @@
      count increment. An airborne→grounded edge WITHOUT a verdict (a respawn) discards the chain —
      no verdict, no bank. Double-banking is structurally impossible: the chain object is consumed
      by the bank and a new one only opens on the next launch edge.
-   · WHIPS (air yaw) ARE OUT, and here is the seam by name: the physics freezes yaw in the air
-     (pilot.js's own comment calls whips "phase-2 scoring vocabulary, stated not smuggled"), and
-     scoring them requires (1) air-yaw authority in createBikeModel, (2) the landing verdict
-     growing a yaw-vs-heading term (pitch-only retires), (3) this scorer tracking a second angle
-     stream exactly like the pitch one (the segmenter below is already just arithmetic on a signed
-     angle — instantiate it per axis when the day comes). All three are physics-touching; this arc's
-     contract is that the physics is byte-untouched.
+   · WHIPS ARE IN (A-WHIP, 2026-08-19 — the seam this file named, now filled): the day came, and
+     all three named pieces landed exactly where the note said they would — (1) air-yaw authority
+     in createBikeModel (`airYawRate`; the body spins, the momentum doesn't), (2) the landing
+     verdict's yaw term (pitch-only retired; land square = clean, wrapped exactly like the flip),
+     (3) THIS scorer running a SECOND angle stream through the SAME segmenter. The yaw stream is
+     OPT-IN by state shape: it flows only when the body publishes `yaw` AND `headYaw` (the travel
+     heading the physics froze at the lip) — a body without the whip vocabulary scores exactly as
+     before, byte for byte. The stream's angle is the RELATIVE spin (yaw − headYaw): zero at
+     launch by the model's own contract, so the reference is the launch line — a 360 is "did you
+     come back round SQUARE", the mirror of the flip's "did you come round to level".
+   · The yaw trick is the '360', at ONE name for BOTH directions — yaw has no gravity asymmetry,
+     so left-spin and right-spin are the same difficulty (unlike back/front flips, where rotating
+     against the kicker's own pitch costs more). PARTIAL WHIPS SCORE NOTHING, the partials rule
+     verbatim: sub-full yaw in the air is landing-SQUARING (bringing the wheels back to the line),
+     i.e. riding; the styled kick-out-and-back whip is presentation vocabulary, not points.
+   · Because pitch and yaw are SEPARATE HANDS (arrows vs A/D), a flip and a 360 can be held
+     TOGETHER — two segments in one air, the combo multiplier's first DRIVABLE case (A-TRICKS
+     honest gap #3, closed by construction rather than by a longer ramp).
+   · GROUNDED STEER STAYS SILENT structurally, the same two-wall argument as grounded pitch: the
+     model keeps yaw ≡ headYaw on the dirt (the relative angle cannot leave 0), AND this scorer
+     only reads the stream while a chain is open, which only happens airborne.
 
    SCORE = (Σ per-segment base×revs) × (1 + airFactorPerSec·lastAir) × (1 + comboStep·(k−1)) × kept,
    rounded to an integer at the bank. The airtime factor is the MM2 read ("stunts gate on HEIGHT
@@ -72,8 +88,11 @@
 export const TRICK_PROFILE = {
   /* base points per trick name. Frontflip > backflip is the genre's own hardness order (rotating
      against your launch attitude off an up-kicker needs MORE rotation under the world-level rule
-     above — the arithmetic agrees with the folklore, which is why the gap is small, not 2×). */
-  bases: { backflip: 100, frontflip: 120 },
+     above — the arithmetic agrees with the folklore, which is why the gap is small, not 2×).
+     '360' (A-WHIP) sits UNDER the backflip — the flat spin is the genre's easier full rotation
+     (no gravity fights it; airYawRate 3.3 < airPitchRate 3.6 says the same thing in rad/s) —
+     and one name serves both spin directions (yaw has no front/back asymmetry to price). */
+  bases: { backflip: 100, frontflip: 120, '360': 90 },
   revSlack: 0.08,          // rev — the release-timing + last-frame forgiveness (≈29°)
   reverseEps: 0.05,        // rad of genuine counter-rotation that closes a segment (air pitch is an
                            // exact integral — zero input holds EXACTLY — so this only fires on a
@@ -105,15 +124,48 @@ export function createTrickScorer(profile = TRICK_PROFILE) {
      the returned array is valid until the NEXT update() call; consume it, do not retain it. */
   const EVENTS = [];
 
-  /* close the current segment; if it rotated at least one full rev it becomes a trick. */
-  function closeSegment(ch) {
-    const seg = ch.seg;
+  /* the two axes' NAMERS — the only thing that differs between the streams. Pitch names by sign
+     (gravity makes back ≠ front); yaw names one trick both ways (nothing to break the symmetry). */
+  const nameOfPitch = (dir) => (dir > 0 ? 'backflip' : 'frontflip');
+  const nameOfYaw = () => '360';
+
+  /* close a segment; if it rotated at least one full rev it becomes a trick on the SHARED list
+     (one list is what makes flip+whip a combo — the multiplier counts segments, not axes). */
+  function closeSegment(ch, seg, nameOf) {
+    if (!seg) return;
     const revs = Math.floor(seg.extreme / TAU + P('revSlack'));
     if (seg.dir !== 0 && revs >= 1) {
-      const name = seg.dir > 0 ? 'backflip' : 'frontflip';
+      const name = nameOf(seg.dir);
       const base = P('bases')[name] || 0;
       ch.tricks.push({ name, revs, points: base * revs });
     }
+  }
+
+  /* ONE segmenter, stepped per axis per frame (the A-TRICKS seam's third item: "instantiate it
+     per axis when the day comes" — the day came). `angle` is the stream's accumulated signed
+     rotation; returns the possibly-replaced segment (a reversal closes + reopens in place). */
+  function stepStream(ch, seg, angle, nameOf, events) {
+    const p = angle - seg.ref;                     // progress relative to the segment's reference
+    if (seg.dir === 0 && Math.abs(p) > P('reverseEps')) seg.dir = Math.sign(p);
+    if (seg.dir !== 0) {
+      const prog = seg.dir * p;                    // progress IN the segment's direction (rad, ≥ 0 at the extreme)
+      if (prog > seg.extreme) seg.extreme = prog;
+      /* ANNOUNCE — same line the bank uses ((n − slack)·2π), so mid-air popups and banked tricks
+         cannot disagree. Multi-rev announces again at each rev ("BACKFLIP ×2" as you keep going). */
+      while (seg.extreme >= (seg.announced + 1 - P('revSlack')) * TAU) {
+        seg.announced++;
+        const name = nameOf(seg.dir);
+        events.push({ type: 'trick', name, revs: seg.announced, points: (P('bases')[name] || 0) * seg.announced });
+      }
+      /* REVERSAL — a genuine counter-rotation past the extreme closes the segment there and
+         opens the next one referenced AT that extreme (so its rotation is measured from where
+         the last trick actually ended, not from world level). */
+      if (seg.extreme - prog > P('reverseEps')) {
+        closeSegment(ch, seg, nameOf);
+        return newSegment(seg.ref + seg.dir * seg.extreme);
+      }
+    }
+    return seg;
   }
 
   function update(state) {
@@ -123,37 +175,22 @@ export function createTrickScorer(profile = TRICK_PROFILE) {
 
     if (state.airborne) {
       if (!chain) {
-        /* LAUNCH EDGE — open the chain. The first segment's reference is WORLD LEVEL (0), not the
-           launch pitch: the lip's angle is credited, per the header's "come round to level" rule. */
-        chain = { tricks: [], seg: newSegment(0) };
+        /* LAUNCH EDGE — open the chain. The pitch segment's reference is WORLD LEVEL (0), not the
+           launch pitch: the lip's angle is credited, per the header's "come round to level" rule.
+           The YAW stream (A-WHIP) opens only for a body that publishes the whip vocabulary
+           (yaw + headYaw); its reference is 0 in RELATIVE angle — the launch line itself. */
+        const hasYaw = typeof state.yaw === 'number' && typeof state.headYaw === 'number';
+        chain = { tricks: [], seg: newSegment(0), yawSeg: hasYaw ? newSegment(0) : null };
       }
-      const seg = chain.seg;
-      const p = state.pitch - seg.ref;             // progress relative to the segment's reference
-      if (seg.dir === 0 && Math.abs(p) > P('reverseEps')) seg.dir = Math.sign(p);
-      if (seg.dir !== 0) {
-        const prog = seg.dir * p;                  // progress IN the segment's direction (rad, ≥ 0 at the extreme)
-        if (prog > seg.extreme) seg.extreme = prog;
-        /* ANNOUNCE — same line the bank uses ((n − slack)·2π), so mid-air popups and banked tricks
-           cannot disagree. Multi-rev announces again at each rev ("BACKFLIP ×2" as you keep going). */
-        while (seg.extreme >= (seg.announced + 1 - P('revSlack')) * TAU) {
-          seg.announced++;
-          const name = seg.dir > 0 ? 'backflip' : 'frontflip';
-          events.push({ type: 'trick', name, revs: seg.announced, points: (P('bases')[name] || 0) * seg.announced });
-        }
-        /* REVERSAL — a genuine counter-rotation past the extreme closes the segment there and
-           opens the next one referenced AT that extreme (so its rotation is measured from where
-           the last trick actually ended, not from world level). */
-        if (seg.extreme - prog > P('reverseEps')) {
-          closeSegment(chain);
-          chain.seg = newSegment(seg.ref + seg.dir * seg.extreme);
-        }
-      }
+      chain.seg = stepStream(chain, chain.seg, state.pitch, nameOfPitch, events);
+      if (chain.yawSeg) chain.yawSeg = stepStream(chain, chain.yawSeg, state.yaw - state.headYaw, nameOfYaw, events);
     } else if (chain) {
       /* AIRBORNE → GROUNDED edge. Bank ONLY on the landing verdict's own count increment — an
          edge without a verdict is a respawn, and a chain with no verdict banks nothing. */
       const verdict = landing && landing.count > lastLandCount;
       if (verdict) {
-        closeSegment(chain);
+        closeSegment(chain, chain.seg, nameOfPitch);
+        closeSegment(chain, chain.yawSeg, nameOfYaw);
         const tricks = chain.tricks;
         if (tricks.length > 0) {
           const sum = tricks.reduce((a, t) => a + t.points, 0);
@@ -182,12 +219,17 @@ export function createTrickScorer(profile = TRICK_PROFILE) {
   function read() {
     let pending = null;
     if (chain) {
-      const seg = chain.seg;
+      const seg = chain.seg, ys = chain.yawSeg;
       pending = {
         tricks: chain.tricks.length,
-        name: seg.dir === 0 ? null : (seg.dir > 0 ? 'backflip' : 'frontflip'),
+        name: seg.dir === 0 ? null : nameOfPitch(seg.dir),
         revs: seg.announced,
         progress: seg.extreme / TAU,               // rev — the HUD's live "0.99 rev" readout
+        /* A-WHIP: the yaw stream's own live readout, beside the pitch one (null-shaped when the
+           body has no whip vocabulary, so pre-whip HUD code reads exactly what it always did). */
+        yawName: ys && ys.dir !== 0 ? nameOfYaw(ys.dir) : null,
+        yawRevs: ys ? ys.announced : 0,
+        yawProgress: ys ? ys.extreme / TAU : 0,
       };
     }
     return { total, best, banks, hash: hash.toString(16), last, pending };

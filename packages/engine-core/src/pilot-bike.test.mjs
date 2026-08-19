@@ -156,6 +156,97 @@ test('STEER CONVENTION: positive steer (D, right) DECREASES yaw — the characte
   assert.ok(s.yaw < -0.05, `steer +1 (D) must decrease yaw (got ${s.yaw.toFixed(3)})`);
 });
 
+/* ── A-WHIP (2026-08-19, phase 3): the second air axis, and the verdict that retires pitch-only ── */
+
+test('AIR YAW is an exact integral of steer — and the BODY rotates, not the momentum (the whip, not a turn)', () => {
+  const m = createBikeModel(P);
+  const FLAT = { heightAt: () => -50 };            // deep air: nothing to land on inside the window
+  const s = { x: 0, y: 10, z: 0, yaw: 0.4, headYaw: 0.4, speed: 5, vy: 0, pitch: 0, airborne: true, quat: new THREE.Quaternion() };
+  const x0 = s.x, z0 = s.z;
+  for (let n = 0; n < Math.round(0.5 / DT); n++) m.step(s, { throttle: 0, steer: 1, lift: 0 }, DT, FLAT);
+  assert.ok(Math.abs((s.yaw - 0.4) - (-P.airYawRate * 0.5)) < 1e-9,
+    `steer +1 for 0.5 s must yaw exactly −airYawRate·t (got Δ ${(s.yaw - 0.4).toFixed(4)})`);
+  // momentum's line: travel stayed on the LAUNCH heading, not the whipped body yaw
+  const dist = Math.hypot(s.x - x0, s.z - z0);
+  const alongHead = (s.x - x0) * Math.sin(0.4) + (s.z - z0) * Math.cos(0.4);
+  assert.ok(Math.abs(dist - alongHead) < 1e-9, 'every unit of travel lies along headYaw — the whip cannot steer the flight');
+  assert.equal(s.headYaw, 0.4, 'headYaw is frozen for the whole flight');
+  const held = s.yaw;
+  for (let n = 0; n < Math.round(0.3 / DT); n++) m.step(s, { throttle: 0, steer: 0, lift: 0 }, DT, FLAT);
+  assert.equal(s.yaw, held, 'no input holds the whip attitude — an exact integral, like the pitch axis');
+});
+
+/* drop with a chosen BODY yaw against a frozen travel heading of 0; return the landing record. */
+function landAtYaw(yaw, pitch = 0) {
+  const m = createBikeModel(P);
+  const FLAT = { heightAt: () => 0 };
+  const s = { x: 0, y: 1.2, z: 0, yaw, headYaw: 0, speed: 6, vy: -1, pitch, airborne: true, quat: new THREE.Quaternion(), airtime: 0.5, airTotal: 0.5, jumps: 1, upX: 0, upY: 1, upZ: 0, landing: { err: 0, yawErr: 0, kept: 1, clean: true, count: 0 } };
+  for (let n = 0; n < Math.round(1.2 / DT) && s.airborne; n++) m.step(s, { throttle: 0, steer: 0, lift: 0 }, DT, FLAT);
+  assert.equal(s.airborne, false, 'the drop must land inside the window');
+  return { landing: s.landing, speed: s.speed, headYaw: s.headYaw, yaw: s.yaw };
+}
+
+test('LAND SQUARE = CLEAN: yaw matching the travel line keeps every unit of speed (pitch-only retires, nothing regresses)', () => {
+  const r = landAtYaw(0);
+  assert.equal(r.landing.clean, true);
+  assert.equal(r.landing.kept, 1);
+  assert.equal(r.landing.yawErr, 0);
+});
+
+test('LANDED SIDEWAYS SCRUBS like over-rotation does: 60° crossed-up is DIRTY, kept between the floor and 1', () => {
+  const r = landAtYaw(Math.PI / 3);                // 60° — past the 29° cone, short of fully crossed
+  assert.equal(r.landing.clean, false);
+  const want = Math.max(P.keepMin, 1 - P.scrub * (Math.PI / 3 - P.cleanYawAngle) / (Math.PI / 2 - P.cleanYawAngle));
+  assert.ok(Math.abs(r.landing.kept - want) < 1e-9, `kept ${r.landing.kept.toFixed(3)} must be the stated yaw law (want ${want.toFixed(3)})`);
+  assert.ok(r.landing.kept < 1 && r.landing.kept > P.keepMin, 'scrubbed, not wrecked — and not clean');
+});
+
+test('THE YAW WRAP: a completed 360 (2π of body yaw) lands SQUARE — the arithmetic the whip trick hangs on', () => {
+  const r = landAtYaw(2 * Math.PI - 0.05);
+  assert.equal(r.landing.clean, true, `yawErr ${r.landing.yawErr.toFixed(3)} rad must wrap to ~0`);
+  assert.equal(r.landing.kept, 1);
+});
+
+test('FULLY CROSSED (90°) is already the keepMin floor, and BACKWARDS (π) stays the floor — not worse than it', () => {
+  const at90 = landAtYaw(Math.PI / 2);
+  const at180 = landAtYaw(Math.PI * 0.999);
+  assert.ok(at90.landing.kept <= P.keepMin + 1e-9, `90° crossed lands at the floor (kept ${at90.landing.kept.toFixed(2)})`);
+  assert.equal(at180.landing.kept, at90.landing.kept, 'past π/2 the floor IS the verdict — the crash state is phase-4 vocabulary');
+});
+
+test('ONE LANDING, ONE NUMBER: with BOTH axes botched the WORST one governs (min, not a blend — Rule 6 in the arithmetic)', () => {
+  const pitchOnly = landAtYaw(0, Math.PI / 2);     // 90° pitch botch, square yaw
+  const both = landAtYaw(Math.PI / 3, Math.PI / 2); // same pitch botch + a 60° yaw botch
+  const yawOnly = landAtYaw(Math.PI / 3);
+  assert.equal(both.landing.kept, Math.min(pitchOnly.landing.kept, yawOnly.landing.kept),
+    'kept = min(keptPitch, keptYaw) — never an average, never a product');
+});
+
+test('LANDING RE-UNIFIES THE LINES: after a sideways touchdown the wheels\' yaw IS the new travel heading', () => {
+  const r = landAtYaw(Math.PI / 4);
+  assert.equal(r.headYaw, r.yaw, 'headYaw snaps to the body yaw at the verdict — the wheels grip where they point');
+});
+
+test('GROUNDED STEER IS A TURN, NOT A WHIP: on the dirt yaw and headYaw stay ONE line (no yaw stream can open)', () => {
+  const m = createBikeModel(P);
+  const FLAT = { heightAt: () => 0 };
+  const s = { x: 0, y: 0, z: 0, yaw: 0, speed: 5, quat: new THREE.Quaternion() };
+  for (let n = 0; n < 60; n++) m.step(s, { throttle: 1, steer: 1, lift: 0 }, DT, FLAT);
+  assert.ok(Math.abs(s.yaw) > 0.1, 'the turn happened');
+  assert.equal(s.headYaw, s.yaw, 'yaw − headYaw ≡ 0 while grounded — the scorer\'s whip stream is structurally silent on the dirt');
+});
+
+test('NO-STEER AIR IS BYTE-IDENTICAL to the phase-1 frozen-yaw air (the re-baseline claim, checkable)', () => {
+  /* the same full-throttle drive that anchors every A-MOTO baseline, steer 0 throughout: every
+     landing must report yawErr EXACTLY 0 and kept must be the pitch law's own number — proven
+     end-to-end by the replay fixture's flipHash too (tricks.test.mjs), but pinned here at the
+     landing-record level so a red names the field that moved. */
+  const s = fresh();
+  const rec = drive(createBikeModel(P), s, 13);
+  assert.ok(rec.landings.length >= 3, 'the run must land repeatedly');
+  for (const L of rec.landings) assert.equal(L.yawErr, 0, 'no whip input → yawErr exactly 0, every landing');
+});
+
 /* ── Rule 7 receipt: the ATV itself is untouched by this arc ───────────────────────────────────── */
 
 test('ATV_PROFILE still has no airborne vocabulary — the dune buggy keeps hugging the terrain', () => {

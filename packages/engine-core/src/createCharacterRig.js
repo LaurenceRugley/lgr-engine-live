@@ -82,6 +82,7 @@ export const LAYER_DEFAULTS = {
 // this ships the plant the metric demands. Presentation-only (bone transform after the mixer; the sim owns the
 // body position) → determinism-safe. Module scratch (runs synchronously at the tail of one _applyLayers).
 const _ikTgt = new THREE.Vector3(), _ikLocal = new THREE.Vector3(), _ikMat = new THREE.Matrix4();
+const _mountTgt = new THREE.Vector3();   // A-WHIP mount-IK: the socket node's world position (per-limb scratch)
 // A-CRAWL (2026-08-19) wall-contact scratch — module-level like every other layer's (the contact pass
 // runs synchronously inside one _applyLayers, one limb at a time, so a shared pair is safe + alloc-free).
 const _cR = new THREE.Vector3(), _cE = new THREE.Vector3();
@@ -325,6 +326,21 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       return { foot: hand || null, knee: fore || null, upleg: arm || null, articulated: !!(arm && fore && hand), clen: 0 };
     };
     const _airArmL = _armChainOf(B.armL), _airArmR = _armChainOf(B.armR);
+    /* ── A-WHIP (2026-08-19) MOUNT-IK state. The RIDER'S version of the crawl's wall contact: a
+       seated body on a vehicle pins hands to GRIP sockets and feet to PEG sockets — world-space
+       target NODES the consumer hands over once (setMountIK), typically empties exported inside
+       the vehicle's own GLB (build_moto_bike.py's bike_grip_l/r under the forks — so the hands
+       ride the STEERING by scene-graph parenting, no per-frame math here at all — and
+       bike_peg_l/r under the body). Same four limb chains the crawl already walks, the same
+       analytic `_solveTwoBone`, the same lerp-from-current-end blend; `_mountRep` is the live
+       receipt (end joint's distance to its socket AFTER the solve — the number the ledger's
+       hands-ON-grips claim quotes; -1 = no chain/no target). Zero cost when never enabled. */
+    let _mountIK = null, _mountW = 0;
+    const _mountRep = { active: false, w: 0, handL: -1, handR: -1, footL: -1, footR: -1 };
+    const _mountLimbs = [
+      { key: 'handL', ch: _airArmL }, { key: 'handR', ch: _airArmR },
+      { key: 'footL', ch: _ikLegL }, { key: 'footR', ch: _ikLegR },
+    ];
     let _airPhase = 0, _airClimbEase = 0, _contactW = 0;
     let _airWallOn = false, _airWallNx = 0, _airWallNz = 0, _airWallPx = 0, _airWallPz = 0;
     const _crawlOff = { u: 0, lift: 0 };            // crawlLimb's out-param (spawn-owned, zero-alloc per frame)
@@ -467,6 +483,17 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // off the wall plane, LIVE (read-only by contract; the layer rewrites it every contact frame).
       get airPhase() { return _airPhase; },
       get contactReport() { return _contactRep; },
+      /* ── A-WHIP MOUNT-IK: pin hands/feet to a vehicle's socket NODES (see the state block).
+         cfg = { handL, handR, footL, footR } — each a THREE.Object3D whose world position is the
+         JOINT target (read live every frame, so steering forks carry the grips and the hands
+         follow for free), or absent/null to leave that limb on the clip pose. Pass null/false to
+         release (eases out 9/s — dismounting melts, never pops). Opt-in and exactly no-op when
+         never called — the horde/city/crowd paths are byte-identical (tier-guard's claim). */
+      setMountIK(cfg) {
+        if (!cfg) { _mountIK = null; return; }
+        _mountIK = { handL: cfg.handL || null, handR: cfg.handR || null, footL: cfg.footL || null, footR: cfg.footR || null };
+      },
+      get mountReport() { return _mountRep; },
       // A1: a SMOOTHED body heading (slerped in _applyLayers) — the caller passes the target yaw instead of
       // snapping object.rotation.y, so turns read smooth. Pass null to go back to caller-driven yaw.
       setHeading(yaw) { _headingTarget = yaw; },
@@ -497,7 +524,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
       // A-AIR: the air layer is reset here too. A pooled slot that recycled mid-fall would otherwise
       // re-arm carrying the previous occupant's spread-eagle in `_airCur` and ease OUT of it on frame one.
-      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; _airPhase = 0; _airClimbEase = 0; _contactW = 0; _airWallOn = false; _contactRep.active = false; _contactRep.w = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
+      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; _airPhase = 0; _airClimbEase = 0; _contactW = 0; _airWallOn = false; _contactRep.active = false; _contactRep.w = 0; _mountIK = null; _mountW = 0; _mountRep.active = false; _mountRep.w = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
@@ -852,6 +879,44 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
               }
             }
           } else if (_contactRep.active) { _contactRep.active = false; _contactRep.w = 0; }
+        }
+        /* ── A-WHIP MOUNT-IK (2026-08-19) — hands to the grips, feet to the pegs. ----------------
+           RUNS LAST (after the crawl pass, for the same last-writer-wins reason — though a body
+           is never mounted AND clinging; different consumers, stated): for each limb with a
+           socket target, read the node's LIVE world position (getWorldPosition walks the parent
+           chain, so the bike group's transform set THIS frame — and the fork's steer yaw — are
+           already in it), lerp the solve target from the limb's CURRENT posed end position by
+           the eased weight (the foot-lock's own blend trick: weight 0 is an exact no-op, no
+           second blending mechanism to keep honest), and run the SAME analytic two-bone solve
+           every other contact pass trusts. The receipt is MEASURED after the solve — the end
+           joint's remaining distance to its socket — so "hands ON grips" is a number a probe
+           asserts, not an impression; a target beyond the chain's reach shows up here as a
+           residual the captures tool prints (the clamp in _solveTwoBone stops at full
+           extension). COST: ~8 updateWorldMatrix walks + 4 solves per mounted rider per frame,
+           zero when never enabled (one failed `if`). */
+        {
+          const wantMount = _mountIK ? 1 : 0;
+          if (wantMount || _mountW > 0.004) {
+            _mountW = damp(_mountW, wantMount, wantMount ? 14 : 9, dt);
+            _mountRep.active = _mountW > 0.004;
+            _mountRep.w = _mountW;
+            if (_mountRep.active) {
+              for (let i = 0; i < _mountLimbs.length; i++) {
+                const d = _mountLimbs[i];
+                const tgt = _mountIK ? _mountIK[d.key] : null;
+                const ch = d.ch;
+                if (!tgt || !(_chainLenOf(ch) > 0)) { _mountRep[d.key] = -1; continue; }
+                tgt.getWorldPosition(_mountTgt);
+                ch.foot.updateWorldMatrix(true, false); ch.foot.getWorldPosition(_cE);
+                _ikTgt.set(_cE.x + (_mountTgt.x - _cE.x) * _mountW,
+                  _cE.y + (_mountTgt.y - _cE.y) * _mountW,
+                  _cE.z + (_mountTgt.z - _cE.z) * _mountW);
+                _solveTwoBone(ch, _ikTgt.x, _ikTgt.y, _ikTgt.z);
+                ch.foot.updateWorldMatrix(true, false); ch.foot.getWorldPosition(_cE);
+                _mountRep[d.key] = _cE.distanceTo(_mountTgt);
+              }
+            }
+          } else if (_mountRep.active) { _mountRep.active = false; _mountRep.w = 0; }
         }
       },
       setState(name, opts = {}) {
