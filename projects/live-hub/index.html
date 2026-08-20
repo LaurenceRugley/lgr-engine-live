@@ -112,6 +112,19 @@
     footer { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 2.4rem; }
     footer a { color: var(--muted); }
     footer .ext { color: var(--accent2); }
+    /* ---- THE SANDBOX DOOR (A-LAUNCH, 2026-08-20). The hub's second face is a SEPARATE page, and
+       this one inline line is the whole of its presence here — deliberately. The card gallery is the
+       public, job-campaign face and the standing rule is that the shipped-products cards must still
+       be above the fold at 1280x800 on load, so the door had to cost roughly one line of height, not
+       a banner. It reads as a door rather than a card: a rule, a label, and a link. ---- */
+    .door {
+      display: flex; align-items: center; justify-content: center; gap: 0.55rem; flex-wrap: wrap;
+      margin-top: 1rem; padding-top: 0.9rem; border-top: 1px solid var(--line);
+      font-size: 0.84rem; color: var(--muted);
+    }
+    .door b { color: var(--accent5); font: 650 0.68rem/1 ui-monospace, monospace; letter-spacing: 0.16em; text-transform: uppercase; }
+    .door a { color: var(--accent5); text-decoration: none; font-weight: 650; }
+    .door a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -124,6 +137,7 @@
            heading; Engine demos follows it). A first-time visitor was being pointed at nothing.
            Also drops an em-dash rather than adding one, per the taste rules for shipped copy. -->
       <p class="sub">Everything public in one place: three shipped products first, then the engine demos they are built on. Tap a card and try it; best on a real GPU, works on phones.</p>
+      <p class="door"><b>Dev Lab</b> <span>Every world and every body it can be entered in, as direct links —</span> <a href="launch.html">open the sandbox launcher →</a></p>
     </header>
 
     <h2 class="section"><b>Shipped products</b> — built on this engine, live at lgrwebstudios.com</h2>
@@ -336,6 +350,7 @@
            footer link at all (and showcase-lab none either) — the 2026-08-19 sweep's finding. -->
       <a href="hoard2/?seed=1337&amp;map=metropolis">hoard v2 metropolis</a> · <a href="hoard/cavern.html">cavern</a> ·
       <a href="office/">office</a> · <a href="cs-viz/sort-race.html">sort race</a> · <a href="cs-viz/event-loop.html">event loop</a> · <a href="cs-viz/graph-wave.html">graph wave</a>
+      <br><a href="launch.html">dev lab launcher</a>
     </footer>
   </div>
 </body>

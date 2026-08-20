@@ -67,6 +67,8 @@
      },
      grapple: { step, attach } | null,   // createGrappleModel(profile); null = a character with no web
      grappleProfile,                     // the SAME profile object the model was built with (read live)
+     gravity: 5.4 | () => 5.4,           // A-LAUNCH: a FUNCTION is re-read every step, so a tuning dock
+                                         // can move the fall as well as the swing (see the defaults block)
      … tuning, see the defaults block
    }) -> {
      update(dt, input), addLook(dx,dy), cameraPose(outPos,outDir),
@@ -114,8 +116,20 @@ export function createCharacterController(opts = {}) {
   const airControl = opts.airControl != null ? opts.airControl : 0.35;
   /* GRAVITY MATCHES THE GRAPPLE'S 5.4 EXACTLY, and that is a seam requirement rather than a taste:
      the two integrators hand the same body back and forth mid-flight, so a mismatch would read as the
-     character getting heavier the instant a web cut. One number, stated once. */
-  const gravity = opts.gravity != null ? opts.gravity : 5.4;
+     character getting heavier the instant a web cut. One number, stated once.
+     ---- A-LAUNCH (2026-08-20): GRAVITY MAY ALSO BE A FUNCTION, and that is the whole of "a tuning
+     dock can move gravity". A NUMBER is read once, here, at construction — which is correct and
+     cheapest for every shipped consumer and stays their behaviour EXACTLY (metropolis and swing-lab
+     both pass numbers and are untouched by this line). A FUNCTION is read once per step, so a room
+     that mutates a live profile object from a slider moves the WALK as well as the SWING.
+     WHY IT MATTERS THAT BOTH MOVE: the grapple model already reads its profile live (pilot.js's
+     `P(k)`), so a dial wired only to the profile would change a swing's gravity and NOT a fall's —
+     i.e. the body would get lighter the instant a web cut, which is precisely the mismatch the
+     paragraph above forbids. Exposing the knob without this seam would have BUILT that bug.
+     C++ anchor: a `double` member versus a `std::function<double()>` — same call site, one resolves
+     at construction, the other every tick. */
+  const gravityOpt = opts.gravity != null ? opts.gravity : 5.4;
+  const gravityOf = typeof gravityOpt === 'function' ? gravityOpt : () => gravityOpt;
   /* JUMP IS SPECIFIED AS A SPEED, and the apex it buys is v²/2g — 1.2 u/s under gravity 5.4 tops out
      0.133 u above the take-off foot, which at this city's scale is ≈0.81 m and ≈0.48 eye-heights: a
      readable human hop that clears a kerb and not a roof. Hang time is 2v/g ≈ 0.44 s. */
@@ -589,7 +603,7 @@ export function createCharacterController(opts = {}) {
       }
 
       // --- VERTICAL: gravity, then the floor, then the two forgiveness timers.
-      state.vy -= gravity * dt;
+      state.vy -= gravityOf() * dt;
       if (state.vy < -maxFall) state.vy = -maxFall;
       state.y += state.vy * dt;
 

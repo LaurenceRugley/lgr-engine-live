@@ -142,15 +142,40 @@ const AR = { cols: qNum('cols', 13), rows: qNum('cols', 13), spacing: qNum('spac
    --------------------------------------------------------------------------------------------- */
 const REGION_KEYS = ['sea', 'city', 'woods', 'desert', 'lakes'];
 const cityRimOf = () => ((AR.cols - 1) / 2) * AR.spacing + (AR.spacing - WP.streetW) / 2 + WP.streetW;
+/* ---- A-LAUNCH: THE SEEDS MUST OUTRUN THE CITY, and until now they could not. -------------------
+   The three district seeds below were SWEPT, not guessed, and every one of them sits at
+   max(|x|,|z|) = 34 u. The city is a 'rect' district whose half-width is `cityRimOf()` — 30.5 u at
+   the shipped cols 13 / spacing 4.6, comfortably inside 34. But that rim is a FUNCTION OF THE DIALS,
+   and once it passes 34 the rect PRE-OWNS all three seed texels, so all three districts start
+   already-enclosed and flood nothing: woods 0%, desert 0%, lakes 0%.
+   THIS IS A DEFECT THAT SHIPPED, and the shipped `city cols` slider reaches it: measured on the
+   pre-arc build, `?cols=15` (rim 35.1) and `?cols=17` (rim 39.7) both report starved 3 and a world
+   that is nothing but city and sea. It is arithmetic, not chance — 7.5·4.6 + 1.7 + 1.2 = 35.1 > 34.
+   THE FIX IS ONE SCALE FACTOR ON ALL THREE SEEDS, so the swept layout's SHAPE is preserved exactly
+   (pushing x and z independently would distort the relative geometry the sweep actually scored) and
+   the seeds simply stand off the rect by `SEED_PAD` once it grows past them.
+   IT IS A NO-OP AT THE SHIPPED CONFIG BY CONSTRUCTION, which is the property that lets it land in an
+   arc whose first rule is "defaults must not move": (30.5 + 3.0)/34 = 0.985, and the Math.max floors
+   it at 1. Verified as an identical terrain checksum, not assumed.
+   HONEST LIMIT, because a guard's green only covers what it can see: this fixes seeds the rect has
+   SWALLOWED, not a plan that is over-subscribed by AREA. At cols 17 the city rect alone is 38.5% of
+   the world and the sea another 22%, leaving 39.5% for wants summing to 53% — no seed position can
+   satisfy that, and the HUD's `starved`/coverage rows are the honest readout of it. Making the plan's
+   wants adapt to the city's real footprint is a change to A-PATCHWORK's swept layout, out of this
+   arc's scope, and it is written up in HANDOFF as an OPEN. ---- */
+const SEED_REACH = 34;      // max(|x|,|z|) of the three swept seed positions below
+const SEED_PAD = 3.0;       // u — how far outside the city rect a seed must stand to survive it
 function regionPlan() {
   const rim = cityRimOf();
   const woods = Math.max(0.05, Math.min(0.36, WP.woods));
+  const push = Math.max(1, (rim + SEED_PAD) / SEED_REACH);
+  const at = (x, z) => ({ x: x * push, z: z * push });
   return [
     { key: 'sea', want: 0.22, mode: 'rim' },
     { key: 'city', want: 0.25, mode: 'rect', rect: { x0: -rim, z0: -rim, x1: rim, z1: rim } },
-    { key: 'woods', want: woods, mode: 'seed', at: { x: -34, z: 30 } },
-    { key: 'desert', want: 0.41 - woods, mode: 'seed', at: { x: 34, z: -32 } },
-    { key: 'lakes', want: 0.12, mode: 'seed', at: { x: 30, z: 34 } },
+    { key: 'woods', want: woods, mode: 'seed', at: at(-34, 30) },
+    { key: 'desert', want: 0.41 - woods, mode: 'seed', at: at(34, -32) },
+    { key: 'lakes', want: 0.12, mode: 'seed', at: at(30, 34) },
   ];
 }
 /* the SHAPING dials. seamBlend 8 u is budgeted off the module's own bound
@@ -335,9 +360,30 @@ buildWorld();
    — groundAt = max(terrain, roof) is the controller's own line, unmodified.
    --------------------------------------------------------------------------------------------- */
 const SWING = { ...GRAPPLE_PROFILE, ropeMax: WORLD_ROPE, aimMode: Q.get('aim') === 'auto' ? 'auto' : 'point' };
-/* the hang cap is DERIVED from the rope (the ledger's own rule — a clock racing a pendulum it was
-   never sized against): a full period plus margin at rope 4.10 / g 5.4 → 6.83 s. */
-SWING.maxHangLatched = Number((2 * Math.PI * Math.sqrt(SWING.ropeMax / SWING.gravity) * 1.24).toFixed(2));
+/* ---- A-LAUNCH (2026-08-20): THE PHYSICS DIALS. --------------------------------------------------
+   The owner's ask was to "change the numbers of, like, rope length and whatnot" in THIS room. The
+   profile is already a LOCAL COPY of GRAPPLE_PROFILE (never the shared export — mutating the module's
+   own object would poison every other consumer in the bundle), so the knobs cost nothing structural:
+   they are URL params first and sliders second, exactly like the world dials above, so a tuning you
+   like is a LINK and the probe drives the identical body a human does.
+   EVERY DEFAULT IS THE FALLBACK ARGUMENT, i.e. today's shipped number — which is what makes "a page
+   with no params is the pre-arc world" a property of the code rather than a hope.
+   `rope` is spelled the owner's way in the URL; the profile key it writes (`ropeMax`) is unchanged,
+   so nothing downstream learns a second name for one fact. */
+const PHYS = [['rope', 'ropeMax'], ['gravity', 'gravity'], ['assist', 'assist'], ['maxSpeed', 'maxSpeed']];
+for (const [param, key] of PHYS) SWING[key] = qNum(param, SWING[key]);
+/* THE HANG CAP IS DERIVED FROM THE ROPE *AND* GRAVITY, and now has to be re-derivable on demand: the
+   ledger's own rule is "recompute it if you move ropeMax or gravity; this number is derived from
+   them, not chosen beside them", and a slider that moves either while this stayed put would leave a
+   clock racing a pendulum it was never sized against — the exact failure that constant warns about.
+   A full period plus margin: 2π√(L/g)·1.24 → 6.79 s at the shipped rope 4.10 / g 5.4. (The previous
+   comment here said 6.83; the expression evaluates to 6.79, measured off the running page. Corrected
+   rather than carried, per Rule 15 — a derived number stated wrong is the same class of stale fact as
+   the `aimReach` literal this room's parent lab already paid for.) */
+const deriveHang = () => {
+  SWING.maxHangLatched = Number((2 * Math.PI * Math.sqrt(SWING.ropeMax / SWING.gravity) * 1.24).toFixed(2));
+};
+deriveHang();
 const EYE = 0.28, HERO_H = 0.30, WALK_V = 0.55, SPRINT_V = 0.95, JUMP_V = 1.2;
 const THIRD = { dist: 1.9, distMax: 3.0, distAtSpeed: 6, height: 0.34, side: 0.16, springR: 0.06, minDist: 0.35 };
 const character = createCharacterController({
@@ -346,7 +392,13 @@ const character = createCharacterController({
   grappleProfile: SWING,
   eyeHeight: EYE, radius: 0.09, footR: 0.12, collideYOff: 0.14,
   moveSpeed: WALK_V, sprintSpeed: SPRINT_V, accel: 14,
-  jumpSpeed: JUMP_V, gravity: SWING.gravity,
+  /* GRAVITY IS HANDED IN AS A FUNCTION, not a number, and that one character of difference is what
+     makes the gravity dial honest (A-LAUNCH). The grapple model already re-reads its profile every
+     frame (pilot.js `P(k)`), so a dial wired only to the profile would change how a SWING falls and
+     not how a FALL falls — the body would get lighter the instant a web cut, which is precisely the
+     mismatch character.js's own gravity note forbids. The seam is engine-core's and opt-in: pass a
+     number and it is read once, as every other consumer still does. */
+  jumpSpeed: JUMP_V, gravity: () => SWING.gravity,
   third: THIRD,
   fov: { base: 58, max: 78, atSpeed: 7 },
   camEyeClear: cameraNearRadius({ near: 0.02, fov: 78, aspect: 2, margin: 1.25 }),
@@ -542,14 +594,29 @@ function updateHud(dt) {
 /* ---------------------------------------------------------------------------------------------
    7. THE DOCK.
    --------------------------------------------------------------------------------------------- */
+/* TWO KINDS OF DIAL, and the split is the architecture rather than tidiness.
+   WORLD dials change the FIELD, so they must re-run the whole generate→shape→carve chain and respawn
+   the body (a pad that moved under your feet is not a pad you are standing on). PHYSICS dials write
+   the LIVE profile object the grapple model and the controller both read every frame, so they take
+   effect on the NEXT FRAME with no reconstruction — which is what makes "does a longer rope actually
+   reach that tower" answerable in ten seconds instead of a rebuild.
+   `spacing` JOINS THE WORLD LIST here and that is a gap being closed, not a feature: it has been a
+   URL param since A-MARRIAGE (`AR.spacing = qNum('spacing', 4.6)`) with no slider and no place in
+   `copy url` — so a world you reached by hand-editing the URL could not be handed to anyone. A param
+   the copy button cannot express is a param the room cannot share. */
 const DIALS = [['seed', 'seed', WP], ['grade', 'maxGrade', WP], ['street', 'streetW', WP],
-  ['cols', 'cols', AR], ['woods', 'woods', WP]];
+  ['cols', 'cols', AR], ['spacing', 'spacing', AR], ['woods', 'woods', WP]];
 const decimals = (key) => (key === 'seed' || key === 'cols' ? 0 : 2);
 function syncDock() {
   for (const [id, key, obj] of DIALS) {
     const el = $('p-' + id); if (!el) continue;
     el.value = String(obj[key]);
     $('n-' + id).textContent = Number(obj[key]).toFixed(decimals(key));
+  }
+  for (const [id, key] of PHYS) {
+    const el = $('p-' + id); if (!el) continue;
+    el.value = String(SWING[key]);
+    $('n-' + id).textContent = Number(SWING[key]).toFixed(2);
   }
 }
 function wireDock() {
@@ -568,6 +635,28 @@ function wireDock() {
       } else flash(`world rebuilt · pads span ${(CARVE.stats.padMax - CARVE.stats.padMin).toFixed(2)} u`);
     });
   }
+  /* THE PHYSICS DIALS write the live profile and return — no rebuild, no respawn. The ONE thing they
+     must not skip is `deriveHang`: rope and gravity are the two inputs the latched-hang cap is
+     computed from, so leaving it stale is how you get a rope the arc outlives. */
+  for (const [id, key] of PHYS) {
+    const el = $('p-' + id); if (!el) continue;
+    el.addEventListener('input', () => {
+      SWING[key] = Number(el.value);
+      $('n-' + id).textContent = Number(el.value).toFixed(2);
+      if (key === 'ropeMax' || key === 'gravity') deriveHang();
+    });
+  }
+  /* RESET RESTORES *THIS ROOM'S* SHIPPED TUNING, which is not GRAPPLE_PROFILE's. The house rope here
+     is 4.10 (swing-lab's derived constant, held fixed so the mechanic is identical across rooms and
+     the LEVEL is the only variable) — handing back the profile's metropolis-fitted 3.2 would silently
+     undo the range this world is generated FROM (`ARENA_SKY.ropeMax`) and read as a broken slider.
+     Same trap swing-lab's own reset comment names, one room over. */
+  $('b-reset').addEventListener('click', () => {
+    SWING.ropeMax = WORLD_ROPE;
+    for (const k of ['gravity', 'assist', 'maxSpeed']) SWING[k] = GRAPPLE_PROFILE[k];
+    deriveHang(); syncDock();
+    flash(`physics reset · rope ${SWING.ropeMax.toFixed(2)} u · g ${SWING.gravity.toFixed(2)} · hang ${SWING.maxHangLatched.toFixed(2)} s`);
+  });
   $('b-valley').addEventListener('click', () => { WP.preset = 'valley'; buildWorld(); spawn(); flash('preset: valley'); });
   $('b-mountains').addEventListener('click', () => { WP.preset = 'mountains'; buildWorld(); spawn(); flash('preset: mountains'); });
   $('b-spawn').addEventListener('click', spawn);
@@ -575,7 +664,13 @@ function wireDock() {
   $('b-copy').addEventListener('click', () => {
     const p = new URLSearchParams();
     p.set('seed', WP.seed); p.set('grade', WP.maxGrade); p.set('street', WP.streetW);
-    p.set('cols', AR.cols); p.set('woods', WP.woods);
+    p.set('cols', AR.cols); p.set('spacing', AR.spacing); p.set('woods', WP.woods);
+    /* THE PHYSICS GOES IN THE URL TOO, which is the whole point of the copy button: a swing that felt
+       right is a rope length and a gravity, and a link that carries the world but not the body is a
+       link to a different experiment. Written from the LIVE profile, so what you copy is what is
+       actually in force — not what the sliders were built with. */
+    for (const [param, key] of PHYS) p.set(param, SWING[key]);
+    if (MODE !== 'walk') p.set('mode', MODE);
     if (WP.preset !== 'valley') p.set('preset', WP.preset);
     if (!WP.regions) p.set('regions', 'off');
     const url = location.origin + location.pathname + '?' + p.toString();
@@ -595,6 +690,13 @@ const _bCamPos = new THREE.Vector3(), _bCamDir = new THREE.Vector3();
 const _hand = new THREE.Vector3();
 const AXES = { throttle: 0, steer: 0, lift: 0, boost: 0 };
 spawn();
+/* ---- A-LAUNCH: THE BODY IS A URL PARAM. `?mode=bike` starts you on the dirtbike instead of on foot.
+   It is applied AFTER `spawn()` deliberately — spawn's own contract is "put the walker at the city
+   edge facing in", and it forces walk mode, so asking for the bike first would be silently undone.
+   This is what makes a launcher entry able to promise a BODY as well as a world: the menu is links,
+   and a link can only carry what the room agrees to read. Anything that is not 'bike' is walk, so a
+   typo lands you on foot rather than nowhere. ---- */
+if (Q.get('mode') === 'bike') setMode('bike');
 let last = performance.now(), fpsAcc = 0, fpsN = 0;
 
 function frame() {

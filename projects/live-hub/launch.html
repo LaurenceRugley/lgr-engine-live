@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Dev Lab — pick a world, pick a mode</title>
+  <meta name="description" content="The sandbox door into the LGR WebGL engine: every world, every body it can be entered in, and the tuning dials that drive them — as links.">
+  <link rel="icon" href="data:,">
+  <!-- ============================================================================================
+       THE LAUNCHER (ARC A-LAUNCH, 2026-08-20) — the hub's SECOND face.
+       ---------------------------------------------------------------------------------------------
+       WHY IT IS A SEPARATE PAGE AND NOT A TOGGLE ON index.html. The card gallery is a job-campaign
+       artifact and stays the default public face; the standing constraint is that the shipped-products
+       cards must not be pushed below the fold on load. A second page satisfies that by construction
+       rather than by measuring a toggle's collapsed height — and it gives the menu room to be a real
+       menu. index.html carries ONE small labelled door to here, in the header.
+
+       IT NAVIGATES. Every entry below is an <a href> carrying its state in the URL, because every room
+       in this engine already reads its own dials from the query string. There is no router, no shared
+       runtime and no in-place mode swapping — that version is deliberately deferred, and building the
+       shell without it would be the thing this codebase has already deleted once.
+
+       EVERY ENTRY LAUNCHES SOMETHING THAT EXISTS. The menu is built from the deploy SET
+       (tools/deploy-live.sh) and every href + thumbnail is asserted 200 against a mirror of the deploy
+       layout by tools/launcher-links.test.mjs. There are no greyed, placeholder or "coming soon"
+       rows: a mode that does not exist is not in the menu. The predecessor of this rule is the
+       "Portfolio OS" sidebar, which was deleted from this codebase for looking like an OS and doing
+       nothing.
+
+       NO NEW IMAGES. Every thumb here is one the gallery already ships, so this page costs the
+       live-hub size budget (tools/size-budget.test.mjs) only its own HTML — the budget had 21.5KB gz
+       of headroom measured before this arc and the hub is ~98% images.
+       ============================================================================================ -->
+  <style>
+    :root {
+      --bg: #0b0e0c; --ink: #eaf0e2; --muted: #9aa891; --line: #ffffff1a; --dim: #6f7a68;
+      --accent: #8fd94a; --accent2: #4aa3d9; --accent3: #d98f4a; --accent4: #b06ad9; --accent5: #e0c34a;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      background: radial-gradient(1100px 620px at 50% -12%, #16211c 0%, var(--bg) 58%) no-repeat, var(--bg);
+      color: var(--ink); font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      min-height: 100dvh; padding: clamp(1.1rem, 3.5vw, 2.2rem) clamp(0.9rem, 4vw, 2rem) 3rem;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; }
+    header { margin-bottom: clamp(1.2rem, 4vw, 1.9rem); }
+    .kicker { color: var(--accent); font: 600 0.72rem/1 ui-monospace, monospace; letter-spacing: 0.22em; text-transform: uppercase; }
+    h1 { font-size: clamp(1.5rem, 5vw, 2.2rem); font-weight: 800; letter-spacing: -0.02em; margin: 0.45rem 0 0.4rem; }
+    .sub { color: var(--muted); max-width: 62ch; font-size: clamp(0.88rem, 2.4vw, 0.97rem); }
+    .back { display: inline-block; margin-top: 0.9rem; color: var(--accent2); text-decoration: none; font: 650 0.84rem/1 ui-sans-serif, system-ui, sans-serif; }
+    .back:hover { text-decoration: underline; }
+
+    h2.section {
+      font: 700 0.75rem/1 ui-monospace, monospace; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--muted); margin: clamp(1.6rem, 4vw, 2.1rem) 0 0.8rem; padding-top: clamp(0.6rem, 2vw, 0.9rem);
+      border-top: 1px solid var(--line);
+    }
+    h2.section b { color: var(--ink); }
+
+    /* A WORLD is a row: picture, identity, then the bodies you can enter it in. On a phone the
+       picture goes full-width on top and the modes wrap underneath — one column, no side-scroll. */
+    .world {
+      display: grid; grid-template-columns: 148px 1fr; gap: clamp(0.8rem, 2.5vw, 1.15rem);
+      align-items: start; padding: clamp(0.85rem, 2.5vw, 1.05rem);
+      background: linear-gradient(180deg, #ffffff0a, #ffffff03);
+      border: 1px solid var(--line); border-left: 3px solid var(--edge, var(--accent));
+      border-radius: 12px; margin-bottom: clamp(0.7rem, 2vw, 0.95rem);
+    }
+    @media (max-width: 640px) { .world { grid-template-columns: 1fr; } }
+    .world img {
+      width: 100%; aspect-ratio: 16 / 9; height: auto; object-fit: cover;
+      border-radius: 8px; background: #000; display: block;
+    }
+    .world h3 { font-size: 1.02rem; font-weight: 750; letter-spacing: -0.01em; }
+    .world .what { color: var(--muted); font-size: 0.86rem; margin: 0.2rem 0 0.6rem; }
+    .lbl { color: var(--dim); font: 600 0.62rem/1 ui-monospace, monospace; letter-spacing: 0.16em; text-transform: uppercase; display: block; margin: 0.55rem 0 0.35rem; }
+
+    /* THE MODES. Chips, because a mode is a short word and a row of them reads as a choice. Each is
+       a link carrying its own query string — the entire mechanism of this page. */
+    .modes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .modes a {
+      display: inline-flex; align-items: center; text-decoration: none;
+      font: 650 0.82rem/1 ui-sans-serif, system-ui, sans-serif;
+      padding: 0.46rem 0.7rem; border-radius: 8px;
+      background: #ffffff0d; color: var(--ink); border: 1px solid var(--line);
+      transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+    }
+    .modes a:hover { border-color: var(--edge, var(--accent)); color: var(--edge, var(--accent)); background: #ffffff14; }
+    .modes a.primary { background: var(--edge, var(--accent)); color: #08120a; border-color: transparent; }
+    .modes a.primary:hover { filter: brightness(1.08); color: #08120a; background: var(--edge, var(--accent)); }
+    /* a DIAL chip is a tuning preset rather than a body — monospace, because it is a number */
+    .modes a.dial { font-family: ui-monospace, monospace; font-size: 0.75rem; color: var(--muted); }
+    .modes a.dial:hover { color: var(--edge, var(--accent)); }
+
+    .note {
+      color: var(--dim); font-size: 0.8rem; line-height: 1.6; margin-top: 1.6rem;
+      padding-top: 0.9rem; border-top: 1px solid var(--line);
+    }
+    .note b { color: var(--muted); }
+    .note code { font-family: ui-monospace, monospace; color: var(--accent5); font-size: 0.94em; }
+    footer { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 2rem; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="kicker">Dev Lab · sandbox</div>
+      <h1>Pick a world, pick a mode</h1>
+      <p class="sub">The engine's rooms and every body they can be entered in, as direct links. This is the
+        workbench face — the tuning docks, the seeds and the physics dials. For the shipped products and the
+        guided demos, use the main page.</p>
+      <a class="back" href="./">← Live demos &amp; shipped products</a>
+    </header>
+
+    <h2 class="section"><b>Labs</b> — rooms with a tuning dock you can drive</h2>
+
+    <!-- WORLD LAB. The only room with PHYSICS dials as of A-LAUNCH, so its dial chips are rope and
+         gravity rather than presets. `?mode=bike` is new in this arc — the room reads it at boot. -->
+    <section class="world" style="--edge: var(--accent5)">
+      <img src="img/world-lab.jpg" alt="The World Lab seen from above — a grid city at the centre of a generated island, woods to the west, dunes to the north-east, lakes and sea around it" loading="lazy" width="720" height="405">
+      <div>
+        <h3>The World Lab</h3>
+        <p class="what">One island, five contiguous districts — city, woods, desert, lakes, sea — on a single
+          heightfield. Walk it, swing it, or ride it. Full dock: seed, terrain, districts, and live physics.</p>
+        <span class="lbl">Body</span>
+        <div class="modes">
+          <a class="primary" href="world-lab/">Walk &amp; swing →</a>
+          <a href="world-lab/?mode=bike">Dirtbike</a>
+        </div>
+        <span class="lbl">Terrain</span>
+        <div class="modes">
+          <a class="dial" href="world-lab/?preset=valley">preset=valley</a>
+          <a class="dial" href="world-lab/?preset=mountains">preset=mountains</a>
+          <a class="dial" href="world-lab/?seed=31">seed=31</a>
+          <a class="dial" href="world-lab/?regions=off">regions=off (pre-district)</a>
+        </div>
+        <span class="lbl">Physics — live dials</span>
+        <div class="modes">
+          <a class="dial" href="world-lab/?rope=6.5">rope=6.5 (long)</a>
+          <a class="dial" href="world-lab/?rope=2.8">rope=2.8 (short)</a>
+          <a class="dial" href="world-lab/?gravity=2.6">gravity=2.6 (moon)</a>
+          <a class="dial" href="world-lab/?gravity=9.1&amp;rope=3.2">gravity=9.1 · rope=3.2</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- SWING LAB. Two levels, both shipped and both already linked from the gallery. Its dock has
+         had URL-addressable swing tuning since A-CLIMB, so the dial chips are real there too. -->
+    <section class="world" style="--edge: var(--accent)">
+      <img src="img/swing-city.jpg" alt="The Swing Lab's city level — the hero mid-swing on a web line over a street canyon of setback towers" loading="lazy" width="720" height="405">
+      <div>
+        <h3>The Swing Lab</h3>
+        <p class="what">The room the web-swinging character was built in: lock, web, ride the arc, launch off
+          the top. Spider-crawl any facade and wall-jump off it.</p>
+        <span class="lbl">Level</span>
+        <div class="modes">
+          <a class="primary" href="swing-lab/?level=city">The city →</a>
+          <a href="swing-lab/">The lab room</a>
+        </div>
+        <span class="lbl">Dials</span>
+        <div class="modes">
+          <a class="dial" href="swing-lab/?ropeMax=6.5">ropeMax=6.5</a>
+          <a class="dial" href="swing-lab/?gravity=2.6">gravity=2.6</a>
+          <a class="dial" href="swing-lab/?level=city&amp;civs=600">civs=600 (full outbreak)</a>
+          <a class="dial" href="swing-lab/?aim=auto">aim=auto</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- MOTO LAB. Its params were read out of moto-lab/main.js rather than assumed: `view` (:206),
+         `ramp` (:393), `bike` (:169), plus a 12-key BIKE_PROFILE sweep (:83-85) that makes gravity
+         and maxSpeed URL-addressable there exactly as they now are in the World Lab. -->
+    <section class="world" style="--edge: var(--accent3)">
+      <img src="img/moto.jpg" alt="The Moto Lab — the dirtbike and rider inverted mid-backflip at the top of the arc over the ramp lane" loading="lazy" width="720" height="405">
+      <div>
+        <h3>The Moto Lab</h3>
+        <p class="what">A dirtbike over dunes solved from the bike's own physics — every crest launches at
+          design speed, and the landing banks or scrubs your trick points.</p>
+        <span class="lbl">Start</span>
+        <div class="modes">
+          <a class="primary" href="moto-lab/">Ride the dunes →</a>
+          <a href="moto-lab/?ramp=1">At the big ramp</a>
+          <a href="moto-lab/?view=first">First person</a>
+        </div>
+        <span class="lbl">Dials</span>
+        <div class="modes">
+          <a class="dial" href="moto-lab/?gravity=3.2">gravity=3.2 (floaty)</a>
+          <a class="dial" href="moto-lab/?maxSpeed=12">maxSpeed=12</a>
+          <a class="dial" href="moto-lab/?seed=19&amp;amp=1.4">seed=19 · amp=1.4</a>
+          <a class="dial" href="moto-lab/?bike=box">bike=box (control arm)</a>
+        </div>
+      </div>
+    </section>
+
+    <h2 class="section"><b>Worlds</b> — the big rooms, and the bodies they hold</h2>
+
+    <!-- METROPOLIS. Six bodies, but they are chosen from the in-page dock rather than the URL, so the
+         menu says so instead of inventing `?body=` links that would 200 and do nothing. The ONE URL
+         state it really has is the palette, which the gallery already ships. -->
+    <section class="world" style="--edge: var(--accent4)">
+      <img src="img/metropolis.jpg" alt="Metropolis at golden hour — a harbour city from the air, thousands of lit windows, the sea burning orange to the horizon" loading="lazy" width="720" height="405">
+      <div>
+        <h3>Metropolis</h3>
+        <p class="what">The full engine in one place: fly, drive, walk, take a boat's helm, ride as a gull, then
+          break the surface as a fish. Click a tower to dive through the glass.</p>
+        <span class="lbl">Enter</span>
+        <div class="modes">
+          <a class="primary" href="metropolis/">Open Metropolis →</a>
+          <a href="metropolis/?profile=neoTokyo">Neo-Tokyo palette</a>
+        </div>
+        <p class="what" style="margin: 0.55rem 0 0">The six bodies are picked from the dock inside the page — they
+          are not URL state, so they are not links here.</p>
+      </div>
+    </section>
+
+    <section class="world" style="--edge: var(--accent2)">
+      <img src="img/city.jpg" alt="The Open City — a procedural skyline at golden hour in a toon-style render" loading="lazy" width="720" height="405">
+      <div>
+        <h3>The Open City</h3>
+        <p class="what">The engine showcase: fly a craft over a procedural city, sweep day↔night, roll weather and
+          seasons, switch style tiers and colour-grade looks.</p>
+        <span class="lbl">Mode</span>
+        <div class="modes">
+          <a class="primary" href="live/">Fly the city →</a>
+          <a href="live/?hoard=1">Survival in-city</a>
+          <a href="live/?office=1">Dive to the office</a>
+          <a href="live/?office=basement">The basement fitout</a>
+        </div>
+        <span class="lbl">Terrain world &amp; editor</span>
+        <div class="modes">
+          <a class="dial" href="live/?world=1">world=1 (terrain)</a>
+          <a class="dial" href="live/?world=1&amp;preset=archipelago">preset=archipelago</a>
+          <a class="dial" href="live/?world=1&amp;preset=mountains">preset=mountains</a>
+          <a class="dial" href="live/?world=1&amp;edit=1&amp;tool=paint">edit=1 · tool=paint</a>
+        </div>
+        <span class="lbl">Look</span>
+        <div class="modes">
+          <a class="dial" href="live/?time=dawn">time=dawn</a>
+          <a class="dial" href="live/?time=night&amp;weather=rain">night · rain</a>
+          <a class="dial" href="live/?style=pixel">style=pixel</a>
+          <a class="dial" href="live/?profile=neoTokyo">profile=neoTokyo</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="world" style="--edge: var(--accent2)">
+      <img src="img/hoard2-metropolis.jpg" alt="Hoard v2 — a first-person dive down a generated city street at night, real stars overhead" loading="lazy" width="720" height="405">
+      <div>
+        <h3>Hoard v2</h3>
+        <p class="what">Five arenas through one text-to-world interpreter, with the iso→first-person dive. Same
+          seed across all five, so the worlds are comparable.</p>
+        <span class="lbl">World</span>
+        <div class="modes">
+          <a class="primary" href="hoard2/?seed=1337&amp;map=metropolis">Metropolis →</a>
+          <a href="hoard2/?seed=1337&amp;map=forest">Forest</a>
+          <a href="hoard2/?seed=1337&amp;map=swamp">Swamp</a>
+          <a href="hoard2/?seed=1337&amp;map=lakeshore">Lakeshore</a>
+          <a href="hoard2/?seed=1337&amp;map=coastal">Coastal</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="world" style="--edge: var(--accent)">
+      <img src="img/hoard.jpg" alt="The Hoard — a top-down survival arena with the survivor and a zombie" loading="lazy" width="720" height="405">
+      <div>
+        <h3>The Hoard</h3>
+        <p class="what">The original top-down wave-survival arena — flow-field horde AI, ballistics, decals — with
+          F to dive into first person.</p>
+        <span class="lbl">Arena</span>
+        <div class="modes">
+          <a class="primary" href="hoard/">City arena →</a>
+          <a href="hoard/?map=forest">Forest (rigged horde)</a>
+          <a href="hoard/cavern.html">Cavern dive</a>
+          <a href="hoard/cavern.html?fullbright=1">Cavern · fullbright</a>
+        </div>
+        <span class="lbl">Control arms</span>
+        <div class="modes">
+          <a class="dial" href="hoard/?ai=seek">ai=seek (no flow field)</a>
+          <a class="dial" href="hoard/?gun=hitscan">gun=hitscan</a>
+        </div>
+      </div>
+    </section>
+
+    <h2 class="section"><b>Scenes &amp; set pieces</b></h2>
+
+    <section class="world" style="--edge: var(--accent2)">
+      <img src="img/showcase.jpg" alt="The city in a flat red toon style mid-flight, the moment the showcase morphs its art direction live" loading="lazy" width="720" height="405">
+      <div>
+        <h3>The Showcase</h3>
+        <p class="what">One continuous scroll-driven shot over the city, the art style morphing mid-flight, ending
+          with the controls handed to you and a lit product stage.</p>
+        <div class="modes"><a class="primary" href="showcase-lab/">Open the Showcase →</a></div>
+      </div>
+    </section>
+
+    <section class="world" style="--edge: var(--accent4)">
+      <img src="img/office.jpg" alt="The Office — an interior with a dual-monitor view of the city and a cat" loading="lazy" width="720" height="405">
+      <div>
+        <h3>The Office</h3>
+        <p class="what">The interior the city's tower-dive lands in, standalone: glass-city view, props, and the
+          seated look-around.</p>
+        <span class="lbl">Fitout</span>
+        <div class="modes">
+          <a class="primary" href="office/">The corner office →</a>
+          <a href="office/?office=basement">The basement</a>
+          <a class="dial" href="office/?officelayout=straight-on">layout=straight-on</a>
+          <a class="dial" href="office/?officeprops=painted">props=painted</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="world" style="--edge: var(--accent)">
+      <img src="img/cs-viz.jpg" alt="Sort Race — insertion, merge and quicksort racing on the same array" loading="lazy" width="720" height="405">
+      <div>
+        <h3>Algorithms, alive</h3>
+        <p class="what">Zero-dependency CS visualizations — no WebGL, instant load, works on any phone.</p>
+        <div class="modes">
+          <a class="primary" href="cs-viz/sort-race.html">Sort Race →</a>
+          <a href="cs-viz/event-loop.html">Event Loop</a>
+          <a href="cs-viz/graph-wave.html">Graph Wave</a>
+        </div>
+      </div>
+    </section>
+
+    <p class="note">
+      <b>Every chip is a URL.</b> The rooms read their dials from the query string, so a setup you like is a
+      link you can keep or hand to someone. Inside the World Lab and the Swing Lab, the dock's
+      <code>copy url</code> button writes the current dials — world <i>and</i> physics — back out as one.
+      <br><br>
+      <b>The World Lab's physics are live.</b> <code>rope</code>, <code>gravity</code>, <code>assist</code> and
+      <code>maxSpeed</code> take effect on the next frame with no rebuild; the terrain dials
+      (<code>seed</code>, <code>grade</code>, <code>street</code>, <code>cols</code>, <code>spacing</code>,
+      <code>woods</code>) regenerate the island. With no parameters at all, every room is exactly its
+      shipped build.
+    </p>
+
+    <footer>
+      <a href="./">← back to the live demos</a>
+    </footer>
+  </div>
+</body>
+</html>

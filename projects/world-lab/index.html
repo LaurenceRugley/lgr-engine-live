@@ -122,16 +122,32 @@
       <label>max grade<input id="p-grade" type="range" min="0.10" max="0.45" step="0.01" /><span class="n" id="n-grade">0.25</span></label>
       <label>street w<input id="p-street" type="range" min="0.9" max="1.8" step="0.05" /><span class="n" id="n-street">1.20</span></label>
       <label>city cols<input id="p-cols" type="range" min="7" max="17" step="2" /><span class="n" id="n-cols">13</span></label>
+      <!-- A-LAUNCH: `spacing` has been a URL param since A-MARRIAGE with no slider and no place in
+           `copy url` — a world you could reach by hand and could not hand to anyone. Range brackets
+           the shipped 4.6 u block pitch. -->
+      <label>block pitch<input id="p-spacing" type="range" min="3.0" max="7.0" step="0.1" /><span class="n" id="n-spacing">4.60</span></label>
       <div class="grp">DISTRICTS (the coverage dial)</div>
       <label>woods %<input id="p-woods" type="range" min="0.08" max="0.34" step="0.01" /><span class="n" id="n-woods">0.26</span></label>
       <div class="btns">
         <button id="b-valley">valley</button>
         <button id="b-mountains">mountains</button>
       </div>
+      <!-- ---- A-LAUNCH: THE PHYSICS. These four write the LIVE profile the grapple model and the
+           character controller both read every frame, so they change the body on the NEXT FRAME —
+           no rebuild, no respawn (unlike every dial above, which re-runs the whole field). The
+           ranges bracket this room's shipped numbers rather than the profile's: rope 4.10 is the
+           house rope the skyline is GENERATED from, so the useful question is "what happens either
+           side of it", not "what does metropolis's 3.2 feel like here". ---- -->
+      <div class="grp">PHYSICS (live — no rebuild)</div>
+      <label>rope length<input id="p-rope" type="range" min="1.5" max="9" step="0.05" /><span class="n" id="n-rope">4.10</span></label>
+      <label>gravity<input id="p-gravity" type="range" min="1" max="16" step="0.1" /><span class="n" id="n-gravity">5.40</span></label>
+      <label>assist<input id="p-assist" type="range" min="0" max="12" step="0.2" /><span class="n" id="n-assist">4.20</span></label>
+      <label>maxSpeed<input id="p-maxSpeed" type="range" min="2" max="24" step="0.5" /><span class="n" id="n-maxSpeed">9.00</span></label>
       <div class="grp">VERBS</div>
       <div class="btns">
         <button id="b-spawn">respawn (R)</button>
         <button id="b-bike">walk/bike (B)</button>
+        <button id="b-reset">reset physics</button>
         <button id="b-copy">copy url</button>
       </div>
       <div class="note">ONE world, five CONTIGUOUS districts — city, woods, desert, lakes and the
