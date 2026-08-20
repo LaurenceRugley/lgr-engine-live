@@ -101,17 +101,29 @@
     <div class="row"><span class="k">pads · relief</span><span class="v" id="v-pads">—</span></div>
     <div class="row"><span class="k">street grade</span><span class="v" id="v-grade">—</span></div>
     <div class="row"><span class="k">swingable (local)</span><span class="v" id="v-guar">—</span></div>
+    <hr />
+    <div class="title">THE PATCHWORK</div>
+    <div class="row"><span class="k">you are in</span><span class="v off" id="v-region">—</span></div>
+    <div class="row"><span class="k">partition</span><span class="v" id="v-partition">—</span></div>
+    <div class="row"><span class="k">contiguity</span><span class="v" id="v-contig">—</span></div>
+    <div class="row"><span class="k">coverage dial</span><span class="v" id="v-cover">—</span></div>
+    <div class="row"><span class="k">seam grade</span><span class="v" id="v-seam">—</span></div>
+    <div class="row"><span class="k">water</span><span class="v" id="v-water">—</span></div>
+    <div class="row"><span class="k">flora</span><span class="v" id="v-flora">—</span></div>
+    <hr />
     <div class="row"><span class="k">draws · fps</span><span class="v" id="v-draws">—</span></div>
   </div>
 
   <div id="dock">
-    <div class="head" id="dock-head"><h2>WORLD LAB — THE MARRIAGE</h2><button id="dock-toggle">–</button></div>
+    <div class="head" id="dock-head"><h2>WORLD LAB — THE PATCHWORK</h2><button id="dock-toggle">–</button></div>
     <div class="body">
       <div class="grp">TERRAIN + CARVE (rebuilds the world)</div>
       <label>seed<input id="p-seed" type="range" min="1" max="99" step="1" /><span class="n" id="n-seed">11</span></label>
       <label>max grade<input id="p-grade" type="range" min="0.10" max="0.45" step="0.01" /><span class="n" id="n-grade">0.25</span></label>
       <label>street w<input id="p-street" type="range" min="0.9" max="1.8" step="0.05" /><span class="n" id="n-street">1.20</span></label>
       <label>city cols<input id="p-cols" type="range" min="7" max="17" step="2" /><span class="n" id="n-cols">13</span></label>
+      <div class="grp">DISTRICTS (the coverage dial)</div>
+      <label>woods %<input id="p-woods" type="range" min="0.08" max="0.34" step="0.01" /><span class="n" id="n-woods">0.26</span></label>
       <div class="btns">
         <button id="b-valley">valley</button>
         <button id="b-mountains">mountains</button>
@@ -122,10 +134,13 @@
         <button id="b-bike">walk/bike (B)</button>
         <button id="b-copy">copy url</button>
       </div>
-      <div class="note">The generated city sits ON the terrain: pads carve flat under blocks, streets
-        RAMP between pads (grade ≤ the dial), towers author their height off their OWN pad — so the
-        70% swingable guarantee is counted against each tower's local ground. One world bag serves
-        walking, the bike and the swing.</div>
+      <div class="note">ONE world, five CONTIGUOUS districts — city, woods, desert, lakes and the
+        surrounding sea. Every texel belongs to exactly one; each district's largest connected blob
+        holds ~100% of it (per-texel biome classification cannot: that is speckle, not a place); and
+        the coverage slider means what it says — ask 26% woods, count 26% off the finished field.
+        District height offsets fade to ZERO at every seam, so nothing the region system adds is a
+        cliff. Inside it all, the city still sits ON the terrain: pads flat, streets ramped, towers
+        authored off their OWN pad. One world bag serves walking, the bike and the swing.</div>
     </div>
   </div>
 

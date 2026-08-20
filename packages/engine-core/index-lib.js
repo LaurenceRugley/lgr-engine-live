@@ -187,6 +187,7 @@ export { createEngineProfiler } from './src/profiler.js';
 export { createQualityGovernor } from './src/quality-governor.js';
 export { generateTerrain, buildTerrainMesh, rebuildTerrainChunks, createTerrainSampler, BIOMES, TERRAIN_PRESETS, PRESET_KEYS } from './src/terrain.js';
 export { carveCityPads, dirtyMeshesFor } from './src/carve-pads.js';   // A-MARRIAGE: pads + street ramps carved into the ONE heightfield
+export { generateRegions, shapeRegionTerrain, regionReport, regionAt, UNASSIGNED } from './src/regions.js';   // A-PATCHWORK: contiguous districts on the ONE heightfield
 export { generateScatter, buildScatterGroup, createScatter } from './src/scatter.js';
 export { detectLakes, buildLakeGroup, createWorldLakes } from './src/world-water.js';
 export { createWaterFlow } from './src/water-flow.js';

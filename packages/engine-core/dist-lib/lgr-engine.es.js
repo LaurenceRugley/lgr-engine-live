@@ -7237,6 +7237,10 @@ var co = (e, t, n) => (n = Math.max(0, Math.min(1, (n - e) / (t - e))), n * n * 
 	{
 		key: "pavement",
 		color: "#63666e"
+	},
+	{
+		key: "desert",
+		color: "#d9b775"
 	}
 ], uo = Object.fromEntries(lo.map((e, t) => [e.key, t]));
 function fo(e, t, n) {
@@ -7425,45 +7429,54 @@ var To = {
 		type: "rock",
 		density: .22,
 		maxSlope: 2
+	}],
+	desert: [{
+		type: "rock",
+		density: .035,
+		maxSlope: 1.3
+	}, {
+		type: "tuft",
+		density: .05,
+		maxSlope: .8
 	}]
 };
-function Eo({ terrain: e, seed: t = 1, worldSize: n = 26, baseY: r = 0, biomeKeys: i, density: a = 1, max: o = 9e3 } = {}) {
-	let { size: s, height: c, biome: l, sea: u, relief: d } = e, f = xn((t ^ 97155048) >>> 0), p = n / (s - 1), m = n / 2, h = (e) => r + (e - u) * d, g = (e, t) => {
-		let n = Math.max(1, Math.min(s - 2, e)), r = Math.max(1, Math.min(s - 2, t)), i = (c[r * s + n + 1] - c[r * s + n - 1]) * d / (2 * p), a = (c[(r + 1) * s + n] - c[(r - 1) * s + n]) * d / (2 * p);
+function Eo({ terrain: e, seed: t = 1, worldSize: n = 26, baseY: r = 0, biomeKeys: i, density: a = 1, max: o = 9e3, mask: s = null } = {}) {
+	let { size: c, height: l, biome: u, sea: d, relief: f } = e, p = xn((t ^ 97155048) >>> 0), m = n / (c - 1), h = n / 2, g = (e) => r + (e - d) * f, _ = (e, t) => {
+		let n = Math.max(1, Math.min(c - 2, e)), r = Math.max(1, Math.min(c - 2, t)), i = (l[r * c + n + 1] - l[r * c + n - 1]) * f / (2 * m), a = (l[(r + 1) * c + n] - l[(r - 1) * c + n]) * f / (2 * m);
 		return Math.hypot(i, a);
-	}, _ = {
+	}, v = {
 		tree: [],
 		rock: [],
 		tuft: []
 	};
-	for (let e = 1; e < s - 1; e += 2) for (let t = 1; t < s - 1; t += 2) {
-		let n = e * s + t, r = c[n];
-		if (r < u + .005) continue;
-		let d = To[i[l[n]]];
-		if (!d) continue;
-		let v = g(t, e);
-		for (let n of d) {
-			let i = f();
-			if (v > n.maxSlope || i > n.density * a) continue;
-			let s = _[n.type];
+	for (let e = 1; e < c - 1; e += 2) for (let t = 1; t < c - 1; t += 2) {
+		let n = e * c + t, r = l[n];
+		if (r < d + .005) continue;
+		let f = To[i[u[n]]];
+		if (!f) continue;
+		let y = _(t, e), b = s ? s(t, e) : 1;
+		for (let n of f) {
+			let i = p();
+			if (y > n.maxSlope || i > n.density * a * b) continue;
+			let s = v[n.type];
 			if (s.length >= o) continue;
-			let c = (f() - .5) * p * 2, l = (f() - .5) * p * 2, u = t * p - m + c, d = e * p - m + l;
+			let c = (p() - .5) * m * 2, l = (p() - .5) * m * 2, u = t * m - h + c, d = e * m - h + l;
 			s.push({
 				x: u,
-				y: h(r),
+				y: g(r),
 				z: d,
-				s: .7 + f() * .6,
-				r: f() * Math.PI * 2,
-				t: .82 + f() * .36
+				s: .7 + p() * .6,
+				r: p() * Math.PI * 2,
+				t: .82 + p() * .36
 			});
 		}
 	}
 	return {
-		placements: _,
+		placements: v,
 		counts: {
-			tree: _.tree.length,
-			rock: _.rock.length,
-			tuft: _.tuft.length
+			tree: v.tree.length,
+			rock: v.rock.length,
+			tuft: v.tuft.length
 		}
 	};
 }
@@ -24310,8 +24323,349 @@ function Ky(e, t) {
 	return n;
 }
 //#endregion
+//#region src/regions.js
+var qy = (e) => (e = e < 0 ? 0 : e > 1 ? 1 : e, e * e * (3 - 2 * e)), Jy = 255;
+function Yy(e = 1024) {
+	let t = 0, n = new Float64Array(e), r = new Int32Array(e), i = (e, t) => {
+		let i = n[e];
+		n[e] = n[t], n[t] = i;
+		let a = r[e];
+		r[e] = r[t], r[t] = a;
+	};
+	return {
+		get size() {
+			return t;
+		},
+		push(e, a) {
+			if (t === n.length) {
+				let e = new Float64Array(t * 2), i = new Int32Array(t * 2);
+				e.set(n), i.set(r), n = e, r = i;
+			}
+			let o = t++;
+			for (n[o] = a, r[o] = e; o > 0;) {
+				let e = o - 1 >> 1;
+				if (n[e] <= n[o]) break;
+				i(e, o), o = e;
+			}
+		},
+		pop() {
+			let e = r[0];
+			t--, t > 0 && (n[0] = n[t], r[0] = r[t]);
+			let a = 0;
+			for (;;) {
+				let e = a * 2 + 1, r = e + 1, o = a;
+				if (e < t && n[e] < n[o] && (o = e), r < t && n[r] < n[o] && (o = r), o === a) break;
+				i(o, a), a = o;
+			}
+			return e;
+		}
+	};
+}
+function Xy({ size: e, worldSize: t, seed: n = 1, plan: r, warp: i = 9, warpFreq: a = 2.4 } = {}) {
+	if (!Array.isArray(r) || !r.length) throw Error("generateRegions: `plan` must list at least one region");
+	let o = r.length;
+	if (o >= 255) throw Error("generateRegions: at most 254 regions (the label buffer is a Uint8Array)");
+	let s = e * e, c = t / (e - 1), l = t / 2, u = (e) => e * c - l, d = (e) => e * c - l, f = ao(n * 13 + 7 >>> 0), p = new Float32Array(s), m = new Float32Array(s);
+	for (let t = 0; t < e; t++) for (let n = 0; n < e; n++) {
+		let r = (n / e - .5) * a, o = (t / e - .5) * a;
+		p[t * e + n] = u(n) + i * oo(f, r + 2.7, o + 8.1, 4, 2, .5), m[t * e + n] = d(t) + i * oo(f, r + 6.3, o + 1.9, 4, 2, .5);
+	}
+	let h = r.reduce((e, t) => e + (t.want || 0), 0) || 1, g = new Int32Array(o), _ = 0;
+	for (let e = 0; e < o; e++) g[e] = Math.floor((r[e].want || 0) / h * s), _ += g[e];
+	let v = 0;
+	for (let e = 1; e < o; e++) g[e] > g[v] && (v = e);
+	g[v] += s - _;
+	let y = new Uint8Array(s).fill(255), b = new Int32Array(o), x = [];
+	for (let e = 0; e < o; e++) x.push(Yy());
+	let S = 0, C = [], w = Array(o);
+	for (let t = 0; t < o; t++) {
+		let n = r[t];
+		if (n.mode === "rim") {
+			w[t] = (t, n) => Math.min(t, n, e - 1 - t, e - 1 - n) * c + (p[n * e + t] - u(t)) * .5 + (m[n * e + t] - d(n)) * .5;
+			continue;
+		}
+		let i, a;
+		n.mode === "rect" ? (i = (n.rect.x0 + n.rect.x1) / 2, a = (n.rect.z0 + n.rect.z1) / 2) : (i = n.at.x, a = n.at.z);
+		let o = Math.max(0, Math.min(e - 1, Math.round((i + l) / c))), s = Math.max(0, Math.min(e - 1, Math.round((a + l) / c))), f = p[s * e + o], h = m[s * e + o];
+		w[t] = (t, n) => Math.hypot(p[n * e + t] - f, m[n * e + t] - h), C.push({
+			key: n.key,
+			x: i,
+			z: a,
+			i: o,
+			j: s
+		});
+	}
+	let T = (t, n, r) => {
+		let i = r * e + n;
+		y[i] === 255 && (y[i] = t, b[t]++, S++);
+	}, E = (t, n, r) => {
+		let i = x[t];
+		n > 0 && y[r * e + n - 1] === 255 && i.push(r * e + n - 1, w[t](n - 1, r)), n < e - 1 && y[r * e + n + 1] === 255 && i.push(r * e + n + 1, w[t](n + 1, r)), r > 0 && y[(r - 1) * e + n] === 255 && i.push((r - 1) * e + n, w[t](n, r - 1)), r < e - 1 && y[(r + 1) * e + n] === 255 && i.push((r + 1) * e + n, w[t](n, r + 1));
+	}, D = new Uint8Array(s), O = [];
+	for (let t = 0; t < o; t++) {
+		let n = r[t], i = [];
+		if (n.mode === "rim") {
+			for (let t = 0; t < e; t++) i.push([t, 0], [t, e - 1]);
+			for (let t = 1; t < e - 1; t++) i.push([0, t], [e - 1, t]);
+		} else if (n.mode === "rect") {
+			let t = Math.max(0, Math.ceil((n.rect.x0 + l) / c)), r = Math.min(e - 1, Math.floor((n.rect.x1 + l) / c)), a = Math.max(0, Math.ceil((n.rect.z0 + l) / c)), o = Math.min(e - 1, Math.floor((n.rect.z1 + l) / c));
+			for (let e = a; e <= o; e++) for (let n = t; n <= r; n++) i.push([n, e]);
+		} else {
+			let e = C.find((e) => e.key === n.key);
+			i.push([e.i, e.j]);
+		}
+		for (let [n, r] of i) T(t, n, r), D[r * e + n] = 1;
+		O.push(i);
+	}
+	for (let e = 0; e < o; e++) for (let [t, n] of O[e]) E(e, t, n);
+	for (let e = 0; e < o; e++) {
+		if (b[e] <= g[e]) continue;
+		let t = b[e] - g[e];
+		for (g[e] = b[e]; t > 0;) {
+			let n = -1, r = 0;
+			for (let t = 0; t < o; t++) {
+				if (t === e) continue;
+				let i = g[t] - b[t];
+				i > r && (r = i, n = t);
+			}
+			if (n < 0) break;
+			g[n]--, t--;
+		}
+	}
+	let k = s * 8;
+	for (; S < s && k-- > 0;) {
+		let t = -1, n = -Infinity;
+		for (let e = 0; e < o; e++) {
+			if (x[e].size === 0) continue;
+			let r = (g[e] - b[e]) / Math.max(1, g[e]);
+			r > n && (n = r, t = e);
+		}
+		if (t < 0) break;
+		let r = x[t].pop();
+		if (y[r] !== 255) continue;
+		let i = r % e, a = r / e | 0;
+		T(t, i, a), E(t, i, a);
+	}
+	{
+		let t = Yy(), n = new Uint8Array(s);
+		for (let r = 0; r < o; r++) {
+			let i = g[r] - b[r];
+			if (i <= 0) continue;
+			for (n.fill(0); t.size;) t.pop();
+			let a = (i) => {
+				let a = y[i];
+				a === r || n[i] || D[i] || (n[i] = 1, t.push(i, -w[a](i % e, i / e | 0)));
+			};
+			for (let t = 0; t < s; t++) {
+				if (y[t] !== r) continue;
+				let n = t % e, i = t / e | 0;
+				n > 0 && y[t - 1] !== r && a(t - 1), n < e - 1 && y[t + 1] !== r && a(t + 1), i > 0 && y[t - e] !== r && a(t - e), i < e - 1 && y[t + e] !== r && a(t + e);
+			}
+			for (; i > 0 && t.size;) {
+				let n = t.pop(), o = y[n];
+				if (o === r || b[o] <= g[o]) continue;
+				y[n] = r, b[r]++, b[o]--, i--;
+				let s = n % e, c = n / e | 0;
+				s > 0 && a(n - 1), s < e - 1 && a(n + 1), c > 0 && a(n - e), c < e - 1 && a(n + e);
+			}
+		}
+	}
+	let A = Math.SQRT2, j = new Float32Array(s).fill(Infinity);
+	for (let t = 0; t < e; t++) for (let n = 0; n < e; n++) {
+		let r = t * e + n, i = y[r];
+		(n === 0 || t === 0 || n === e - 1 || t === e - 1 || n > 0 && y[r - 1] !== i || n < e - 1 && y[r + 1] !== i || t > 0 && y[r - e] !== i || t < e - 1 && y[r + e] !== i) && (j[r] = 0);
+	}
+	for (let t = 0; t < e; t++) for (let n = 0; n < e; n++) {
+		let r = t * e + n, i = j[r];
+		n > 0 && (i = Math.min(i, j[r - 1] + 1)), t > 0 && (i = Math.min(i, j[r - e] + 1), n > 0 && (i = Math.min(i, j[r - e - 1] + A)), n < e - 1 && (i = Math.min(i, j[r - e + 1] + A))), j[r] = i;
+	}
+	for (let t = e - 1; t >= 0; t--) for (let n = e - 1; n >= 0; n--) {
+		let r = t * e + n, i = j[r];
+		n < e - 1 && (i = Math.min(i, j[r + 1] + 1)), t < e - 1 && (i = Math.min(i, j[r + e] + 1), n > 0 && (i = Math.min(i, j[r + e - 1] + A)), n < e - 1 && (i = Math.min(i, j[r + e + 1] + A))), j[r] = i;
+	}
+	for (let e = 0; e < s; e++) j[e] *= c;
+	let M = r.map((e) => e.key), N = Zy(y, e, o), P = 0, F = r.map((e, t) => (b[t] < g[t] && P++, {
+		key: e.key,
+		want: (e.want || 0) / h,
+		wantTexels: g[t],
+		texels: b[t],
+		frac: b[t] / s,
+		lcc: N.lcc[t],
+		lccFrac: b[t] ? N.lcc[t] / b[t] : 1,
+		components: N.components[t]
+	}));
+	return {
+		size: e,
+		worldSize: t,
+		keys: M,
+		region: y,
+		edgeDist: j,
+		seeds: C,
+		stats: {
+			total: s,
+			unassigned: N.unassigned,
+			starved: P,
+			per: F
+		}
+	};
+}
+function Zy(e, t, n) {
+	let r = t * t, i = new Int32Array(n), a = new Int32Array(n), o = new Int32Array(n), s = 0;
+	for (let t = 0; t < r; t++) {
+		let r = e[t];
+		if (r === 255 || r >= n) {
+			s++;
+			continue;
+		}
+		i[r]++;
+	}
+	let c = new Uint8Array(r), l = new Int32Array(r);
+	for (let i = 0; i < r; i++) {
+		if (c[i]) continue;
+		let r = e[i];
+		if (r === 255 || r >= n) {
+			c[i] = 1;
+			continue;
+		}
+		let s = 0, u = 0;
+		for (l[s++] = i, c[i] = 1; s > 0;) {
+			let n = l[--s];
+			u++;
+			let i = n % t, a = n / t | 0;
+			i > 0 && !c[n - 1] && e[n - 1] === r && (c[n - 1] = 1, l[s++] = n - 1), i < t - 1 && !c[n + 1] && e[n + 1] === r && (c[n + 1] = 1, l[s++] = n + 1), a > 0 && !c[n - t] && e[n - t] === r && (c[n - t] = 1, l[s++] = n - t), a < t - 1 && !c[n + t] && e[n + t] === r && (c[n + t] = 1, l[s++] = n + t);
+		}
+		o[r]++, u > a[r] && (a[r] = u);
+	}
+	return {
+		unassigned: s,
+		counts: i,
+		lcc: a,
+		components: o
+	};
+}
+function Qy(e, t, n, r = {}) {
+	let { size: i, height: a, biome: o, sea: s, relief: c } = e, { worldSize: l = 26 } = t || {}, u = l / (i - 1), d = l / 2, f = i * i, p = r.seamBlend ?? 8, m = r.seed ?? 1, h = (e) => n.keys.indexOf(e), g = new Float32Array(f), _ = r.desert || null, v = _ ? h(_.key ?? "desert") : -1;
+	if (v >= 0 && _.amp > 0) {
+		let e = _.amp, t = _.len ?? 12, r = _.sharp ?? 1.6, a = Math.cos(_.angle ?? .6), o = Math.sin(_.angle ?? .6), s = ao(m * 29 + 3 >>> 0), c = _.warp ?? .25, l = _.warpFreq ?? 2;
+		for (let f = 0; f < i; f++) for (let p = 0; p < i; p++) {
+			let m = f * i + p;
+			if (n.region[m] !== v) continue;
+			let h = p * u - d, _ = f * u - d, y = (h * a + _ * o) / t + c * oo(s, (p / i - .5) * l, (f / i - .5) * l, 3, 2, .5);
+			g[m] = e * (.5 + .5 * Math.sin(2 * Math.PI * y)) ** r;
+		}
+	}
+	let y = r.lakes || null, b = y ? h(y.key ?? "lakes") : -1, x = [], S = s + (y && y.bedMargin != null ? y.bedMargin : .03);
+	if (b >= 0 && y.depth > 0) {
+		let e = y.rimR ?? 11, t = Math.min(y.flatR ?? 5, e - .5), r = y.bowls ?? 3, o = (e) => (a[e] - S) * c, s = y.minDepth ?? .45, l = y.fill ?? .045, p = (t) => {
+			let n = t % i * u - d, r = (t / i | 0) * u - d, s = Math.max(S, a[t] - Math.min(y.depth, o(t)) / c) + l;
+			for (let t = 0; t < 16; t++) {
+				let o = t * Math.PI / 8, c = Math.max(0, Math.min(i - 1, Math.round((n + Math.cos(o) * e + d) / u)));
+				if (a[Math.max(0, Math.min(i - 1, Math.round((r + Math.sin(o) * e + d) / u))) * i + c] < s) return !1;
+			}
+			return !0;
+		}, m = [], h = 0;
+		for (let e = 0; e < f; e++) n.region[e] === b && n.edgeDist[e] > h && (h = n.edgeDist[e]);
+		let _ = Math.min(e * .85, h * .72);
+		for (let e = 0; e < f; e++) n.region[e] !== b || n.edgeDist[e] < _ || o(e) < s || p(e) && m.push(e);
+		for (let a = 0; a < r && m.length; a++) {
+			let r = -1, a = -Infinity;
+			for (let e of m) {
+				let t = e % i * u - d, o = (e / i | 0) * u - d, s = Infinity;
+				for (let e of x) s = Math.min(s, Math.hypot(t - e.x, o - e.z));
+				let c = x.length ? s : n.edgeDist[e];
+				c > a && (a = c, r = e);
+			}
+			if (r < 0 || x.length && a < e * 1.15) break;
+			x.push({
+				x: r % i * u - d,
+				z: (r / i | 0) * u - d,
+				rimR: e,
+				flatR: t,
+				depth: Math.min(y.depth, o(r))
+			});
+		}
+		for (let t of x) {
+			let r = Math.max(0, Math.floor((t.x - e + d) / u)), a = Math.min(i - 1, Math.ceil((t.x + e + d) / u)), o = Math.max(0, Math.floor((t.z - e + d) / u)), s = Math.min(i - 1, Math.ceil((t.z + e + d) / u));
+			for (let c = o; c <= s; c++) for (let o = r; o <= a; o++) {
+				let r = c * i + o;
+				if (n.region[r] !== b) continue;
+				let a = Math.hypot(o * u - d - t.x, c * u - d - t.z);
+				if (a >= e) continue;
+				let s = -t.depth * (1 - qy((a - t.flatR) / (e - t.flatR)));
+				s < g[r] && (g[r] = s);
+			}
+		}
+	}
+	let C = 0;
+	for (let e = 0; e < f; e++) {
+		if (g[e] === 0) continue;
+		g[e] *= qy(n.edgeDist[e] / p);
+		let t = Math.abs(g[e]);
+		t > C && (C = t);
+	}
+	let w = 0, T = null;
+	for (let e = 0; e < i; e++) for (let t = 0; t < i; t++) {
+		let n = e * i + t;
+		if (t < i - 1) {
+			let r = Math.abs(g[n + 1] - g[n]) / u;
+			r > w && (w = r, T = {
+				i: t,
+				j: e,
+				axis: "x"
+			});
+		}
+		if (e < i - 1) {
+			let r = Math.abs(g[n + i] - g[n]) / u;
+			r > w && (w = r, T = {
+				i: t,
+				j: e,
+				axis: "z"
+			});
+		}
+	}
+	let E = 0;
+	for (let e = 0; e < f; e++) {
+		if (g[e] === 0) continue;
+		let t = a[e] + g[e] / c;
+		g[e] < 0 && t < S && (t = S, E++), a[e] = t;
+	}
+	let D = 0, O = [
+		1,
+		2,
+		3,
+		4
+	];
+	if (v >= 0 && o && _.paint !== !1) {
+		let e = p * (_.paintGate ?? .5);
+		for (let t = 0; t < f; t++) n.region[t] !== v || n.edgeDist[t] < e || O.includes(o[t]) && (o[t] = 8, D++);
+	}
+	let k = Infinity, A = -Infinity;
+	for (let e = 0; e < f; e++) {
+		let t = a[e];
+		t < k && (k = t), t > A && (A = t);
+	}
+	e.minH = k, e.maxH = A;
+	let j = 0, M = h(r.seaKey ?? "sea");
+	if (M >= 0) for (let e = 0; e < f; e++) n.region[e] === M && a[e] > s && j++;
+	return {
+		offset: g,
+		offMax: C,
+		gradeMax: w,
+		gradeAt: T,
+		bowls: x,
+		painted: D,
+		clamped: E,
+		islandTexels: j,
+		seamBlend: p
+	};
+}
+function $y(e, t, n) {
+	let { size: r, worldSize: i, region: a, keys: o } = e, s = i / (r - 1), c = i / 2, l = Math.max(0, Math.min(r - 1, Math.round((t + c) / s))), u = a[Math.max(0, Math.min(r - 1, Math.round((n + c) / s))) * r + l];
+	return u === 255 ? null : o[u];
+}
+//#endregion
 //#region src/audio-bus.js
-function qy() {
+function eb() {
 	let e = typeof window < "u" && (window.AudioContext || window.webkitAudioContext);
 	if (!e) return null;
 	let t = null, n = null, r = !1, i = !1, a = /* @__PURE__ */ new Map();
@@ -24376,7 +24730,7 @@ function qy() {
 }
 //#endregion
 //#region src/ambient-bed.js
-function Jy(e, { preset: t = 1 } = {}) {
+function tb(e, { preset: t = 1 } = {}) {
 	let n = null, r = null;
 	function i(t) {
 		let n = e && e.context;
@@ -24510,12 +24864,12 @@ function Jy(e, { preset: t = 1 } = {}) {
 }
 //#endregion
 //#region src/positional-field.js
-var Yy = 3;
-function Xy(t, n) {
+var nb = 3;
+function rb(t, n) {
 	let r = null, i = !1, a = [], o = [], s = [], c = new e.Vector3();
 	function l() {
 		e.AudioContext.setContext(t.context), r = new e.AudioListener(), n.add(r);
-		for (let t = 0; t < Yy; t++) {
+		for (let t = 0; t < nb; t++) {
 			let t = new e.Object3D(), n = new e.PositionalAudio(r);
 			n.panner.panningModel = "equalpower", t.add(n), o.push({
 				dummy: t,
@@ -24578,7 +24932,7 @@ function Xy(t, n) {
 		s.sort((e, t) => e._dist2 - t._dist2);
 		let e = (e) => e.maxDistance * e.maxDistance;
 		for (let t = 0; t < s.length; t++) {
-			let n = s[t], r = n._active && t < Yy && n._dist2 < e(n);
+			let n = s[t], r = n._active && t < nb && n._dist2 < e(n);
 			r && n._slot === null && u(n), !r && n._slot !== null && d(n), n._slot !== null && (o[n._slot].dummy.position.copy(n._posVec), o[n._slot].dummy.updateMatrixWorld());
 		}
 	}
@@ -24591,8 +24945,8 @@ function Xy(t, n) {
 }
 //#endregion
 //#region src/rotor.js
-var Zy = new e.Vector3();
-function Qy(t, n, { getThrottle: r, getAltitude: i, getWorldPos: a }) {
+var ib = new e.Vector3();
+function ab(t, n, { getThrottle: r, getAltitude: i, getWorldPos: a }) {
 	let o = null, s = null, c = null, l = null, u = null;
 	function d() {
 		let r = t.context, i = n.getListener();
@@ -24611,7 +24965,7 @@ function Qy(t, n, { getThrottle: r, getAltitude: i, getWorldPos: a }) {
 	}
 	function f(e) {
 		if (!o) return;
-		a(Zy), s.position.copy(Zy), s.updateMatrixWorld();
+		a(ib), s.position.copy(ib), s.updateMatrixWorld();
 		let n = Math.max(0, Math.min(1, r())), i = n > .005 ? .18 + n * .28 : 0, u = 14 + n * 8, d = t.context;
 		if (!d) return;
 		let f = d.currentTime;
@@ -24634,7 +24988,7 @@ function Qy(t, n, { getThrottle: r, getAltitude: i, getWorldPos: a }) {
 }
 //#endregion
 //#region src/shaders/riso.frag
-var $y = "precision highp float;\n\nvarying vec2 vUv;\nuniform sampler2D uScene;\nuniform vec2      uResolution;\nuniform vec3      uInks[3];      \nuniform int       uInkCount;     \nuniform float     uDot;          \nuniform float     uReg;          \nuniform float     uGrain;        \nuniform vec3      uPaper;        \n\nfloat hash(vec2 p) { p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }\n\n/* Dot coverage (1 = full ink) for a screen at angle 'ang', dot growing with 'density'. */\nfloat screen(vec2 uv, float density, float ang, float cell, vec2 res) {\n  float a = radians(ang);\n  mat2 R = mat2(cos(a), -sin(a), sin(a), cos(a));\n  vec2 p = R * (uv * res);\n  vec2 c = mod(p, cell) - cell * 0.5;\n  float r = sqrt(clamp(density, 0.0, 1.0)) * cell * 0.62;\n  return 1.0 - smoothstep(r - 1.0, r + 1.0, length(c));\n}\n\nvoid main() {\n  float cell = max(2.0, uDot);\n  vec3 col = uPaper;\n  for (int i = 0; i < 3; i++) {\n    if (i >= uInkCount) break;\n    vec3 ink = uInks[i];\n    \n    float ao = radians(float(i) * 120.0);\n    vec2 off = vec2(cos(ao), sin(ao)) * uReg / uResolution;\n    vec3 src = texture2D(uScene, vUv + off).rgb;\n    \n    vec3 Dsrc = -log(clamp(src, 0.02, 1.0));\n    vec3 Dink = -log(clamp(ink, 0.02, 1.0));\n    float density = clamp(dot(Dsrc, Dink) / (dot(Dink, Dink) + 1e-3) * 1.25, 0.0, 1.0);\n    float cov = screen(vUv, density, 15.0 + float(i) * 30.0, cell, uResolution);   \n    col *= (1.0 - cov * (1.0 - ink));           \n  }\n  float g = (hash(floor(vUv * uResolution / 1.5)) - 0.5) * uGrain;\n  gl_FragColor = vec4(clamp(col + g, 0.0, 1.0), 1.0);\n}", eb = [
+var ob = "precision highp float;\n\nvarying vec2 vUv;\nuniform sampler2D uScene;\nuniform vec2      uResolution;\nuniform vec3      uInks[3];      \nuniform int       uInkCount;     \nuniform float     uDot;          \nuniform float     uReg;          \nuniform float     uGrain;        \nuniform vec3      uPaper;        \n\nfloat hash(vec2 p) { p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }\n\n/* Dot coverage (1 = full ink) for a screen at angle 'ang', dot growing with 'density'. */\nfloat screen(vec2 uv, float density, float ang, float cell, vec2 res) {\n  float a = radians(ang);\n  mat2 R = mat2(cos(a), -sin(a), sin(a), cos(a));\n  vec2 p = R * (uv * res);\n  vec2 c = mod(p, cell) - cell * 0.5;\n  float r = sqrt(clamp(density, 0.0, 1.0)) * cell * 0.62;\n  return 1.0 - smoothstep(r - 1.0, r + 1.0, length(c));\n}\n\nvoid main() {\n  float cell = max(2.0, uDot);\n  vec3 col = uPaper;\n  for (int i = 0; i < 3; i++) {\n    if (i >= uInkCount) break;\n    vec3 ink = uInks[i];\n    \n    float ao = radians(float(i) * 120.0);\n    vec2 off = vec2(cos(ao), sin(ao)) * uReg / uResolution;\n    vec3 src = texture2D(uScene, vUv + off).rgb;\n    \n    vec3 Dsrc = -log(clamp(src, 0.02, 1.0));\n    vec3 Dink = -log(clamp(ink, 0.02, 1.0));\n    float density = clamp(dot(Dsrc, Dink) / (dot(Dink, Dink) + 1e-3) * 1.25, 0.0, 1.0);\n    float cov = screen(vUv, density, 15.0 + float(i) * 30.0, cell, uResolution);   \n    col *= (1.0 - cov * (1.0 - ink));           \n  }\n  float g = (hash(floor(vUv * uResolution / 1.5)) - 0.5) * uGrain;\n  gl_FragColor = vec4(clamp(col + g, 0.0, 1.0), 1.0);\n}", sb = [
 	"#000000",
 	"#FF48B0",
 	"#0078BF",
@@ -24647,17 +25001,17 @@ var $y = "precision highp float;\n\nvarying vec2 vUv;\nuniform sampler2D uScene;
 	"#5EC8E5",
 	"#914E72",
 	"#44D62C"
-], tb = (t) => {
+], cb = (t) => {
 	let n = new e.Color(t);
 	return new e.Vector3(n.r, n.g, n.b);
 };
-function nb(e) {
-	return typeof e == "number" ? tb(eb[e] || eb[0]) : typeof e == "string" ? tb(e) : e;
+function lb(e) {
+	return typeof e == "number" ? cb(sb[e] || sb[0]) : typeof e == "string" ? cb(e) : e;
 }
-function rb({ inks: t = [2, 1], dot: n = 6, reg: r = 3, grain: i = .06, paper: a = "#F5F1E6" } = {}) {
+function ub({ inks: t = [2, 1], dot: n = 6, reg: r = 3, grain: i = .06, paper: a = "#F5F1E6" } = {}) {
 	let o = new e.ShaderMaterial({
 		vertexShader: an,
-		fragmentShader: $y,
+		fragmentShader: ob,
 		uniforms: {
 			uScene: { value: null },
 			uResolution: { value: new e.Vector2(1, 1) },
@@ -24670,17 +25024,17 @@ function rb({ inks: t = [2, 1], dot: n = 6, reg: r = 3, grain: i = .06, paper: a
 			uDot: { value: 6 },
 			uReg: { value: 3 },
 			uGrain: { value: .06 },
-			uPaper: { value: tb("#F5F1E6") }
+			uPaper: { value: cb("#F5F1E6") }
 		}
 	});
 	function s(e = {}) {
 		let t = o.uniforms;
 		if (e.inks) {
 			let n = t.uInks.value, r = Math.max(1, Math.min(3, e.inks.length));
-			for (let t = 0; t < 3; t++) n[t].copy(nb(t < r ? e.inks[t] : 0));
+			for (let t = 0; t < 3; t++) n[t].copy(lb(t < r ? e.inks[t] : 0));
 			t.uInkCount.value = r;
 		}
-		return e.dot != null && (t.uDot.value = e.dot), e.reg != null && (t.uReg.value = e.reg), e.grain != null && (t.uGrain.value = e.grain), e.paper != null && (t.uPaper.value = typeof e.paper == "string" ? tb(e.paper) : e.paper), e.scene !== void 0 && (t.uScene.value = e.scene), e.resolution && t.uResolution.value.copy(e.resolution), c;
+		return e.dot != null && (t.uDot.value = e.dot), e.reg != null && (t.uReg.value = e.reg), e.grain != null && (t.uGrain.value = e.grain), e.paper != null && (t.uPaper.value = typeof e.paper == "string" ? cb(e.paper) : e.paper), e.scene !== void 0 && (t.uScene.value = e.scene), e.resolution && t.uResolution.value.copy(e.resolution), c;
 	}
 	let c = {
 		material: o,
@@ -24702,7 +25056,7 @@ function rb({ inks: t = [2, 1], dot: n = 6, reg: r = 3, grain: i = .06, paper: a
 }
 //#endregion
 //#region src/graph-spec.js
-var ib = 1, ab = [
+var db = 1, fb = [
 	"hub",
 	"live-ops",
 	"doctrine",
@@ -24710,14 +25064,14 @@ var ib = 1, ab = [
 	"learning",
 	"ops",
 	"site"
-], ob = [
+], pb = [
 	"links-to",
 	"depends-on",
 	"explains",
 	"built-by",
 	"derived-from"
-], sb = 1500;
-function cb(e, { slowMs: t = sb } = {}) {
+], mb = 1500;
+function hb(e, { slowMs: t = mb } = {}) {
 	if (!e || e.checked === !1 || e.httpCode == null && !e.timedOut && !e.error) return "unknown";
 	if (e.timedOut || e.error) return "red";
 	let n = Number(e.httpCode);
@@ -24729,41 +25083,41 @@ function cb(e, { slowMs: t = sb } = {}) {
 	}
 	return "unknown";
 }
-var lb = {
+var gb = {
 	red: 4,
 	working: 3,
 	unknown: 2,
 	green: 1,
 	stale: 3
 };
-function ub(e = []) {
+function _b(e = []) {
 	let t = null, n = 0;
 	for (let r of e) {
-		let e = lb[r] || 0;
+		let e = gb[r] || 0;
 		e > n && (n = e, t = r);
 	}
 	return t || "unknown";
 }
-var db = [
+var vb = [
 	"bubble-sort",
 	"binary-search",
 	"merge-sort",
 	"quick-sort",
 	"heap-sort"
-], fb = ["binary-search-tree", "binary-heap"], pb = [
+], yb = ["binary-search-tree", "binary-heap"], bb = [
 	"green",
 	"working",
 	"stale",
 	"red",
 	"unknown"
-], mb = new Set([
+], xb = new Set([
 	"v",
 	"nodes",
 	"edges"
-]), hb = (e) => typeof e == "object" && !!e && !Array.isArray(e), gb = (e) => typeof e == "string" && e.length > 0;
-function _b(e) {
+]), Sb = (e) => typeof e == "object" && !!e && !Array.isArray(e), Cb = (e) => typeof e == "string" && e.length > 0;
+function wb(e) {
 	let t = [];
-	if (!hb(e)) return {
+	if (!Sb(e)) return {
 		ok: !1,
 		errors: ["spec must be a plain object"],
 		unknownSections: []
@@ -24771,15 +25125,15 @@ function _b(e) {
 	e.v !== 1 && t.push(`v must be 1 (got ${JSON.stringify(e.v)}) — a different version needs its own loader`);
 	let n = /* @__PURE__ */ new Set();
 	Array.isArray(e.nodes) ? e.nodes.forEach((e, r) => {
-		if (!hb(e)) {
+		if (!Sb(e)) {
 			t.push(`nodes[${r}] must be an object`);
 			return;
 		}
-		if (!gb(e.id)) {
+		if (!Cb(e.id)) {
 			t.push(`nodes[${r}].id must be a non-empty string`);
 			return;
 		}
-		if (n.has(e.id) && t.push(`nodes[${r}].id "${e.id}" is a duplicate (ids must be unique)`), n.add(e.id), "label" in e && typeof e.label != "string" && t.push(`nodes[${r}] (${e.id}).label must be a string`), "kind" in e && !ab.includes(e.kind) && t.push(`nodes[${r}] (${e.id}).kind must be one of ${ab.join("|")}`), "type" in e && typeof e.type != "string" && t.push(`nodes[${r}] (${e.id}).type must be a string`), "group" in e && typeof e.group != "string" && t.push(`nodes[${r}] (${e.id}).group must be a string`), "href" in e && typeof e.href != "string" && t.push(`nodes[${r}] (${e.id}).href must be a string`), "weight" in e && !Number.isFinite(e.weight) && t.push(`nodes[${r}] (${e.id}).weight must be a finite number`), "batch" in e && typeof e.batch != "boolean" && t.push(`nodes[${r}] (${e.id}).batch must be a boolean`), "state" in e && !pb.includes(e.state) && t.push(`nodes[${r}] (${e.id}).state must be one of ${pb.join("|")}`), "algorithm" in e && (!hb(e.algorithm) || !gb(e.algorithm.kind) ? t.push(`nodes[${r}] (${e.id}).algorithm must be an object with a non-empty kind`) : db.includes(e.algorithm.kind) || t.push(`nodes[${r}] (${e.id}).algorithm.kind "${e.algorithm.kind}" is not runnable (have: ${db.join("|")})`), "input" in e.algorithm && !Array.isArray(e.algorithm.input) && t.push(`nodes[${r}] (${e.id}).algorithm.input must be an array`)), "structure" in e && (!hb(e.structure) || !gb(e.structure.kind) ? t.push(`nodes[${r}] (${e.id}).structure must be an object with a non-empty kind`) : fb.includes(e.structure.kind) || t.push(`nodes[${r}] (${e.id}).structure.kind "${e.structure.kind}" is not runnable (have: ${fb.join("|")})`), "inserts" in e.structure && !Array.isArray(e.structure.inserts) && t.push(`nodes[${r}] (${e.id}).structure.inserts must be an array`)), "launch" in e && (!hb(e.launch) || !gb(e.launch.url) || !gb(e.launch.label)) && t.push(`nodes[${r}] (${e.id}).launch must be an object with a non-empty url and label`), "media" in e) if (!hb(e.media)) t.push(`nodes[${r}] (${e.id}).media must be an object`);
+		if (n.has(e.id) && t.push(`nodes[${r}].id "${e.id}" is a duplicate (ids must be unique)`), n.add(e.id), "label" in e && typeof e.label != "string" && t.push(`nodes[${r}] (${e.id}).label must be a string`), "kind" in e && !fb.includes(e.kind) && t.push(`nodes[${r}] (${e.id}).kind must be one of ${fb.join("|")}`), "type" in e && typeof e.type != "string" && t.push(`nodes[${r}] (${e.id}).type must be a string`), "group" in e && typeof e.group != "string" && t.push(`nodes[${r}] (${e.id}).group must be a string`), "href" in e && typeof e.href != "string" && t.push(`nodes[${r}] (${e.id}).href must be a string`), "weight" in e && !Number.isFinite(e.weight) && t.push(`nodes[${r}] (${e.id}).weight must be a finite number`), "batch" in e && typeof e.batch != "boolean" && t.push(`nodes[${r}] (${e.id}).batch must be a boolean`), "state" in e && !bb.includes(e.state) && t.push(`nodes[${r}] (${e.id}).state must be one of ${bb.join("|")}`), "algorithm" in e && (!Sb(e.algorithm) || !Cb(e.algorithm.kind) ? t.push(`nodes[${r}] (${e.id}).algorithm must be an object with a non-empty kind`) : vb.includes(e.algorithm.kind) || t.push(`nodes[${r}] (${e.id}).algorithm.kind "${e.algorithm.kind}" is not runnable (have: ${vb.join("|")})`), "input" in e.algorithm && !Array.isArray(e.algorithm.input) && t.push(`nodes[${r}] (${e.id}).algorithm.input must be an array`)), "structure" in e && (!Sb(e.structure) || !Cb(e.structure.kind) ? t.push(`nodes[${r}] (${e.id}).structure must be an object with a non-empty kind`) : yb.includes(e.structure.kind) || t.push(`nodes[${r}] (${e.id}).structure.kind "${e.structure.kind}" is not runnable (have: ${yb.join("|")})`), "inserts" in e.structure && !Array.isArray(e.structure.inserts) && t.push(`nodes[${r}] (${e.id}).structure.inserts must be an array`)), "launch" in e && (!Sb(e.launch) || !Cb(e.launch.url) || !Cb(e.launch.label)) && t.push(`nodes[${r}] (${e.id}).launch must be an object with a non-empty url and label`), "media" in e) if (!Sb(e.media)) t.push(`nodes[${r}] (${e.id}).media must be an object`);
 		else for (let n of [
 			"figma",
 			"pdf",
@@ -24790,34 +25144,34 @@ function _b(e) {
 		]) n in e.media && typeof e.media[n] != "boolean" && t.push(`nodes[${r}] (${e.id}).media.${n} must be a boolean`);
 		"ageDays" in e && (!Number.isFinite(e.ageDays) || e.ageDays < 0) && t.push(`nodes[${r}] (${e.id}).ageDays must be a finite number >= 0`);
 	}) : t.push("nodes must be an array"), Array.isArray(e.edges) ? e.edges.forEach((r, i) => {
-		if (!hb(r)) {
+		if (!Sb(r)) {
 			t.push(`edges[${i}] must be an object`);
 			return;
 		}
 		for (let a of ["from", "to"]) {
-			if (!gb(r[a])) {
+			if (!Cb(r[a])) {
 				t.push(`edges[${i}].${a} must be a non-empty string`);
 				continue;
 			}
 			Array.isArray(e.nodes) && !n.has(r[a]) && t.push(`edges[${i}].${a} "${r[a]}" references no node (dangling edge)`);
 		}
-		"rel" in r && !ob.includes(r.rel) && t.push(`edges[${i}].rel must be one of ${ob.join("|")}`), "weight" in r && !Number.isFinite(r.weight) && t.push(`edges[${i}].weight must be a finite number`);
+		"rel" in r && !pb.includes(r.rel) && t.push(`edges[${i}].rel must be one of ${pb.join("|")}`), "weight" in r && !Number.isFinite(r.weight) && t.push(`edges[${i}].weight must be a finite number`);
 	}) : t.push("edges must be an array");
-	let r = Object.keys(e).filter((e) => !mb.has(e));
+	let r = Object.keys(e).filter((e) => !xb.has(e));
 	return {
 		ok: t.length === 0,
 		errors: t,
 		unknownSections: r
 	};
 }
-var vb = 7;
-function yb(e, t = 7) {
+var Tb = 7;
+function Eb(e, t = 7) {
 	if (!Number.isFinite(e) || e < 0 || !Number.isFinite(t) || t <= 0) return 0;
 	let n = Math.exp(-e / t);
 	return n < .02 ? 0 : n;
 }
-var bb = 5e3;
-function xb(e, { deepChars: t = bb } = {}) {
+var Db = 5e3;
+function Ob(e, { deepChars: t = Db } = {}) {
 	let n = Array.isArray(e && e.assets) ? e.assets : [];
 	return {
 		figma: !!(e && Array.isArray(e.figmaAssets) && e.figmaAssets.length),
@@ -24828,38 +25182,38 @@ function xb(e, { deepChars: t = bb } = {}) {
 		launch: !!(e && e.launch && typeof e.launch.url == "string")
 	};
 }
-var Sb = [
+var kb = [
 	"rocket",
 	"play",
 	"frame",
 	"page",
 	"book"
 ];
-function Cb(e) {
+function Ab(e) {
 	return e ? e.launch ? "rocket" : e.interactive ? "play" : e.figma || e.img ? "frame" : e.pdf ? "page" : e.deep ? "book" : null : null;
 }
-function wb(e) {
-	let t = Cb(e);
-	return t ? Sb.indexOf(t) + 1 : 0;
+function jb(e) {
+	let t = Ab(e);
+	return t ? kb.indexOf(t) + 1 : 0;
 }
-function Tb(e) {
+function Mb(e) {
 	return !!(e && (e.figma || e.pdf || e.img || e.deep || e.interactive || e.launch));
 }
-function Eb(e) {
+function Nb(e) {
 	let t = /* @__PURE__ */ new Map();
 	if (e && Array.isArray(e.nodes)) for (let n of e.nodes) n && n.id && t.set(n.id, n);
 	return t;
 }
 //#endregion
 //#region src/graph-layout.js
-var Db = {
+var Pb = {
 	ops: 2,
 	"live-ops": 4,
 	doctrine: 8,
 	initiative: 12,
 	learning: 14
-}, Ob = 16;
-function kb(e, { kind: t = "radial", rings: n = Db, fallbackRadius: r = Ob } = {}) {
+}, Fb = 16;
+function Ib(e, { kind: t = "radial", rings: n = Pb, fallbackRadius: r = Fb } = {}) {
 	if (t !== "radial") throw Error(`createGraphLayout: unknown layout kind "${t}" (v1 supports 'radial')`);
 	let i = /* @__PURE__ */ new Map(), a = e && Array.isArray(e.nodes) ? e.nodes : [], o = /* @__PURE__ */ new Map();
 	for (let e of a) {
@@ -24891,7 +25245,7 @@ function kb(e, { kind: t = "radial", rings: n = Db, fallbackRadius: r = Ob } = {
 }
 //#endregion
 //#region src/ingest-vault.js
-function Ab(e) {
+function Lb(e) {
 	let t = {}, n = /^---\n([\s\S]*?)\n---/.exec(e);
 	if (!n) return t;
 	let r = n[1], i = /^name:\s*(.+)$/m.exec(r);
@@ -24901,7 +25255,7 @@ function Ab(e) {
 	let o = /kind\/([a-z0-9-]+)/i.exec(r);
 	return o && (t.kind = o[1]), t;
 }
-function jb(e) {
+function Rb(e) {
 	let t = e.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, ""), n = [], r = /* @__PURE__ */ new Set(), i = /\[\[([^\]]+)\]\]/g, a;
 	for (; (a = i.exec(t)) !== null;) {
 		let e = a[1].split("|")[0].trim();
@@ -24909,7 +25263,7 @@ function jb(e) {
 	}
 	return n;
 }
-function Mb(e) {
+function zb(e) {
 	let t = e.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, ""), n = [], r = /* @__PURE__ */ new Set(), i = /\[[^\]]*\]\(([^)\s]+)\)/g, a;
 	for (; (a = i.exec(t)) !== null;) {
 		let e = a[1].split("#")[0].trim();
@@ -24919,8 +25273,8 @@ function Mb(e) {
 	}
 	return n;
 }
-function Nb(e, t, { href: n } = {}) {
-	let r = Ab(t), i = e === "MEMORY", a = {
+function Bb(e, t, { href: n } = {}) {
+	let r = Lb(t), i = e === "MEMORY", a = {
 		id: e,
 		label: i ? "MEMORY" : r.name || e,
 		kind: i ? "hub" : r.kind,
@@ -24928,14 +25282,14 @@ function Nb(e, t, { href: n } = {}) {
 		href: n || `${e}.md`
 	};
 	a.kind ?? delete a.kind, a.type ?? delete a.type;
-	let o = jb(t);
-	if (i) for (let e of Mb(t)) o.includes(e) || o.push(e);
+	let o = Rb(t);
+	if (i) for (let e of zb(t)) o.includes(e) || o.push(e);
 	return {
 		node: a,
 		links: o
 	};
 }
-function Pb(e, t = 220) {
+function Vb(e, t = 220) {
 	let n = e.replace(/^---\n[\s\S]*?\n---/, "").split(/\n\s*\n/).map((e) => e.trim()).find((e) => e && !e.startsWith("#"));
 	if (!n) return "";
 	let r = n.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (e, t, n, r) => r || t).replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
@@ -24943,10 +25297,10 @@ function Pb(e, t = 220) {
 	let i = r.slice(0, t);
 	return i.slice(0, i.lastIndexOf(" ")) + "…";
 }
-function Fb(e) {
+function Hb(e) {
 	let t = [], n = [];
 	for (let { slug: r, content: i, href: a } of e) {
-		let { node: e, links: o } = Nb(r, i, { href: a });
+		let { node: e, links: o } = Bb(r, i, { href: a });
 		t.push(e);
 		for (let e of o) n.push({
 			from: r,
@@ -24962,7 +25316,7 @@ function Fb(e) {
 }
 //#endregion
 //#region src/shaders/graph-edge.vert
-var Ib = "attribute float aAlong;   \nattribute float aSide;    \nattribute vec3  aEndA;\nattribute vec3  aEndB;\nattribute vec3  aColorA;\nattribute vec3  aColorB;\nattribute float aWidth;\n\nattribute float aDim;\n\nuniform float uLift;        \nuniform float uWidthScale;  \nuniform float uMinWidth;    \nuniform float uTaper;       \n\nvarying float vT;\nvarying float vCross;\nvarying vec3  vColor;\nvarying float vDim;\n\nconst float PI = 3.14159265;\n\nvec3 curvePoint(float t, float lift) {\n  vec3 p = mix(aEndA, aEndB, t);\n  p.y += sin(t * PI) * lift;\n  return p;\n}\n\nvoid main() {\n  float t     = aAlong;\n  float cross = aSide;              \n\n  vT     = t;\n  vCross = cross;\n  vDim   = aDim;\n  vColor = mix(aColorA, aColorB, t);   \n\n  float lift = uLift * distance(aEndA, aEndB);   \n\n  \n  \n  \n  const float E = 0.01;\n  float ta = max(t - E, 0.0);\n  float tb = min(t + E, 1.0);\n\n  vec4 mv  = modelViewMatrix * vec4(curvePoint(t,  lift), 1.0);\n  vec4 mva = modelViewMatrix * vec4(curvePoint(ta, lift), 1.0);\n  vec4 mvb = modelViewMatrix * vec4(curvePoint(tb, lift), 1.0);\n\n  vec2 dir  = mvb.xy - mva.xy;\n  vec2 side = length(dir) > 1e-6 ? normalize(vec2(-dir.y, dir.x)) : vec2(0.0, 1.0);\n\n  \n  \n  float w = aWidth * uWidthScale * (1.0 - uTaper * sin(t * PI));\n  \n  \n  \n  w *= 1.0 + max(aDim - 1.0, 0.0) * 0.75;\n  \n  w *= mix(0.55, 1.0, clamp(aDim, 0.0, 1.0));\n  w = max(w, uMinWidth);\n\n  mv.xy += side * cross * w * 0.5;\n  gl_Position = projectionMatrix * mv;\n}", Lb = "uniform float uTime;\nuniform float uSpeed;\nuniform float uDashRatio;   \nuniform float uFlow;        \nuniform float uOpacity;\nuniform float uRest;        \nuniform vec3  uColor;       \n\nvarying float vT;\nvarying float vCross;\nvarying vec3  vColor;\nvarying float vDim;   \n\nvoid main() {\n  \n  float aa   = fwidth(vCross);\n  float edge = 1.0 - smoothstep(1.0 - aa * 1.5, 1.0, abs(vCross));\n  if (edge <= 0.0) discard;\n\n  \n  \n  float head = fract(uTime * uSpeed * uFlow);\n  float d    = vT - head;\n  d = d - floor(d + 0.5);\n\n  float sigma = max(uDashRatio * 0.35, 1e-4);\n  float band  = exp(-(d * d) / (sigma * sigma));\n\n  \n  \n  vec3  col = vColor * uRest + (vColor * 0.6 + uColor * 0.5) * band;\n  float a   = uOpacity * edge * (uRest + 0.85 * band);\n\n  \n  \n  \n  float calm = min(vDim, 1.0);\n  float floorKeep = mix(1.0, calm, 0.35);              \n  float bandKeep  = calm;                              \n  vec3  colC = vColor * uRest * floorKeep + (vColor * 0.6 + uColor * 0.5) * band * bandKeep;\n  float aC   = uOpacity * edge * (uRest * floorKeep + 0.85 * band * bandKeep);\n  \n  vec3  colF = mix(colC, col * vDim, step(1.0001, vDim));\n  float aF   = mix(aC, a * min(vDim, 1.25), step(1.0001, vDim));\n  gl_FragColor = vec4(colF, aF);\n}", Rb = "uniform float uSizeMul;   \nuniform float uScale;     \nuniform float uHaloCap;   \n\nattribute float aHaloCap; \n                          \n                          \nattribute vec3  aOutline; \n                          \nattribute float aBadge;   \n                          \n\nvarying vec2 vP;\nvarying vec3 vColor;\nvarying vec3 vOutline;\nvarying float vBadge;\n\nvoid main() {\n  vP     = uv * 2.0 - 1.0;   \n  vColor = instanceColor;    \n\n  vOutline = aOutline;\n  vBadge = aBadge;\n  float radius = length(instanceMatrix[0].xyz) * uScale * uSizeMul * mix(1.0, aHaloCap, uHaloCap);\n\n  vec4 mv = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);\n  mv.xy += position.xy * 2.0 * radius;   \n\n  gl_Position = projectionMatrix * mv;\n}", zb = "uniform float uRimPower;\nuniform float uRimGain;\nuniform float uPrint;   \n                        \n                        \nuniform float uOutlinePx;  \n                           \n                           \n                           \n\nuniform float uBadgePx;    \n                           \nuniform vec3  uBadgeColor; \n                           \n\nvarying vec2 vP;\nvarying vec3 vColor;\nvarying vec3 vOutline;\nvarying float vBadge;\n\nvoid main() {\n  float d = length(vP);\n\n  float aa    = fwidth(d);\n  float alpha = 1.0 - smoothstep(1.0 - aa * 1.5, 1.0, d);\n  if (alpha <= 0.0) discard;\n\n  float nz    = sqrt(max(0.0, 1.0 - d * d));   \n  float inner = 0.55 + 0.45 * nz;              \n  float rim   = pow(1.0 - nz, uRimPower) * uRimGain;\n\n  \n  vec3 glow = vColor * inner + vColor * rim + vec3(rim * 0.12);\n\n  \n  \n  \n  if (uOutlinePx > 0.0) {\n    float ring = smoothstep(1.0 - aa * (uOutlinePx + 1.0), 1.0 - aa * uOutlinePx + aa, d);\n    glow = mix(glow, vOutline, ring);\n  }\n\n  \n  if (uBadgePx > 0.0 && vBadge > 0.5) {\n    vec2 bc = (vP - vec2(0.40, -0.40)) / (aa * uBadgePx);   \n    float pad = 1.0 - step(1.35, max(abs(bc.x), abs(bc.y)));\n    glow = mix(glow, vOutline, pad);                        \n\n    float g = 0.0;\n    float kind = vBadge;\n    /* SLICE 27: the codes shifted when ROCKET took the top priority slot (1 rocket · 2 play · 3 frame ·\n       4 page · 5 book). The branch order follows mediaGlyphCode's list — if that list changes, this\n       ladder changes with it, which is why the priority lives in ONE place (graph-spec) and not here. */\n    if (kind < 1.5) {\n      \n      \n      float nose = step(abs(bc.x), 0.30) * step(0.30, bc.y) * step(bc.y, 0.95)\n                 * step(abs(bc.x), 0.30 * (0.95 - bc.y) / 0.65 + 0.08);\n      float body = step(abs(bc.x), 0.30) * step(-0.45, bc.y) * step(bc.y, 0.35);\n      float fins = step(0.28, abs(bc.x)) * step(abs(bc.x), 0.72) * step(-0.45, bc.y) * step(bc.y, -0.05);\n      float flame = step(abs(bc.x), 0.17) * step(-0.85, bc.y) * step(bc.y, -0.45);\n      g = max(max(nose, body), max(fins, flame));\n    } else if (kind < 2.5) {\n      \n      float h = 0.75 * (1.0 - (bc.x + 0.7) / 1.4);\n      g = step(-0.7, bc.x) * step(bc.x, 0.7) * step(abs(bc.y), max(h, 0.0));\n    } else if (kind < 3.5) {\n      \n      float outer = 1.0 - step(0.8, max(abs(bc.x), abs(bc.y)));\n      float inner = 1.0 - step(0.48, max(abs(bc.x), abs(bc.y)));\n      float bar   = (1.0 - step(0.8, abs(bc.x))) * step(0.15, bc.y) * (1.0 - step(0.55, bc.y));\n      g = max(outer - inner, bar);\n    } else if (kind < 4.5) {\n      \n      float body = (1.0 - step(0.55, abs(bc.x))) * (1.0 - step(0.85, abs(bc.y)));\n      float l1 = (1.0 - step(0.3, abs(bc.x))) * (1.0 - step(0.12, abs(bc.y - 0.3)));\n      float l2 = (1.0 - step(0.3, abs(bc.x))) * (1.0 - step(0.12, abs(bc.y + 0.15)));\n      g = body - max(l1, l2);\n    } else {\n      \n      float top = (1.0 - step(0.8, abs(bc.x))) * (1.0 - step(0.28, abs(bc.y - 0.42)));\n      float bot = (1.0 - step(0.8, abs(bc.x))) * (1.0 - step(0.28, abs(bc.y + 0.42)));\n      g = max(top, bot);\n    }\n    glow = mix(glow, uBadgeColor, clamp(g, 0.0, 1.0) * pad);\n  }\n\n  \n  float outline = smoothstep(0.94 - aa, 0.94 + aa, d);\n  vec3 print = mix(vColor, vColor * 0.55, outline);\n  \n  \n  if (uBadgePx > 0.0 && vBadge > 0.5) {\n    vec2 bc = (vP - vec2(0.40, -0.40)) / (aa * uBadgePx);\n    float box = 1.0 - step(0.9, max(abs(bc.x), abs(bc.y)));\n    print = mix(print, uBadgeColor, box);\n  }\n\n  gl_FragColor = vec4(mix(glow, print, uPrint), alpha);\n}", Bb = "uniform float uFalloff;\nuniform float uRings;   \n                        \n                        \n\nvarying vec2 vP;\nvarying vec3 vColor;\n\nvoid main() {\n  float d2 = dot(vP, vP);\n  if (d2 > 1.0) discard;   \n\n  float i = exp(-d2 * uFalloff) - exp(-uFalloff);   \n  i = max(i, 0.0);\n  if (uRings > 0.5) i = ceil(i * uRings) / uRings * step(0.015, i) * 0.9;   \n\n  gl_FragColor = vec4(vColor * i, i);   \n}", Vb = {
+var Ub = "attribute float aAlong;   \nattribute float aSide;    \nattribute vec3  aEndA;\nattribute vec3  aEndB;\nattribute vec3  aColorA;\nattribute vec3  aColorB;\nattribute float aWidth;\n\nattribute float aDim;\n\nuniform float uLift;        \nuniform float uWidthScale;  \nuniform float uMinWidth;    \nuniform float uTaper;       \n\nvarying float vT;\nvarying float vCross;\nvarying vec3  vColor;\nvarying float vDim;\n\nconst float PI = 3.14159265;\n\nvec3 curvePoint(float t, float lift) {\n  vec3 p = mix(aEndA, aEndB, t);\n  p.y += sin(t * PI) * lift;\n  return p;\n}\n\nvoid main() {\n  float t     = aAlong;\n  float cross = aSide;              \n\n  vT     = t;\n  vCross = cross;\n  vDim   = aDim;\n  vColor = mix(aColorA, aColorB, t);   \n\n  float lift = uLift * distance(aEndA, aEndB);   \n\n  \n  \n  \n  const float E = 0.01;\n  float ta = max(t - E, 0.0);\n  float tb = min(t + E, 1.0);\n\n  vec4 mv  = modelViewMatrix * vec4(curvePoint(t,  lift), 1.0);\n  vec4 mva = modelViewMatrix * vec4(curvePoint(ta, lift), 1.0);\n  vec4 mvb = modelViewMatrix * vec4(curvePoint(tb, lift), 1.0);\n\n  vec2 dir  = mvb.xy - mva.xy;\n  vec2 side = length(dir) > 1e-6 ? normalize(vec2(-dir.y, dir.x)) : vec2(0.0, 1.0);\n\n  \n  \n  float w = aWidth * uWidthScale * (1.0 - uTaper * sin(t * PI));\n  \n  \n  \n  w *= 1.0 + max(aDim - 1.0, 0.0) * 0.75;\n  \n  w *= mix(0.55, 1.0, clamp(aDim, 0.0, 1.0));\n  w = max(w, uMinWidth);\n\n  mv.xy += side * cross * w * 0.5;\n  gl_Position = projectionMatrix * mv;\n}", Wb = "uniform float uTime;\nuniform float uSpeed;\nuniform float uDashRatio;   \nuniform float uFlow;        \nuniform float uOpacity;\nuniform float uRest;        \nuniform vec3  uColor;       \n\nvarying float vT;\nvarying float vCross;\nvarying vec3  vColor;\nvarying float vDim;   \n\nvoid main() {\n  \n  float aa   = fwidth(vCross);\n  float edge = 1.0 - smoothstep(1.0 - aa * 1.5, 1.0, abs(vCross));\n  if (edge <= 0.0) discard;\n\n  \n  \n  float head = fract(uTime * uSpeed * uFlow);\n  float d    = vT - head;\n  d = d - floor(d + 0.5);\n\n  float sigma = max(uDashRatio * 0.35, 1e-4);\n  float band  = exp(-(d * d) / (sigma * sigma));\n\n  \n  \n  vec3  col = vColor * uRest + (vColor * 0.6 + uColor * 0.5) * band;\n  float a   = uOpacity * edge * (uRest + 0.85 * band);\n\n  \n  \n  \n  float calm = min(vDim, 1.0);\n  float floorKeep = mix(1.0, calm, 0.35);              \n  float bandKeep  = calm;                              \n  vec3  colC = vColor * uRest * floorKeep + (vColor * 0.6 + uColor * 0.5) * band * bandKeep;\n  float aC   = uOpacity * edge * (uRest * floorKeep + 0.85 * band * bandKeep);\n  \n  vec3  colF = mix(colC, col * vDim, step(1.0001, vDim));\n  float aF   = mix(aC, a * min(vDim, 1.25), step(1.0001, vDim));\n  gl_FragColor = vec4(colF, aF);\n}", Gb = "uniform float uSizeMul;   \nuniform float uScale;     \nuniform float uHaloCap;   \n\nattribute float aHaloCap; \n                          \n                          \nattribute vec3  aOutline; \n                          \nattribute float aBadge;   \n                          \n\nvarying vec2 vP;\nvarying vec3 vColor;\nvarying vec3 vOutline;\nvarying float vBadge;\n\nvoid main() {\n  vP     = uv * 2.0 - 1.0;   \n  vColor = instanceColor;    \n\n  vOutline = aOutline;\n  vBadge = aBadge;\n  float radius = length(instanceMatrix[0].xyz) * uScale * uSizeMul * mix(1.0, aHaloCap, uHaloCap);\n\n  vec4 mv = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);\n  mv.xy += position.xy * 2.0 * radius;   \n\n  gl_Position = projectionMatrix * mv;\n}", Kb = "uniform float uRimPower;\nuniform float uRimGain;\nuniform float uPrint;   \n                        \n                        \nuniform float uOutlinePx;  \n                           \n                           \n                           \n\nuniform float uBadgePx;    \n                           \nuniform vec3  uBadgeColor; \n                           \n\nvarying vec2 vP;\nvarying vec3 vColor;\nvarying vec3 vOutline;\nvarying float vBadge;\n\nvoid main() {\n  float d = length(vP);\n\n  float aa    = fwidth(d);\n  float alpha = 1.0 - smoothstep(1.0 - aa * 1.5, 1.0, d);\n  if (alpha <= 0.0) discard;\n\n  float nz    = sqrt(max(0.0, 1.0 - d * d));   \n  float inner = 0.55 + 0.45 * nz;              \n  float rim   = pow(1.0 - nz, uRimPower) * uRimGain;\n\n  \n  vec3 glow = vColor * inner + vColor * rim + vec3(rim * 0.12);\n\n  \n  \n  \n  if (uOutlinePx > 0.0) {\n    float ring = smoothstep(1.0 - aa * (uOutlinePx + 1.0), 1.0 - aa * uOutlinePx + aa, d);\n    glow = mix(glow, vOutline, ring);\n  }\n\n  \n  if (uBadgePx > 0.0 && vBadge > 0.5) {\n    vec2 bc = (vP - vec2(0.40, -0.40)) / (aa * uBadgePx);   \n    float pad = 1.0 - step(1.35, max(abs(bc.x), abs(bc.y)));\n    glow = mix(glow, vOutline, pad);                        \n\n    float g = 0.0;\n    float kind = vBadge;\n    /* SLICE 27: the codes shifted when ROCKET took the top priority slot (1 rocket · 2 play · 3 frame ·\n       4 page · 5 book). The branch order follows mediaGlyphCode's list — if that list changes, this\n       ladder changes with it, which is why the priority lives in ONE place (graph-spec) and not here. */\n    if (kind < 1.5) {\n      \n      \n      float nose = step(abs(bc.x), 0.30) * step(0.30, bc.y) * step(bc.y, 0.95)\n                 * step(abs(bc.x), 0.30 * (0.95 - bc.y) / 0.65 + 0.08);\n      float body = step(abs(bc.x), 0.30) * step(-0.45, bc.y) * step(bc.y, 0.35);\n      float fins = step(0.28, abs(bc.x)) * step(abs(bc.x), 0.72) * step(-0.45, bc.y) * step(bc.y, -0.05);\n      float flame = step(abs(bc.x), 0.17) * step(-0.85, bc.y) * step(bc.y, -0.45);\n      g = max(max(nose, body), max(fins, flame));\n    } else if (kind < 2.5) {\n      \n      float h = 0.75 * (1.0 - (bc.x + 0.7) / 1.4);\n      g = step(-0.7, bc.x) * step(bc.x, 0.7) * step(abs(bc.y), max(h, 0.0));\n    } else if (kind < 3.5) {\n      \n      float outer = 1.0 - step(0.8, max(abs(bc.x), abs(bc.y)));\n      float inner = 1.0 - step(0.48, max(abs(bc.x), abs(bc.y)));\n      float bar   = (1.0 - step(0.8, abs(bc.x))) * step(0.15, bc.y) * (1.0 - step(0.55, bc.y));\n      g = max(outer - inner, bar);\n    } else if (kind < 4.5) {\n      \n      float body = (1.0 - step(0.55, abs(bc.x))) * (1.0 - step(0.85, abs(bc.y)));\n      float l1 = (1.0 - step(0.3, abs(bc.x))) * (1.0 - step(0.12, abs(bc.y - 0.3)));\n      float l2 = (1.0 - step(0.3, abs(bc.x))) * (1.0 - step(0.12, abs(bc.y + 0.15)));\n      g = body - max(l1, l2);\n    } else {\n      \n      float top = (1.0 - step(0.8, abs(bc.x))) * (1.0 - step(0.28, abs(bc.y - 0.42)));\n      float bot = (1.0 - step(0.8, abs(bc.x))) * (1.0 - step(0.28, abs(bc.y + 0.42)));\n      g = max(top, bot);\n    }\n    glow = mix(glow, uBadgeColor, clamp(g, 0.0, 1.0) * pad);\n  }\n\n  \n  float outline = smoothstep(0.94 - aa, 0.94 + aa, d);\n  vec3 print = mix(vColor, vColor * 0.55, outline);\n  \n  \n  if (uBadgePx > 0.0 && vBadge > 0.5) {\n    vec2 bc = (vP - vec2(0.40, -0.40)) / (aa * uBadgePx);\n    float box = 1.0 - step(0.9, max(abs(bc.x), abs(bc.y)));\n    print = mix(print, uBadgeColor, box);\n  }\n\n  gl_FragColor = vec4(mix(glow, print, uPrint), alpha);\n}", qb = "uniform float uFalloff;\nuniform float uRings;   \n                        \n                        \n\nvarying vec2 vP;\nvarying vec3 vColor;\n\nvoid main() {\n  float d2 = dot(vP, vP);\n  if (d2 > 1.0) discard;   \n\n  float i = exp(-d2 * uFalloff) - exp(-uFalloff);   \n  i = max(i, 0.0);\n  if (uRings > 0.5) i = ceil(i * uRings) / uRings * step(0.015, i) * 0.9;   \n\n  gl_FragColor = vec4(vColor * i, i);   \n}", Jb = {
 	hub: $.NEUTRAL.text,
 	"live-ops": $.ACCENT.ihat,
 	doctrine: $.ACCENT.jhat,
@@ -24970,30 +25324,30 @@ var Ib = "attribute float aAlong;   \nattribute float aSide;    \nattribute vec3
 	learning: $.ACCENT.guide,
 	ops: $.ACCENT.gold,
 	site: $.ACCENT.jhat
-}, Hb = (t, n = 1.9) => {
+}, Yb = (t, n = 1.9) => {
 	let r = new e.Color(t).multiplyScalar(n);
 	return r.r = Math.min(r.r, 1), r.g = Math.min(r.g, 1), r.b = Math.min(r.b, 1), "#" + r.getHexString();
-}, Ub = {
-	hub: Hb(Cd.paper.NEUTRAL.text, 1.6),
-	"live-ops": Hb(Cd.paper.ACCENT.ihat),
-	doctrine: Hb(Cd.paper.ACCENT.jhat),
-	initiative: Hb(Cd.paper.ACCENT.axis),
-	learning: Hb(Cd.paper.ACCENT.guide),
-	ops: Hb(Cd.paper.ACCENT.gold),
-	site: Hb(Cd.paper.ACCENT.jhat)
-}, Wb = {
+}, Xb = {
+	hub: Yb(Cd.paper.NEUTRAL.text, 1.6),
+	"live-ops": Yb(Cd.paper.ACCENT.ihat),
+	doctrine: Yb(Cd.paper.ACCENT.jhat),
+	initiative: Yb(Cd.paper.ACCENT.axis),
+	learning: Yb(Cd.paper.ACCENT.guide),
+	ops: Yb(Cd.paper.ACCENT.gold),
+	site: Yb(Cd.paper.ACCENT.jhat)
+}, Zb = {
 	glow: $.NEUTRAL.dim,
-	print: Hb(Cd.paper.NEUTRAL.dim, 1.7)
+	print: Yb(Cd.paper.NEUTRAL.dim, 1.7)
 };
-function Gb(e = "glow") {
+function Qb(e = "glow") {
 	return Object.freeze({
-		...e === "print" ? Ub : Vb,
-		untagged: Wb[e === "print" ? "print" : "glow"]
+		...e === "print" ? Xb : Jb,
+		untagged: Zb[e === "print" ? "print" : "glow"]
 	});
 }
-var Kb = .6, qb = .18, Jb = .1, Yb = .9, Xb = .45, Zb = .3, Qb = 1.25, $b = 1.6, ex = .18, tx = .1, nx = 1.6, rx = .5, ix = .06, ax = .45, ox = new e.Color("#fff2dc"), sx = new e.Color("#b45309"), cx = new e.Color("#3a2e22"), lx = "#cbdbfc", ux = "#2f2a21", dx = .3, fx = "#d9a066", px = .5, mx = new e.Color(fx), hx = new e.Color("#c9c2b4");
-function gx(t, n, r, i = {}) {
-	let a = Array.isArray(n.nodes) ? n.nodes : [], o = Array.isArray(n.edges) ? n.edges : [], s = a.length, c = "glow", l = 0, u = Vb, d = ox, f = 0, p = 0, m = !1, h = rx, g = null, _ = new Float32Array(s || 1).fill(1), v = !1, y = new Map(a.map((e, t) => [e.id, t])), b = typeof window < "u" && window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null, x = () => !!(b && b.matches), S = /* @__PURE__ */ new Map();
+var $b = .6, ex = .18, tx = .1, nx = .9, rx = .45, ix = .3, ax = 1.25, ox = 1.6, sx = .18, cx = .1, lx = 1.6, ux = .5, dx = .06, fx = .45, px = new e.Color("#fff2dc"), mx = new e.Color("#b45309"), hx = new e.Color("#3a2e22"), gx = "#cbdbfc", _x = "#2f2a21", vx = .3, yx = "#d9a066", bx = .5, xx = new e.Color(yx), Sx = new e.Color("#c9c2b4");
+function Cx(t, n, r, i = {}) {
+	let a = Array.isArray(n.nodes) ? n.nodes : [], o = Array.isArray(n.edges) ? n.edges : [], s = a.length, c = "glow", l = 0, u = Jb, d = px, f = 0, p = 0, m = !1, h = ux, g = null, _ = new Float32Array(s || 1).fill(1), v = !1, y = new Map(a.map((e, t) => [e.id, t])), b = typeof window < "u" && window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null, x = () => !!(b && b.matches), S = /* @__PURE__ */ new Map();
 	for (let e of a) S.set(e.id, /* @__PURE__ */ new Set());
 	for (let e of o) S.has(e.from) && S.has(e.to) && (S.get(e.from).add(e.to), S.get(e.to).add(e.from));
 	let C = /* @__PURE__ */ new Map();
@@ -25004,19 +25358,19 @@ function gx(t, n, r, i = {}) {
 			x: 0,
 			y: 0,
 			z: 0
-		}, D[n] = w(t), O[n] = new e.Color(u[t.kind] || Wb.glow);
+		}, D[n] = w(t), O[n] = new e.Color(u[t.kind] || Zb.glow);
 	});
 	let A = new e.PlaneGeometry(1, 1), j = new Float32Array(s || 1).fill(1), M = new Float32Array((s || 1) * 3), N = new e.InstancedBufferAttribute(j, 1), P = new e.InstancedBufferAttribute(M, 3);
 	A.setAttribute("aHaloCap", N), A.setAttribute("aOutline", P);
 	let F = new Float32Array(s || 1);
 	a.forEach((e, t) => {
-		F[t] = wb(e.media);
+		F[t] = jb(e.media);
 	});
 	let I = new e.InstancedBufferAttribute(F, 1);
 	A.setAttribute("aBadge", I);
 	let L = F.reduce((e, t) => e + t, 0), R = new e.ShaderMaterial({
-		vertexShader: Rb,
-		fragmentShader: zb,
+		vertexShader: Gb,
+		fragmentShader: Kb,
 		transparent: !0,
 		depthWrite: !1,
 		uniforms: {
@@ -25028,11 +25382,11 @@ function gx(t, n, r, i = {}) {
 			uOutlinePx: { value: 0 },
 			uHaloCap: { value: 0 },
 			uBadgePx: { value: 0 },
-			uBadgeColor: { value: new e.Color(lx).multiplyScalar(2.4) }
+			uBadgeColor: { value: new e.Color(gx).multiplyScalar(2.4) }
 		}
 	}), z = new e.ShaderMaterial({
-		vertexShader: Rb,
-		fragmentShader: Bb,
+		vertexShader: Gb,
+		fragmentShader: qb,
 		transparent: !0,
 		depthWrite: !1,
 		depthTest: !1,
@@ -25045,7 +25399,7 @@ function gx(t, n, r, i = {}) {
 			uHaloCap: { value: 0 },
 			uOutlinePx: { value: 0 },
 			uBadgePx: { value: 0 },
-			uBadgeColor: { value: new e.Color(lx) }
+			uBadgeColor: { value: new e.Color(gx) }
 		}
 	}), B = new e.InstancedMesh(A, R, Math.max(s, 1)), V = new e.InstancedMesh(A, z, Math.max(s, 1));
 	for (let t of [B, V]) t.count = s, t.instanceMatrix.setUsage(e.DynamicDrawUsage), t.frustumCulled = !1;
@@ -25056,8 +25410,8 @@ function gx(t, n, r, i = {}) {
 		T.makeScale(n, n, n).setPosition(r.x, r.y, r.z), W.setMatrixAt(t, T), B.setMatrixAt(t, T), V.setMatrixAt(t, T), B.setColorAt(t, O[t]), V.setColorAt(t, O[t]);
 	}), W.instanceMatrix.needsUpdate = !0;
 	let G = new e.ShaderMaterial({
-		vertexShader: Ib,
-		fragmentShader: Lb,
+		vertexShader: Ub,
+		fragmentShader: Wb,
 		transparent: !0,
 		depthWrite: !1,
 		blending: e.AdditiveBlending,
@@ -25099,7 +25453,7 @@ function gx(t, n, r, i = {}) {
 	fe.add(de), fe.add(V), fe.add(B), fe.add(W);
 	let pe = i.heatTauDays ?? 7, me = i.batchDiscount ?? .15, he = new Float32Array(s), q = new Float32Array(s);
 	a.forEach((e, t) => {
-		he[t] = yb(e.ageDays, pe) * (e.batch ? me : 1), e.state === "red" && (he[t] = Math.max(he[t], .85)), q[t] = he[t];
+		he[t] = Eb(e.ageDays, pe) * (e.batch ? me : 1), e.state === "red" && (he[t] = Math.max(he[t], .85)), q[t] = he[t];
 	});
 	let ge = {
 		red: [new e.Color("#ff3b30"), .55],
@@ -25112,7 +25466,7 @@ function gx(t, n, r, i = {}) {
 		let n = a.findIndex((t) => t.id === e);
 		if (n < 0) return;
 		a[n].state = t, _e[n] = ge[t] || null;
-		let r = yb(a[n].ageDays, pe) * (a[n].batch ? me : 1);
+		let r = Eb(a[n].ageDays, pe) * (a[n].batch ? me : 1);
 		he[n] = t === "red" ? Math.max(r, .85) : r, q[n] = Math.max(q[n], he[n]);
 	}
 	function ye(e, t) {
@@ -25191,8 +25545,8 @@ function gx(t, n, r, i = {}) {
 			let r = ee[t * 2], i = ee[t * 2 + 1], a;
 			if (g != null) {
 				let e = g.has(r), t = g.has(i);
-				a = e && t ? nx : e || t ? tx : ix;
-			} else a = e == null ? h : r === e || i === e ? nx : tx;
+				a = e && t ? lx : e || t ? cx : dx;
+			} else a = e == null ? h : r === e || i === e ? lx : cx;
 			if (v) {
 				let e = y.get(r), t = y.get(i), n = e == null ? 1 : _[e], o = t == null ? 1 : _[t];
 				a *= Math.min(n, o);
@@ -25235,22 +25589,22 @@ function gx(t, n, r, i = {}) {
 	function nt(e, t) {
 		let n = !x(), r = we > 0 ? Math.floor(t * we) / we : t;
 		G.uniforms.uTime.value = r, G.uniforms.uFlow.value = +!!n, X < Infinity && (X += e);
-		let i = Math.min(X / ax, 1), o = qe(), l = Ge == null ? void 0 : y.get(Ge), u = o == null ? void 0 : y.get(o), h = u != null, b = h ? S.get(o) : null;
+		let i = Math.min(X / fx, 1), o = qe(), l = Ge == null ? void 0 : y.get(Ge), u = o == null ? void 0 : y.get(o), h = u != null, b = h ? S.get(o) : null;
 		for (let r = 0; r < s; r++) {
-			q[r] > he[r] && (q[r] = he[r] + (q[r] - he[r]) * Math.exp(-e / Kb), q[r] - he[r] < .001 && (q[r] = he[r]));
-			let o = r === l, s = r === u, y = o ? 1 - i : 0, x = n ? Math.sin(t * $b * Math.PI * 2 + r) : 0, S = D[r] * (1 + qb * q[r] + Jb * q[r] * x + .6 * y) * (v ? _[r] : 1), C = k[r];
+			q[r] > he[r] && (q[r] = he[r] + (q[r] - he[r]) * Math.exp(-e / $b), q[r] - he[r] < .001 && (q[r] = he[r]));
+			let o = r === l, s = r === u, y = o ? 1 - i : 0, x = n ? Math.sin(t * ox * Math.PI * 2 + r) : 0, S = D[r] * (1 + ex * q[r] + tx * q[r] * x + .6 * y) * (v ? _[r] : 1), C = k[r];
 			T.makeScale(S, S, S).setPosition(C.x, C.y, C.z), B.setMatrixAt(r, T), c === "print" && T.setPosition(C.x + .05, C.y, C.z + .09), V.setMatrixAt(r, T);
-			let w = g != null && !g.has(a[r].id) ? ix : h && !s && !b.has(a[r].id) && g == null ? ex : 1, A = Math.min(w * (1 + Yb * q[r] + .8 * y), 2);
-			if (c === "print" && w < 1 ? E.copy(O[r]).lerp(hx, .78) : (E.copy(O[r]).lerp(d, Xb * q[r]).multiplyScalar(c === "print" ? Math.min(A, 1.15) : A), _e[r] && E.lerp(_e[r][0], _e[r][1])), f > 0) {
+			let w = g != null && !g.has(a[r].id) ? dx : h && !s && !b.has(a[r].id) && g == null ? sx : 1, A = Math.min(w * (1 + nx * q[r] + .8 * y), 2);
+			if (c === "print" && w < 1 ? E.copy(O[r]).lerp(Sx, .78) : (E.copy(O[r]).lerp(d, rx * q[r]).multiplyScalar(c === "print" ? Math.min(A, 1.15) : A), _e[r] && E.lerp(_e[r][0], _e[r][1])), f > 0) {
 				let e = .2126 * E.r + .7152 * E.g + .0722 * E.b;
 				e > 1e-5 && e < f && E.multiplyScalar(f / e);
 			}
 			if (B.setColorAt(r, E), m) {
-				E.copy(O[r]).multiplyScalar(dx * w);
-				let e = Math.max(0, Math.min((q[r] - px) / (1 - px), 1));
-				e > 0 && E.lerp(mx, e), _e[r] && E.lerp(_e[r][0], _e[r][1] * .85), M[r * 3] = E.r, M[r * 3 + 1] = E.g, M[r * 3 + 2] = E.b;
+				E.copy(O[r]).multiplyScalar(vx * w);
+				let e = Math.max(0, Math.min((q[r] - bx) / (1 - bx), 1));
+				e > 0 && E.lerp(xx, e), _e[r] && E.lerp(_e[r][0], _e[r][1] * .85), M[r * 3] = E.r, M[r * 3 + 1] = E.g, M[r * 3 + 2] = E.b;
 			}
-			c === "print" ? E.copy(cx) : E.copy(O[r]).lerp(d, Xb * q[r] * (1 - p)).multiplyScalar(w * (Zb * (1 - p) + Qb * q[r] + .6 * y)), V.setColorAt(r, E);
+			c === "print" ? E.copy(hx) : E.copy(O[r]).lerp(d, rx * q[r] * (1 - p)).multiplyScalar(w * (ix * (1 - p) + ax * q[r] + .6 * y)), V.setColorAt(r, E);
 		}
 		B.instanceMatrix.needsUpdate = !0, V.instanceMatrix.needsUpdate = !0, B.instanceColor && (B.instanceColor.needsUpdate = !0), V.instanceColor && (V.instanceColor.needsUpdate = !0), m && (P.needsUpdate = !0);
 	}
@@ -25315,7 +25669,7 @@ function gx(t, n, r, i = {}) {
 		},
 		setEdgeStyle: Le,
 		getEdgeStyle: Re,
-		kindColor: (e) => u[e] || Wb[c === "print" ? "print" : "glow"],
+		kindColor: (e) => u[e] || Zb[c === "print" ? "print" : "glow"],
 		setState: ve,
 		setColorFloor: (e) => {
 			f = e;
@@ -25331,7 +25685,7 @@ function gx(t, n, r, i = {}) {
 		get badgeCount() {
 			return L;
 		},
-		badgedIds: () => a.filter((e) => Tb(e.media)).map((e) => e.id),
+		badgedIds: () => a.filter((e) => Mb(e.media)).map((e) => e.id),
 		stateColors: () => {
 			let e = {};
 			for (let [t, n] of Object.entries(ge)) e[t] = "#" + n[0].getHexString();
@@ -25339,20 +25693,20 @@ function gx(t, n, r, i = {}) {
 		},
 		glyphOf: (e) => {
 			let t = a.find((t) => t.id === e);
-			return t ? Cb(t.media) : null;
+			return t ? Ab(t.media) : null;
 		},
 		glyphCounts: () => {
 			let e = {};
-			for (let t of Sb) e[t] = 0;
+			for (let t of kb) e[t] = 0;
 			for (let t of a) {
-				let n = Cb(t.media);
+				let n = Ab(t.media);
 				n && e[n]++;
 			}
 			return e;
 		},
-		BADGE_COLOR: lx,
-		activeBadgeColor: () => c === "print" ? ux : lx,
-		OUTLINE_HOT: fx,
+		BADGE_COLOR: gx,
+		activeBadgeColor: () => c === "print" ? _x : gx,
+		OUTLINE_HOT: yx,
 		debugHaloCap: (e) => {
 			let t = y.get(e);
 			return t == null ? null : j[t];
@@ -25368,7 +25722,7 @@ function gx(t, n, r, i = {}) {
 		setRenderMode(t) {
 			c = t === "print" ? "print" : "glow";
 			let n = c === "print";
-			u = n ? Ub : Vb, d = n ? sx : ox, z.blending = n ? e.NormalBlending : e.AdditiveBlending, z.uniforms.uSizeMul.value = n ? 1.35 : i.haloScale ?? 3.2, z.uniforms.uFalloff.value = n ? 10 : 5.5, z.needsUpdate = !0, R.uniforms.uPrint.value = +!!n, R.uniforms.uBadgeColor.value.set(n ? ux : lx), n || R.uniforms.uBadgeColor.value.multiplyScalar(2.4), G.blending = n ? e.NormalBlending : e.AdditiveBlending, G.needsUpdate = !0, a.forEach((e, t) => O[t].set(u[e.kind] || Wb[c === "print" ? "print" : "glow"]));
+			u = n ? Xb : Jb, d = n ? mx : px, z.blending = n ? e.NormalBlending : e.AdditiveBlending, z.uniforms.uSizeMul.value = n ? 1.35 : i.haloScale ?? 3.2, z.uniforms.uFalloff.value = n ? 10 : 5.5, z.needsUpdate = !0, R.uniforms.uPrint.value = +!!n, R.uniforms.uBadgeColor.value.set(n ? _x : gx), n || R.uniforms.uBadgeColor.value.multiplyScalar(2.4), G.blending = n ? e.NormalBlending : e.AdditiveBlending, G.needsUpdate = !0, a.forEach((e, t) => O[t].set(u[e.kind] || Zb[c === "print" ? "print" : "glow"]));
 			let { colA0: r, colB0: o } = le.userData, s = 0;
 			for (let e = 0; e < ee.length / 2; e++) {
 				let t = O[te[e]], n = O[ne[e]];
@@ -25379,7 +25733,7 @@ function gx(t, n, r, i = {}) {
 		activeKindColors() {
 			return Object.freeze({
 				...u,
-				untagged: Wb[c === "print" ? "print" : "glow"]
+				untagged: Zb[c === "print" ? "print" : "glow"]
 			});
 		},
 		get renderMode() {
@@ -25414,8 +25768,8 @@ function gx(t, n, r, i = {}) {
 }
 //#endregion
 //#region src/graph-labels.js
-var _x = new e.Vector3(), vx = .5, yx = 2;
-function bx({ container: e, nodes: t = [], edges: n = [], positions: r, camera: i, project: a = null, radiusOf: o = null, alwaysTop: s = 8, zoomThreshold: c = 5.5, gapPx: l = 5 } = {}) {
+var wx = new e.Vector3(), Tx = .5, Ex = 2;
+function Dx({ container: e, nodes: t = [], edges: n = [], positions: r, camera: i, project: a = null, radiusOf: o = null, alwaysTop: s = 8, zoomThreshold: c = 5.5, gapPx: l = 5 } = {}) {
 	if (!e) throw Error("createGraphLabels: container is required");
 	if (!r) throw Error("createGraphLabels: positions (Map<id,{x,y,z}>) is required");
 	if (!i && !a) throw Error("createGraphLabels: need a camera or a project(id) function");
@@ -25513,23 +25867,23 @@ function bx({ container: e, nodes: t = [], edges: n = [], positions: r, camera: 
 				}
 				d = e.x, h = e.y;
 			} else {
-				if (_x.set(r.p.x, r.p.y, r.p.z).project(i), _x.z > 1) {
+				if (wx.set(r.p.x, r.p.y, r.p.z).project(i), wx.z > 1) {
 					D(r, !1);
 					continue;
 				}
-				d = (_x.x + 1) * .5 * t, h = (1 - _x.y) * .5 * n;
+				d = (wx.x + 1) * .5 * t, h = (1 - wx.y) * .5 * n;
 			}
 			let S = o ? o(r.id) * u : 0, C = r.above ? h - S - l - r.hh : h + S + l, T = d - r.hw, E = d + r.hw, O = C, k = C + r.hh;
-			if (T < yx || E > t - yx || O < 0 || k > n - yx) {
+			if (T < Ex || E > t - Ex || O < 0 || k > n - Ex) {
 				D(r, !1);
 				continue;
 			}
-			if (!w(T - yx, O - yx, E + yx, k + yx)) {
+			if (!w(T - Ex, O - Ex, E + Ex, k + Ex)) {
 				D(r, !1);
 				continue;
 			}
 			let A = y * 4;
-			v[A] = T, v[A + 1] = O, v[A + 2] = E, v[A + 3] = k, y++, Math.abs(d - r.x) < vx && Math.abs(C - r.y) < vx || (r.x = d, r.y = C, r.el.style.transform = `translate(-50%, 0) translate(${d.toFixed(1)}px, ${C.toFixed(1)}px)`), D(r, !0), x++;
+			v[A] = T, v[A + 1] = O, v[A + 2] = E, v[A + 3] = k, y++, Math.abs(d - r.x) < Tx && Math.abs(C - r.y) < Tx || (r.x = d, r.y = C, r.el.style.transform = `translate(-50%, 0) translate(${d.toFixed(1)}px, ${C.toFixed(1)}px)`), D(r, !0), x++;
 		}
 	}
 	function k(e) {
@@ -25557,14 +25911,14 @@ function bx({ container: e, nodes: t = [], edges: n = [], positions: r, camera: 
 }
 //#endregion
 //#region src/shaders/graph-star.vert
-var xx = "precision highp float;\n\nattribute float aPhase;    \nattribute float aSize;     \nattribute vec3  aColor;    \n\nuniform float uTime;\nuniform float uTwinkle;    \n\nvarying float vTw;\nvarying vec3  vColor;\n\nvoid main() {\n  float w = uTime * (0.9 + aPhase * 1.3) + aPhase * 6.28318;\n  \n  vTw = 1.0 + uTwinkle * 0.5 * (sin(w) + sin(w * 1.618 + aPhase * 4.0));\n  vColor = aColor;\n  gl_PointSize = aSize;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}", Sx = "precision highp float;\n\nuniform float uOpacity;\n\nvarying float vTw;\nvarying vec3  vColor;   \n\nvoid main() {\n  gl_FragColor = vec4(vColor, uOpacity * clamp(vTw, 0.0, 2.0));\n}", Cx = "precision highp float;\n\nattribute vec2  aCorner;   \nattribute float aSize;     \nattribute float aKind;     \nattribute vec3  aTint;\nattribute float aPhase;    \n\nvarying vec2  vC;\nvarying float vKind;\nvarying vec3  vTint;\nvarying float vPhase;\n\nvoid main() {\n  vC = aCorner;\n  vKind = aKind;\n  vTint = aTint;\n  vPhase = aPhase;\n  vec4 mv = modelViewMatrix * vec4(position, 1.0);\n  mv.xy += aCorner * aSize;\n  gl_Position = projectionMatrix * mv;\n}", wx = "precision highp float;\n\nuniform float uTime;\nuniform float uTwinkle;    \nuniform float uIntensity;\n\nvarying vec2  vC;\nvarying float vKind;\nvarying vec3  vTint;\nvarying float vPhase;\n\nvoid main() {\n  vec2 c = vC * 2.0;               \n  float r = length(c);\n  vec3 col = vec3(0.0);\n\n  if (vKind < 0.5) {\n    \n    float disc = 1.0 - smoothstep(0.50, 0.53, r);\n    float cr = exp(-dot(c - vec2(-0.13, 0.09), c - vec2(-0.13, 0.09)) * 55.0)\n             + exp(-dot(c - vec2(0.17, -0.04), c - vec2(0.17, -0.04)) * 85.0)\n             + exp(-dot(c - vec2(0.01, -0.24), c - vec2(0.01, -0.24)) * 110.0);\n    float shade = clamp(0.60 + 0.55 * dot(vec2(-0.55, 0.835), c) - cr * 0.45, 0.0, 1.0);\n    vec3 discCol = mix(vec3(0.188, 0.376, 0.510), vTint, shade);           \n    \n    vec2 q = vec2(c.x * 0.883 - c.y * 0.469, c.x * 0.469 + c.y * 0.883);\n    float er = length(vec2(q.x / 0.94, q.y / 0.28));\n    float ring = 1.0 - smoothstep(0.06, 0.13, abs(er - 1.0));\n    float ringVis = ring * (q.y > 0.0 ? 1.0 : step(0.53, r));              \n    \n    \n    float aura = exp(-max(r - 0.53, 0.0) * 22.0) * 0.14 * step(0.5, r) * (1.0 - smoothstep(0.72, 0.85, r));\n    col = discCol * disc + vec3(0.796, 0.859, 0.988) * ringVis * 0.8 + vTint * aura;\n  } else if (vKind < 1.5) {\n    \n    float disc = 1.0 - smoothstep(0.44, 0.50, r);\n    float shade = clamp(0.55 + 0.5 * dot(vec2(-0.55, 0.835), c), 0.0, 1.0);\n    col = mix(vec3(0.416, 0.416, 0.416), vTint, shade) * disc;             \n  } else if (vKind < 2.5) {\n    \n    vec2 a = abs(c);\n    float arm = max(step(a.x, 0.11) * (1.0 - smoothstep(0.45, 0.95, a.y)),\n                    step(a.y, 0.11) * (1.0 - smoothstep(0.45, 0.95, a.x)));\n    float core = 1.0 - smoothstep(0.10, 0.22, r);\n    float w = uTime * (1.4 + vPhase * 1.3) + vPhase * 6.28318;\n    float tw = 1.0 + uTwinkle * 0.5 * (sin(w) + sin(w * 1.618 + vPhase * 4.0));\n    col = vTint * (arm * 0.85 + core) * clamp(tw, 0.15, 2.0);\n  } else {\n    \n    float e = length(vec2(c.x, c.y * 2.6));                                 \n    float body = exp(-e * e * 2.4);\n    float theta = atan(c.y * 2.6, c.x);\n    float arms = 0.5 + 0.5 * cos(theta * 2.0 - log(max(e, 0.05)) * 3.5 + vPhase * 6.28318);\n    float core = exp(-e * e * 28.0);\n    col = vTint * body * (0.35 + 0.65 * arms * smoothstep(0.10, 0.45, e)) * 0.7\n        + mix(vTint, vec3(1.0), 0.55) * core;\n  }\n\n  gl_FragColor = vec4(col * uIntensity, 1.0);   \n}";
+var Ox = "precision highp float;\n\nattribute float aPhase;    \nattribute float aSize;     \nattribute vec3  aColor;    \n\nuniform float uTime;\nuniform float uTwinkle;    \n\nvarying float vTw;\nvarying vec3  vColor;\n\nvoid main() {\n  float w = uTime * (0.9 + aPhase * 1.3) + aPhase * 6.28318;\n  \n  vTw = 1.0 + uTwinkle * 0.5 * (sin(w) + sin(w * 1.618 + aPhase * 4.0));\n  vColor = aColor;\n  gl_PointSize = aSize;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}", kx = "precision highp float;\n\nuniform float uOpacity;\n\nvarying float vTw;\nvarying vec3  vColor;   \n\nvoid main() {\n  gl_FragColor = vec4(vColor, uOpacity * clamp(vTw, 0.0, 2.0));\n}", Ax = "precision highp float;\n\nattribute vec2  aCorner;   \nattribute float aSize;     \nattribute float aKind;     \nattribute vec3  aTint;\nattribute float aPhase;    \n\nvarying vec2  vC;\nvarying float vKind;\nvarying vec3  vTint;\nvarying float vPhase;\n\nvoid main() {\n  vC = aCorner;\n  vKind = aKind;\n  vTint = aTint;\n  vPhase = aPhase;\n  vec4 mv = modelViewMatrix * vec4(position, 1.0);\n  mv.xy += aCorner * aSize;\n  gl_Position = projectionMatrix * mv;\n}", jx = "precision highp float;\n\nuniform float uTime;\nuniform float uTwinkle;    \nuniform float uIntensity;\n\nvarying vec2  vC;\nvarying float vKind;\nvarying vec3  vTint;\nvarying float vPhase;\n\nvoid main() {\n  vec2 c = vC * 2.0;               \n  float r = length(c);\n  vec3 col = vec3(0.0);\n\n  if (vKind < 0.5) {\n    \n    float disc = 1.0 - smoothstep(0.50, 0.53, r);\n    float cr = exp(-dot(c - vec2(-0.13, 0.09), c - vec2(-0.13, 0.09)) * 55.0)\n             + exp(-dot(c - vec2(0.17, -0.04), c - vec2(0.17, -0.04)) * 85.0)\n             + exp(-dot(c - vec2(0.01, -0.24), c - vec2(0.01, -0.24)) * 110.0);\n    float shade = clamp(0.60 + 0.55 * dot(vec2(-0.55, 0.835), c) - cr * 0.45, 0.0, 1.0);\n    vec3 discCol = mix(vec3(0.188, 0.376, 0.510), vTint, shade);           \n    \n    vec2 q = vec2(c.x * 0.883 - c.y * 0.469, c.x * 0.469 + c.y * 0.883);\n    float er = length(vec2(q.x / 0.94, q.y / 0.28));\n    float ring = 1.0 - smoothstep(0.06, 0.13, abs(er - 1.0));\n    float ringVis = ring * (q.y > 0.0 ? 1.0 : step(0.53, r));              \n    \n    \n    float aura = exp(-max(r - 0.53, 0.0) * 22.0) * 0.14 * step(0.5, r) * (1.0 - smoothstep(0.72, 0.85, r));\n    col = discCol * disc + vec3(0.796, 0.859, 0.988) * ringVis * 0.8 + vTint * aura;\n  } else if (vKind < 1.5) {\n    \n    float disc = 1.0 - smoothstep(0.44, 0.50, r);\n    float shade = clamp(0.55 + 0.5 * dot(vec2(-0.55, 0.835), c), 0.0, 1.0);\n    col = mix(vec3(0.416, 0.416, 0.416), vTint, shade) * disc;             \n  } else if (vKind < 2.5) {\n    \n    vec2 a = abs(c);\n    float arm = max(step(a.x, 0.11) * (1.0 - smoothstep(0.45, 0.95, a.y)),\n                    step(a.y, 0.11) * (1.0 - smoothstep(0.45, 0.95, a.x)));\n    float core = 1.0 - smoothstep(0.10, 0.22, r);\n    float w = uTime * (1.4 + vPhase * 1.3) + vPhase * 6.28318;\n    float tw = 1.0 + uTwinkle * 0.5 * (sin(w) + sin(w * 1.618 + vPhase * 4.0));\n    col = vTint * (arm * 0.85 + core) * clamp(tw, 0.15, 2.0);\n  } else {\n    \n    float e = length(vec2(c.x, c.y * 2.6));                                 \n    float body = exp(-e * e * 2.4);\n    float theta = atan(c.y * 2.6, c.x);\n    float arms = 0.5 + 0.5 * cos(theta * 2.0 - log(max(e, 0.05)) * 3.5 + vPhase * 6.28318);\n    float core = exp(-e * e * 28.0);\n    col = vTint * body * (0.35 + 0.65 * arms * smoothstep(0.10, 0.45, e)) * 0.7\n        + mix(vTint, vec3(1.0), 0.55) * core;\n  }\n\n  gl_FragColor = vec4(col * uIntensity, 1.0);   \n}";
 //#endregion
 //#region src/graph-atmosphere.js
-function Tx(e) {
+function Mx(e) {
 	let t = e >>> 0;
 	return () => (t = Math.imul(t, 1664525) + 1013904223 >>> 0, t / 4294967296);
 }
-function Ex(t = {}) {
+function Nx(t = {}) {
 	let { starCount: n = 340, starRadius: r = 17, depth: i = 5, intensity: a = .055, seed: o = 24301, aspect: s = 1.6, bandMul: c = 1, dustMul: l = 1, twinkle: u = 0, starShape: d = 0, skyStars: f = 0, extraSmudge: p = 0, starSize: m = 1.6, art: h = 0, clearing: g = 0, starVariety: _ = null, skySprites: v = null } = t, y = new e.Group(), b = new e.ShaderMaterial({
 		vertexShader: dv,
 		fragmentShader: fv,
@@ -25591,14 +25945,14 @@ function Ex(t = {}) {
 		}
 	}), x = new e.Mesh(new e.PlaneGeometry(1, 1), b);
 	x.frustumCulled = !1, x.renderOrder = -10, y.add(x);
-	let S = Tx(o), C = new Float32Array(n * 3);
+	let S = Mx(o), C = new Float32Array(n * 3);
 	for (let e = 0; e < n; e++) {
 		let t = Math.sqrt(S()) * r, n = S() * Math.PI * 2;
 		C[e * 3] = Math.cos(n) * t, C[e * 3 + 1] = -i - S() * 3, C[e * 3 + 2] = Math.sin(n) * t;
 	}
-	let w = Tx((o ^ 30487) >>> 0), T = new Float32Array(n);
+	let w = Mx((o ^ 30487) >>> 0), T = new Float32Array(n);
 	for (let e = 0; e < n; e++) T[e] = w();
-	let E = Tx((o ^ 20907) >>> 0), D = (e, t) => {
+	let E = Mx((o ^ 20907) >>> 0), D = (e, t) => {
 		let n = 0;
 		for (let [, t] of e) n += t;
 		let r = 0;
@@ -25609,8 +25963,8 @@ function Ex(t = {}) {
 	let M = new e.BufferGeometry();
 	M.setAttribute("position", new e.BufferAttribute(C, 3)), M.setAttribute("aPhase", new e.BufferAttribute(T, 1)), M.setAttribute("aSize", new e.BufferAttribute(O, 1)), M.setAttribute("aColor", new e.BufferAttribute(k, 3));
 	let N = new e.ShaderMaterial({
-		vertexShader: xx,
-		fragmentShader: Sx,
+		vertexShader: Ox,
+		fragmentShader: kx,
 		transparent: !0,
 		depthWrite: !1,
 		blending: e.AdditiveBlending,
@@ -25673,8 +26027,8 @@ function Ex(t = {}) {
 			let v = n * 4, y = n * 6;
 			d[y] = v, d[y + 1] = v + 1, d[y + 2] = v + 2, d[y + 3] = v, d[y + 4] = v + 2, d[y + 5] = v + 3;
 		}), K = new e.BufferGeometry(), K.setAttribute("position", new e.BufferAttribute(r, 3)), K.setAttribute("aCorner", new e.BufferAttribute(a, 2)), K.setAttribute("aSize", new e.BufferAttribute(o, 1)), K.setAttribute("aKind", new e.BufferAttribute(s, 1)), K.setAttribute("aTint", new e.BufferAttribute(c, 3)), K.setAttribute("aPhase", new e.BufferAttribute(l, 1)), K.setIndex(new e.BufferAttribute(d, 1)), G = new e.ShaderMaterial({
-			vertexShader: Cx,
-			fragmentShader: wx,
+			vertexShader: Ax,
+			fragmentShader: jx,
 			transparent: !0,
 			depthWrite: !1,
 			blending: e.AdditiveBlending,
@@ -25749,12 +26103,12 @@ function Ex(t = {}) {
 }
 //#endregion
 //#region src/graph-ambient-core.js
-function Dx(e) {
+function Px(e) {
 	let t = e >>> 0;
 	return () => (t = Math.imul(t, 1664525) + 1013904223 >>> 0, t / 4294967296);
 }
-function Ox({ seed: e = 171646535, events: t = [] } = {}) {
-	let n = Dx(e), r = (e) => {
+function Fx({ seed: e = 171646535, events: t = [] } = {}) {
+	let n = Px(e), r = (e) => {
 		let t = e.jitter ?? .5;
 		return e.meanInterval * (1 - t + n() * 2 * t);
 	}, i = /* @__PURE__ */ new Map();
@@ -25803,18 +26157,18 @@ function Ox({ seed: e = 171646535, events: t = [] } = {}) {
 }
 //#endregion
 //#region src/shaders/graph-comet.vert
-var kx = "precision highp float;\n\nvarying vec2 vUv;\n\nvoid main() {\n  vUv = uv;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}", Ax = "precision highp float;\n\nuniform vec3  uColor;\nuniform float uIntensity;\nuniform float uFade;\n\nvarying vec2 vUv;\n\nvoid main() {\n  float u = vUv.x;                                     \n  float tail = pow(u, 2.2);\n  float head = exp(-(1.0 - u) * 26.0) * 1.7;\n  float d = (vUv.y - 0.5) * 2.0;                       \n  float across = exp(-d * d * 5.0);\n  \n  across *= mix(0.35, 1.0, u);\n  float g = (tail * 0.85 + head) * across * uIntensity * uFade;\n  gl_FragColor = vec4(uColor * g, 1.0);                \n}", jx = 24, Mx = 16;
-function Nx() {
+var Ix = "precision highp float;\n\nvarying vec2 vUv;\n\nvoid main() {\n  vUv = uv;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}", Lx = "precision highp float;\n\nuniform vec3  uColor;\nuniform float uIntensity;\nuniform float uFade;\n\nvarying vec2 vUv;\n\nvoid main() {\n  float u = vUv.x;                                     \n  float tail = pow(u, 2.2);\n  float head = exp(-(1.0 - u) * 26.0) * 1.7;\n  float d = (vUv.y - 0.5) * 2.0;                       \n  float across = exp(-d * d * 5.0);\n  \n  across *= mix(0.35, 1.0, u);\n  float g = (tail * 0.85 + head) * across * uIntensity * uFade;\n  gl_FragColor = vec4(uColor * g, 1.0);                \n}", Rx = 24, zx = 16;
+function Bx() {
 	let t = document.createElement("canvas");
-	t.width = jx * 2, t.height = Mx;
+	t.width = Rx * 2, t.height = zx;
 	let n = t.getContext("2d"), r = (e, t, r, i, a, o) => {
-		n.fillStyle = o, n.fillRect(e * jx + t, r, i, a);
+		n.fillStyle = o, n.fillRect(e * Rx + t, r, i, a);
 	};
 	for (let e = 0; e < 2; e++) r(e, 4, 8, 16, 3, "#847e87"), r(e, 6, 7, 12, 1, "#9badb7"), r(e, 6, 11, 12, 1, "#696a6a"), r(e, 2, 9, 2, 1, "#696a6a"), r(e, 20, 9, 2, 1, "#9badb7"), r(e, 10, 4, 5, 3, "#5fcde4"), r(e, 11, 4, 2, 1, "#cbdbfc"), r(e, 7, 12, 1, 1, "#fbf236"), r(e, 11, 12, 1, 1, "#fbf236"), r(e, 15, 12, 1, 1, "#fbf236"), e === 0 ? (r(e, 0, 9, 3, 1, "#df7126"), r(e, 1, 8, 1, 3, "#df7126")) : r(e, 1, 9, 2, 1, "#d95763");
 	let i = new e.CanvasTexture(t);
 	return i.magFilter = e.NearestFilter, i.minFilter = e.NearestFilter, i.generateMipmaps = !1, i.repeat.set(.5, 1), i.colorSpace = e.SRGBColorSpace, i;
 }
-function Px(t = {}) {
+function Vx(t = {}) {
 	let { seed: n = 171646535, radius: r = 11, depth: i = 3.2, camera: a = null, comet: o = {}, ship: s = {} } = t, c = {
 		meanInterval: 75,
 		durationMin: 4.5,
@@ -25828,7 +26182,7 @@ function Px(t = {}) {
 		durationMin: 9,
 		durationMax: 13,
 		...s
-	}, u = Ox({
+	}, u = Fx({
 		seed: n,
 		events: [{
 			kind: "comet",
@@ -25846,8 +26200,8 @@ function Px(t = {}) {
 	}), d = new e.Group(), f = 2.8 * c.length, p = .22 * c.width, m = new e.PlaneGeometry(f, p);
 	m.rotateX(-Math.PI / 2);
 	let h = new e.ShaderMaterial({
-		vertexShader: kx,
-		fragmentShader: Ax,
+		vertexShader: Ix,
+		fragmentShader: Lx,
 		transparent: !0,
 		depthTest: !1,
 		depthWrite: !1,
@@ -25859,12 +26213,12 @@ function Px(t = {}) {
 		}
 	}), g = new e.Mesh(m, h);
 	g.visible = !1, g.frustumCulled = !1, g.renderOrder = -8, d.add(g);
-	let _ = 1.5, v = Nx(), y = new e.MeshBasicMaterial({
+	let _ = 1.5, v = Bx(), y = new e.MeshBasicMaterial({
 		map: v,
 		transparent: !0,
 		depthTest: !1,
 		depthWrite: !1
-	}), b = new e.Mesh(new e.PlaneGeometry(_, Mx / jx * _), y);
+	}), b = new e.Mesh(new e.PlaneGeometry(_, zx / Rx * _), y);
 	b.visible = !1, b.frustumCulled = !1, b.renderOrder = -8, d.add(b);
 	let x = !0, S = null, C = new e.Vector3(), w = new e.Vector3(), T = new e.Vector3();
 	function E(e) {
@@ -25927,15 +26281,15 @@ function Px(t = {}) {
 }
 //#endregion
 //#region src/render-markdown.js
-var Fx = (e) => e.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-function Ix(e, t) {
+var Hx = (e) => e.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+function Ux(e, t) {
 	let n = [];
 	return e = e.replace(/`([^`\n]+)`/g, (e, t) => (n.push(`<code>${t}</code>`), `\x01${n.length - 1}\x01`)), e = e.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (e, t, n) => /^[a-z][a-z0-9+.-]*:/i.test(n) ? `<a href="${n}" target="_blank" rel="noopener">🖼 ${t || n}</a>` : `<img src="${n}" alt="${t}" loading="lazy">`), e = e.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>"), e = e.replace(/\*([^*\n]+)\*/g, "<em>$1</em>"), e = e.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (e, n, r) => {
 		let i = n.trim(), a = (r || i).trim();
 		return t && t(i) ? `<span class="wikilink" data-wl="${i}" role="link" tabindex="0">${a}</span>` : `<span class="wikilink wl-dead" title="needs tending — not a node yet">${a}</span>`;
 	}), e = e.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, "<a href=\"$2\" target=\"_blank\" rel=\"noopener\">$1</a>"), e = e.replace(/\x01(\d+)\x01/g, (e, t) => n[Number(t)]), e;
 }
-function Lx(e) {
+function Wx(e) {
 	if (typeof e != "string") return [];
 	let t = [], n = /* @__PURE__ */ new Set(), r = /(!?)\[([^\]]+)\]\(([^)\s]+)\)/g, i;
 	for (; (i = r.exec(e)) !== null;) {
@@ -25947,16 +26301,16 @@ function Lx(e) {
 	}
 	return t;
 }
-function Rx(e, { resolveWikilink: t } = {}) {
+function Gx(e, { resolveWikilink: t } = {}) {
 	if (typeof e != "string" || !e.length) return "";
 	let n = e.replace(/^---\n[\s\S]*?\n---\n?/, "");
-	n = Fx(n);
+	n = Hx(n);
 	let r = [];
 	n = n.replace(/```[^\n]*\n([\s\S]*?)```/g, (e, t) => (r.push(`<pre><code>${t}</code></pre>`), `\x00${r.length - 1}\x00`));
 	let i = [], a = null, o = [], s = () => {
 		a &&= (i.push(`</${a}>`), null);
 	}, c = () => {
-		o.length && (i.push(`<p>${Ix(o.join(" "), t)}</p>`), o = []);
+		o.length && (i.push(`<p>${Ux(o.join(" "), t)}</p>`), o = []);
 	};
 	for (let e of n.split("\n")) {
 		let n = e.trimEnd(), l = /^\x00(\d+)\x00$/.exec(n.trim());
@@ -25966,14 +26320,14 @@ function Rx(e, { resolveWikilink: t } = {}) {
 		}
 		let u = /^(#{1,3})\s+(.*)$/.exec(n);
 		if (u) {
-			s(), c(), i.push(`<h${u[1].length + 1}>${Ix(u[2], t)}</h${u[1].length + 1}>`);
+			s(), c(), i.push(`<h${u[1].length + 1}>${Ux(u[2], t)}</h${u[1].length + 1}>`);
 			continue;
 		}
 		let d = /^\s*[-*]\s+(.*)$/.exec(n), f = /^\s*\d+[.)]\s+(.*)$/.exec(n);
 		if (d || f) {
 			c();
 			let e = d ? "ul" : "ol";
-			a !== e && (s(), i.push(`<${e}>`), a = e), i.push(`<li>${Ix((d || f)[1], t)}</li>`);
+			a !== e && (s(), i.push(`<${e}>`), a = e), i.push(`<li>${Ux((d || f)[1], t)}</li>`);
 			continue;
 		}
 		if (s(), n.trim() === "") {
@@ -25986,7 +26340,7 @@ function Rx(e, { resolveWikilink: t } = {}) {
 }
 //#endregion
 //#region src/algorithms.js
-function zx(e) {
+function Kx(e) {
 	let t = {
 		compare: 0,
 		swap: 0,
@@ -25999,14 +26353,14 @@ function zx(e) {
 	for (let n of e || []) n && typeof n.type == "string" && (t[n.type] !== void 0 && t[n.type]++, t.total++);
 	return t.work = t.compare + t.get, t;
 }
-function Bx(e, { n: t = e.getArray().length } = {}) {
+function qx(e, { n: t = e.getArray().length } = {}) {
 	for (let n = 0; n < t - 1; n++) {
 		for (let r = 0; r < t - 1 - n; r++) e.compare(r, r + 1) || e.swap(r, r + 1);
 		e.mark(t - 1 - n, "done");
 	}
 	return t > 0 && e.mark(0, "done"), { sorted: e.getArray() };
 }
-function Vx(e, { target: t } = {}) {
+function Jx(e, { target: t } = {}) {
 	let n = e.getArray().length, r = 0, i = n - 1, a = -1;
 	for (; r <= i;) {
 		let n = r + i >> 1;
@@ -26029,7 +26383,7 @@ function Vx(e, { target: t } = {}) {
 		target: t
 	};
 }
-function Hx(e, { n: t = e.getArray().length } = {}) {
+function Yx(e, { n: t = e.getArray().length } = {}) {
 	let n = (t, r) => {
 		if (r - t < 1) return;
 		let i = t + r >> 1;
@@ -26048,7 +26402,7 @@ function Hx(e, { n: t = e.getArray().length } = {}) {
 	};
 	return n(0, t - 1), { sorted: e.getArray() };
 }
-function Ux(e, { n: t = e.getArray().length } = {}) {
+function Xx(e, { n: t = e.getArray().length } = {}) {
 	let n = (t, n) => {
 		let r = t;
 		for (let i = t; i < n; i++) e.compare(i, n) && (r !== i && e.swap(r, i), r++);
@@ -26063,7 +26417,7 @@ function Ux(e, { n: t = e.getArray().length } = {}) {
 	};
 	return r(0, t - 1), { sorted: e.getArray() };
 }
-function Wx(e, { n: t = e.getArray().length } = {}) {
+function Zx(e, { n: t = e.getArray().length } = {}) {
 	let n = (e) => e - 1 >> 1;
 	for (let r = 1; r < t; r++) {
 		let t = r;
@@ -26087,10 +26441,10 @@ function Wx(e, { n: t = e.getArray().length } = {}) {
 	for (let n = 0; n < t; n++) r[n] !== i[n] && e.set(n, i[n]);
 	return { sorted: e.getArray() };
 }
-var Gx = {
+var Qx = {
 	"merge-sort": {
 		label: "Merge sort",
-		run: Hx,
+		run: Yx,
 		complexity: { worst: {
 			label: "O(n log n) — n·log₂n comparisons",
 			fn: (e) => e * Math.log2(Math.max(e, 1)),
@@ -26117,7 +26471,7 @@ var Gx = {
 	},
 	"quick-sort": {
 		label: "Quick sort",
-		run: Ux,
+		run: Xx,
 		complexity: {
 			average: {
 				label: "O(n log n) — average case",
@@ -26151,7 +26505,7 @@ var Gx = {
 	},
 	"heap-sort": {
 		label: "Heap sort",
-		run: Wx,
+		run: Zx,
 		complexity: { worst: {
 			label: "O(n log n) — worst case too (no bad days)",
 			fn: (e) => e * Math.log2(Math.max(e, 1)),
@@ -26178,7 +26532,7 @@ var Gx = {
 	},
 	"bubble-sort": {
 		label: "Bubble sort",
-		run: Bx,
+		run: qx,
 		complexity: { worst: {
 			label: "O(n²) — n(n−1)/2 comparisons",
 			fn: (e) => e * (e - 1) / 2,
@@ -26205,7 +26559,7 @@ var Gx = {
 	},
 	"binary-search": {
 		label: "Binary search",
-		run: Vx,
+		run: Jx,
 		complexity: {
 			worst: {
 				label: "O(log n) — ⌊log₂ n⌋ + 1 reads",
@@ -26242,26 +26596,26 @@ var Gx = {
 		]
 	}
 };
-function Kx(e, t, n, r) {
-	let i = Gx[e];
+function $x(e, t, n, r) {
+	let i = Qx[e];
 	if (!i) throw Error(`measureComplexity: unknown algorithm "${e}"`);
 	let a = [];
 	for (let o of t) {
 		let t = n(o), s = r(t), c = e === "binary-search" ? { target: t[t.length - 1] } : {};
 		i.run(s, c), a.push({
 			n: o,
-			work: zx(s.getOps()).work
+			work: Kx(s.getOps()).work
 		});
 	}
 	return a;
 }
-var qx = [
+var eS = [
 	"bubble-sort",
 	"merge-sort",
 	"quick-sort",
 	"heap-sort"
 ];
-function Jx(e, t) {
+function tS(e, t) {
 	let n = t >>> 0, r = () => (n = Math.imul(n, 1664525) + 1013904223 >>> 0) / 4294967296, i = e.slice();
 	for (let e = i.length - 1; e > 0; e--) {
 		let t = Math.floor(r() * (e + 1)), n = i[e];
@@ -26269,11 +26623,11 @@ function Jx(e, t) {
 	}
 	return i;
 }
-function Yx(e, t = "random", n = 5361185) {
+function nS(e, t = "random", n = 5361185) {
 	let r = Array.from({ length: e }, (e, t) => t + 1);
-	return t === "sorted" ? r : t === "reversed" ? r.slice().reverse() : Jx(r, n + e);
+	return t === "sorted" ? r : t === "reversed" ? r.slice().reverse() : tS(r, n + e);
 }
-function Xx({ kinds: e = qx, sizes: t = [
+function rS({ kinds: e = eS, sizes: t = [
 	8,
 	16,
 	32,
@@ -26283,13 +26637,13 @@ function Xx({ kinds: e = qx, sizes: t = [
 ], case: n = "random", seed: r = 5361185, createTracerFn: i } = {}) {
 	return {
 		measured: e.map((e) => {
-			let a = Gx[e];
+			let a = Qx[e];
 			if (!a) throw Error(`raceAlgorithms: unknown algorithm "${e}"`);
 			let o = t.map((e) => {
-				let t = i(Yx(e, n, r));
+				let t = i(nS(e, n, r));
 				return a.run(t, {}), {
 					x: e,
-					y: zx(t.getOps()).compare
+					y: Kx(t.getOps()).compare
 				};
 			});
 			return {
@@ -26319,14 +26673,14 @@ function Xx({ kinds: e = qx, sizes: t = [
 }
 //#endregion
 //#region src/chart.js
-var Zx = "http://www.w3.org/2000/svg";
-function Qx(e, t, n = 5) {
+var iS = "http://www.w3.org/2000/svg";
+function aS(e, t, n = 5) {
 	if (!Number.isFinite(e) || !Number.isFinite(t) || t <= e || n < 2) return [];
 	let r = (t - e) / (n - 1), i = 10 ** Math.floor(Math.log10(r)), a = r / i, o = (a >= Math.sqrt(50) ? 10 : a >= Math.sqrt(10) ? 5 : a >= Math.sqrt(2) ? 2 : 1) * i, s = Math.ceil(e / o) * o, c = [];
 	for (let e = s; e <= t + o * 1e-6; e += o) c.push(Number(e.toFixed(10)));
 	return c;
 }
-function $x(e, t) {
+function oS(e, t) {
 	let n = Math.max(e, 1e-9), r = Math.max(t, n * 10), i = Math.log10(r) - Math.log10(n), a = [];
 	for (let e = Math.floor(Math.log10(n)); e <= Math.ceil(Math.log10(r)); e++) {
 		let t = 10 ** e, o = i <= 2.5 ? [
@@ -26341,7 +26695,7 @@ function $x(e, t) {
 	}
 	return a;
 }
-function eS({ domain: e, range: t, type: n = "linear" }) {
+function sS({ domain: e, range: t, type: n = "linear" }) {
 	let [r, i] = e, [a, o] = t;
 	if (n === "log") {
 		let e = Math.log10(Math.max(r, 1e-9)), t = Math.log10(Math.max(i, 1e-9)) - e || 1;
@@ -26350,7 +26704,7 @@ function eS({ domain: e, range: t, type: n = "linear" }) {
 	let s = i - r || 1;
 	return (e) => a + (e - r) / s * (o - a);
 }
-function tS(e, t, n) {
+function cS(e, t, n) {
 	let r = [];
 	for (let i of e.data || []) {
 		let e = Number(i.x), a = Number(i.y);
@@ -26363,7 +26717,7 @@ function tS(e, t, n) {
 	}
 	return r;
 }
-function nS({ series: e = [], width: t = 460, height: n = 260, padding: r = {}, xScale: i = "linear", yScale: a = "linear", xDomain: o, yDomain: s, ticks: c = 5 } = {}) {
+function lS({ series: e = [], width: t = 460, height: n = 260, padding: r = {}, xScale: i = "linear", yScale: a = "linear", xDomain: o, yDomain: s, ticks: c = 5 } = {}) {
 	let l = {
 		top: 16,
 		right: 14,
@@ -26375,11 +26729,11 @@ function nS({ series: e = [], width: t = 460, height: n = 260, padding: r = {}, 
 		y0: n - l.bottom,
 		x1: t - l.right,
 		y1: l.top
-	}, d = e.flatMap((e) => (e.data || []).map((e) => Number(e.x))).filter(Number.isFinite), f = e.flatMap((e) => (e.data || []).map((e) => Number(e.y))).filter(Number.isFinite), p = o || [Math.min(...d), Math.max(...d)], m = s || (a === "log" ? [Math.max(Math.min(...f), 1), Math.max(...f)] : [0, Math.max(...f)]), h = eS({
+	}, d = e.flatMap((e) => (e.data || []).map((e) => Number(e.x))).filter(Number.isFinite), f = e.flatMap((e) => (e.data || []).map((e) => Number(e.y))).filter(Number.isFinite), p = o || [Math.min(...d), Math.max(...d)], m = s || (a === "log" ? [Math.max(Math.min(...f), 1), Math.max(...f)] : [0, Math.max(...f)]), h = sS({
 		domain: p,
 		range: [u.x0, u.x1],
 		type: i
-	}), g = eS({
+	}), g = sS({
 		domain: m,
 		range: [u.y0, u.y1],
 		type: a
@@ -26394,20 +26748,20 @@ function nS({ series: e = [], width: t = 460, height: n = 260, padding: r = {}, 
 		yScale: a,
 		sx: h,
 		sy: g,
-		xTicks: i === "log" ? $x(p[0], p[1]) : Qx(p[0], p[1], c),
-		yTicks: a === "log" ? $x(m[0], m[1]) : Qx(m[0], m[1], c),
+		xTicks: i === "log" ? oS(p[0], p[1]) : aS(p[0], p[1], c),
+		yTicks: a === "log" ? oS(m[0], m[1]) : aS(m[0], m[1], c),
 		points: e.map((e) => ({
 			series: e,
-			pts: tS(e, h, g)
+			pts: cS(e, h, g)
 		}))
 	};
 }
-var rS = (e, t = {}) => {
-	let n = document.createElementNS(Zx, e);
+var uS = (e, t = {}) => {
+	let n = document.createElementNS(iS, e);
 	for (let [e, r] of Object.entries(t)) n.setAttribute(e, String(r));
 	return n;
 };
-function iS(e = {}) {
+function dS(e = {}) {
 	let { xLabel: t = "", yLabel: n = "", legend: r = !0 } = e, i = [
 		$.ACCENT.ihat,
 		$.ACCENT.jhat,
@@ -26417,12 +26771,12 @@ function iS(e = {}) {
 	a.className = "lgr-chart";
 	let o = e.series || [];
 	function s() {
-		let s = nS({
+		let s = lS({
 			...e,
 			series: o
 		});
 		a.replaceChildren();
-		let l = rS("svg", {
+		let l = uS("svg", {
 			viewBox: `0 0 ${s.width} ${s.height}`,
 			preserveAspectRatio: "xMidYMid meet",
 			role: "img",
@@ -26431,7 +26785,7 @@ function iS(e = {}) {
 		l.style.width = "100%", l.style.height = "auto", l.style.display = "block", l.style.fontFamily = $.TYPE.font;
 		for (let e of s.yTicks) {
 			let t = s.sy(e);
-			l.appendChild(rS("line", {
+			l.appendChild(uS("line", {
 				x1: s.plot.x0,
 				y1: t,
 				x2: s.plot.x1,
@@ -26440,7 +26794,7 @@ function iS(e = {}) {
 				"stroke-width": .5,
 				opacity: .5
 			}));
-			let n = rS("text", {
+			let n = uS("text", {
 				x: s.plot.x0 - 6,
 				y: t + 3,
 				"text-anchor": "end",
@@ -26451,7 +26805,7 @@ function iS(e = {}) {
 		}
 		for (let e of s.xTicks) {
 			let t = s.sx(e);
-			l.appendChild(rS("line", {
+			l.appendChild(uS("line", {
 				x1: t,
 				y1: s.plot.y0,
 				x2: t,
@@ -26459,7 +26813,7 @@ function iS(e = {}) {
 				stroke: $.NEUTRAL.border,
 				"stroke-width": .5
 			}));
-			let n = rS("text", {
+			let n = uS("text", {
 				x: t,
 				y: s.plot.y0 + 15,
 				"text-anchor": "middle",
@@ -26468,14 +26822,14 @@ function iS(e = {}) {
 			});
 			n.textContent = c(e), l.appendChild(n);
 		}
-		if (l.appendChild(rS("line", {
+		if (l.appendChild(uS("line", {
 			x1: s.plot.x0,
 			y1: s.plot.y0,
 			x2: s.plot.x1,
 			y2: s.plot.y0,
 			stroke: $.NEUTRAL.border,
 			"stroke-width": 1
-		})), l.appendChild(rS("line", {
+		})), l.appendChild(uS("line", {
 			x1: s.plot.x0,
 			y1: s.plot.y0,
 			x2: s.plot.x0,
@@ -26483,7 +26837,7 @@ function iS(e = {}) {
 			stroke: $.NEUTRAL.border,
 			"stroke-width": 1
 		})), t) {
-			let e = rS("text", {
+			let e = uS("text", {
 				x: (s.plot.x0 + s.plot.x1) / 2,
 				y: s.height - 4,
 				"text-anchor": "middle",
@@ -26494,7 +26848,7 @@ function iS(e = {}) {
 			e.textContent = t.toUpperCase(), l.appendChild(e);
 		}
 		if (n) {
-			let e = rS("text", {
+			let e = uS("text", {
 				x: 10,
 				y: (s.plot.y0 + s.plot.y1) / 2,
 				"text-anchor": "middle",
@@ -26507,7 +26861,7 @@ function iS(e = {}) {
 		}
 		if (s.points.forEach(({ series: e, pts: t }, n) => {
 			let r = e.color || i[n % i.length];
-			if (e.type === "scatter") for (let n of t) l.appendChild(rS("circle", {
+			if (e.type === "scatter") for (let n of t) l.appendChild(uS("circle", {
 				cx: n.x,
 				cy: n.y,
 				r: e.size || 3,
@@ -26517,7 +26871,7 @@ function iS(e = {}) {
 			}));
 			else {
 				let n = t.map((e, t) => `${t ? "L" : "M"}${e.x.toFixed(2)},${e.y.toFixed(2)}`).join(" ");
-				l.appendChild(rS("path", {
+				l.appendChild(uS("path", {
 					d: n,
 					fill: "none",
 					stroke: r,
@@ -26531,8 +26885,8 @@ function iS(e = {}) {
 			o.forEach((a, o) => {
 				let c = a.color || i[o % i.length], u = a.label || `series ${o + 1}`, d = 12 + u.length * 5 + 14;
 				e + d > r && e > s.plot.x0 && (e = s.plot.x0, t += 12, n++);
-				let f = rS("g", {});
-				f.appendChild(rS("rect", {
+				let f = uS("g", {});
+				f.appendChild(uS("rect", {
 					x: e,
 					y: t - 6,
 					width: 8,
@@ -26540,7 +26894,7 @@ function iS(e = {}) {
 					fill: c,
 					rx: 1
 				}));
-				let p = rS("text", {
+				let p = uS("text", {
 					x: e + 12,
 					y: t + 1,
 					fill: $.NEUTRAL.text,
@@ -26565,7 +26919,7 @@ function iS(e = {}) {
 		setSeries: l,
 		dispose: u,
 		get layout() {
-			return nS({
+			return lS({
 				...e,
 				series: o
 			});
@@ -26574,12 +26928,12 @@ function iS(e = {}) {
 }
 //#endregion
 //#region src/step-panel.js
-function aS({ kind: e, input: t, target: n, reducedMotion: r = !1, secondsPerStep: i = .65 } = {}) {
-	let a = Gx[e];
-	if (!a) throw Error(`createStepPanel: unknown algorithm "${e}" (have: ${Object.keys(Gx).join(", ")})`);
+function fS({ kind: e, input: t, target: n, reducedMotion: r = !1, secondsPerStep: i = .65 } = {}) {
+	let a = Qx[e];
+	if (!a) throw Error(`createStepPanel: unknown algorithm "${e}" (have: ${Object.keys(Qx).join(", ")})`);
 	let o = Vf(Array.isArray(t) && t.length ? t.slice() : a.defaultInput.slice()), s = e === "binary-search" ? { target: n ?? a.defaultTarget } : {};
 	a.run(o, s);
-	let c = o.getOps(), l = o.getKeyframes(), u = zx(c), d = Hf(o, { secondsPerStep: i }), f = document.createElement("div");
+	let c = o.getOps(), l = o.getKeyframes(), u = Kx(c), d = Hf(o, { secondsPerStep: i }), f = document.createElement("div");
 	f.className = "lgr-step-panel";
 	let p = document.createElement("div");
 	p.className = "lgr-step-cells";
@@ -26655,7 +27009,7 @@ function aS({ kind: e, input: t, target: n, reducedMotion: r = !1, secondsPerSte
 		});
 		for (let [e, t] of [...b.children].entries()) t.dataset.on = i && x[i.type] === e ? "1" : "";
 		y.value = String(e);
-		let a = zx(c.slice(0, e));
+		let a = Kx(c.slice(0, e));
 		g.textContent = `step ${e} / ${c.length} · ${a.compare} compares · ${a.swap} swaps · ${a.get} reads` + (u.set ? ` · ${a.set || 0} writes` : "") + (e >= c.length ? ` — done: ${u.work} operations of work` : "");
 	}
 	d.onUpdate((e) => w(e)), w(0);
@@ -26682,7 +27036,7 @@ function aS({ kind: e, input: t, target: n, reducedMotion: r = !1, secondsPerSte
 }
 //#endregion
 //#region src/graph-clusters.js
-function oS(e, t = (e) => e.kind) {
+function pS(e, t = (e) => e.kind) {
 	let n = e && Array.isArray(e.nodes) ? e.nodes : [], r = /* @__PURE__ */ new Map(), i = [];
 	for (let e of n) {
 		if (!e || !e.id) continue;
@@ -26703,22 +27057,22 @@ function oS(e, t = (e) => e.kind) {
 		unclustered: i.slice().sort()
 	};
 }
-function sS(e) {
+function mS(e) {
 	let t = /* @__PURE__ */ new Map();
 	for (let n of e) for (let e of n.memberIds) t.set(e, n.key);
 	return t;
 }
-function cS(e, t) {
+function hS(e, t) {
 	for (let n of t) if (n.memberIds.includes(e)) return n;
 	return null;
 }
-function lS(e, t) {
+function gS(e, t) {
 	let n = t.find((t) => t.id === e);
 	if (n) return n.memberIds.slice();
-	let r = cS(e, t);
+	let r = hS(e, t);
 	return r ? r.memberIds.slice() : [];
 }
-function uS(e, t, { mode: n = "mean" } = {}) {
+function _S(e, t, { mode: n = "mean" } = {}) {
 	let r = /* @__PURE__ */ new Map();
 	for (let i of e) {
 		let e = 0, a = 0, o = 0, s = 0, c = 0, l = 0;
@@ -26762,7 +27116,7 @@ function uS(e, t, { mode: n = "mean" } = {}) {
 	}
 	return r;
 }
-function dS(e, t, { hubKey: n = "hub", gap: r = .6, order: i = null } = {}) {
+function vS(e, t, { hubKey: n = "hub", gap: r = .6, order: i = null } = {}) {
 	let a = e.find((e) => e.key === n) || null, o = e.filter((e) => e !== a), s = i ? o.slice().sort((e, t) => i.indexOf(e.key) - i.indexOf(t.key)) : o.slice().sort((e, t) => e.key < t.key ? -1 : 1), c = /* @__PURE__ */ new Map(), l = s.length;
 	if (a && c.set(a.id, {
 		x: 0,
@@ -26784,8 +27138,8 @@ function dS(e, t, { hubKey: n = "hub", gap: r = .6, order: i = null } = {}) {
 		});
 	}), c;
 }
-function fS(e, t) {
-	let n = sS(t), r = /* @__PURE__ */ new Map(), i = /* @__PURE__ */ new Map();
+function yS(e, t) {
+	let n = mS(t), r = /* @__PURE__ */ new Map(), i = /* @__PURE__ */ new Map();
 	for (let e of t) i.set(e.key, 0);
 	for (let t of e && Array.isArray(e.edges) ? e.edges : []) {
 		if (!t) continue;
@@ -26811,8 +27165,8 @@ function fS(e, t) {
 		internal: i
 	};
 }
-function pS(e, t, { hasMedia: n = () => !1, worstState: r = null } = {}) {
-	let i = new Map((e.nodes || []).map((e) => [e.id, e])), { edges: a } = fS(e, t);
+function bS(e, t, { hasMedia: n = () => !1, worstState: r = null } = {}) {
+	let i = new Map((e.nodes || []).map((e) => [e.id, e])), { edges: a } = yS(e, t);
 	return {
 		v: 1,
 		nodes: t.map((e) => {
@@ -26840,20 +27194,20 @@ function pS(e, t, { hasMedia: n = () => !1, worstState: r = null } = {}) {
 		edges: a
 	};
 }
-var mS = Object.freeze({
+var xS = Object.freeze({
 	detailIn: 10.5,
 	detailOut: 11.8,
 	overviewIn: 15,
 	overviewOut: 13.5
 });
-function hS(e, t = null, n = {}) {
+function SS(e, t = null, n = {}) {
 	let { detailIn: r, detailOut: i, overviewIn: a, overviewOut: o } = {
-		...mS,
+		...xS,
 		...n
 	};
 	return t === "detail" ? e > i ? e >= a ? "overview" : "focus" : "detail" : t === "overview" ? e < o ? e <= r ? "detail" : "focus" : "overview" : e <= r ? "detail" : e >= a ? "overview" : "focus";
 }
-function gS(e, t = {
+function CS(e, t = {
 	x: 0,
 	z: 0
 }) {
@@ -26864,7 +27218,7 @@ function gS(e, t = {
 	}
 	return n;
 }
-function _S({ state: e, clusters: t, centroids: n, target: r }) {
+function wS({ state: e, clusters: t, centroids: n, target: r }) {
 	let i = /* @__PURE__ */ new Set(), a = /* @__PURE__ */ new Set(), o = [];
 	if (e === "detail") {
 		for (let e of t) {
@@ -26885,7 +27239,7 @@ function _S({ state: e, clusters: t, centroids: n, target: r }) {
 			expanded: o
 		};
 	}
-	let s = gS(n, r);
+	let s = CS(n, r);
 	for (let e of t) if (e.id === s) {
 		o.push(e.key);
 		for (let t of e.memberIds) i.add(t);
@@ -26898,8 +27252,8 @@ function _S({ state: e, clusters: t, centroids: n, target: r }) {
 }
 //#endregion
 //#region src/tree-layout.js
-var vS = (e) => e ? Array.isArray(e.children) ? e.children.filter(Boolean) : [e.left, e.right].filter((e) => e != null) : [];
-function yS(e, { childrenOf: t = vS, gapX: n = 1, gapY: r = 1 } = {}) {
+var TS = (e) => e ? Array.isArray(e.children) ? e.children.filter(Boolean) : [e.left, e.right].filter((e) => e != null) : [];
+function ES(e, { childrenOf: t = TS, gapX: n = 1, gapY: r = 1 } = {}) {
 	let i = /* @__PURE__ */ new Map(), a = [];
 	if (!e) return {
 		positions: i,
@@ -26939,20 +27293,20 @@ function yS(e, { childrenOf: t = vS, gapX: n = 1, gapY: r = 1 } = {}) {
 		order: a
 	};
 }
-function bS(e, t = vS) {
+function DS(e, t = TS) {
 	let n = [], r = (e) => {
 		if (e) for (let i of t(e)) n.push([e, i]), r(i);
 	};
 	return r(e), n;
 }
-function xS(e, t = vS) {
+function OS(e, t = TS) {
 	if (!e) return -1;
 	let n = t(e);
-	return n.length ? 1 + Math.max(...n.map((e) => xS(e, t))) : 0;
+	return n.length ? 1 + Math.max(...n.map((e) => OS(e, t))) : 0;
 }
 //#endregion
 //#region src/data-structures.js
-function SS(e, t) {
+function kS(e, t) {
 	if (!e) return {
 		key: t,
 		left: null,
@@ -26970,12 +27324,12 @@ function SS(e, t) {
 		n = n[r];
 	}
 }
-function CS(e) {
+function AS(e) {
 	let t = null;
-	for (let n of e) t = SS(t, n);
+	for (let n of e) t = kS(t, n);
 	return t;
 }
-function wS(e, t) {
+function jS(e, t) {
 	let n = e;
 	for (; n;) {
 		if (t === n.key) return !0;
@@ -26983,13 +27337,13 @@ function wS(e, t) {
 	}
 	return !1;
 }
-function TS(e) {
+function MS(e) {
 	let t = [], n = (e) => {
 		e && (n(e.left), t.push(e.key), n(e.right));
 	};
 	return n(e), t;
 }
-function ES(e, { inserts: t = [], target: n = null } = {}) {
+function NS(e, { inserts: t = [], target: n = null } = {}) {
 	let r = null, i = 0, a = /* @__PURE__ */ new Map(), o = (e) => {
 		let t = {
 			id: i++,
@@ -27039,7 +27393,7 @@ function ES(e, { inserts: t = [], target: n = null } = {}) {
 		comparisons: e.getOps().filter((e) => e.type === "compare").length
 	};
 }
-function DS(e, t) {
+function PS(e, t) {
 	let n = e, r = 0;
 	for (; n;) {
 		if (r++, t === n.key) return r;
@@ -27047,7 +27401,7 @@ function DS(e, t) {
 	}
 	return r;
 }
-function OS(e) {
+function FS(e) {
 	let t = [], n = (e, r) => {
 		if (e > r) return;
 		let i = e + r >> 1;
@@ -27055,10 +27409,10 @@ function OS(e) {
 	};
 	return n(0, e - 1), t;
 }
-function kS(e) {
+function IS(e) {
 	return Array.from({ length: e }, (e, t) => t + 1);
 }
-function AS(e = [
+function LS(e = [
 	8,
 	16,
 	32,
@@ -27069,10 +27423,10 @@ function AS(e = [
 	let t = (e) => e, n = [], r = [], i = [];
 	for (let a of e) n.push({
 		x: a,
-		y: DS(CS(OS(a)), t(a))
+		y: PS(AS(FS(a)), t(a))
 	}), r.push({
 		x: a,
-		y: DS(CS(kS(a)), t(a))
+		y: PS(AS(IS(a)), t(a))
 	}), i.push({
 		x: a,
 		y: a
@@ -27084,39 +27438,39 @@ function AS(e = [
 		sizes: e
 	};
 }
-var jS = (e) => e - 1 >> 1, MS = (e) => 2 * e + 1, NS = (e) => 2 * e + 2;
-function PS(e, t = e.length) {
-	for (let n = 0; n < t; n++) for (let r of [MS(n), NS(n)]) if (r < t && e[r] < e[n]) return !1;
+var RS = (e) => e - 1 >> 1, zS = (e) => 2 * e + 1, BS = (e) => 2 * e + 2;
+function VS(e, t = e.length) {
+	for (let n = 0; n < t; n++) for (let r of [zS(n), BS(n)]) if (r < t && e[r] < e[n]) return !1;
 	return !0;
 }
-function FS(e, t) {
+function HS(e, t) {
 	e.push(t);
 	let n = e.length - 1;
-	for (; n > 0 && e[n] < e[jS(n)];) {
-		let t = jS(n);
+	for (; n > 0 && e[n] < e[RS(n)];) {
+		let t = RS(n);
 		[e[n], e[t]] = [e[t], e[n]], n = t;
 	}
 	return e;
 }
-function IS(e) {
+function US(e) {
 	if (!e.length) return;
 	let t = e[0], n = e.pop();
 	if (e.length) {
 		e[0] = n;
 		let t = 0;
 		for (;;) {
-			let n = MS(t), r = NS(t), i = t;
+			let n = zS(t), r = BS(t), i = t;
 			if (n < e.length && e[n] < e[i] && (i = n), r < e.length && e[r] < e[i] && (i = r), i === t) break;
 			[e[t], e[i]] = [e[i], e[t]], t = i;
 		}
 	}
 	return t;
 }
-function LS(e, { inserts: t = [], extracts: n = 0 } = {}) {
+function WS(e, { inserts: t = [], extracts: n = 0 } = {}) {
 	let r = 0, i = (t) => {
 		let n = t;
 		for (; n > 0;) {
-			let t = jS(n);
+			let t = RS(n);
 			if (e.mark(n, "visit"), !e.compare(n, t)) {
 				e.mark(n, "settled");
 				break;
@@ -27127,7 +27481,7 @@ function LS(e, { inserts: t = [], extracts: n = 0 } = {}) {
 	}, a = () => {
 		let t = 0;
 		for (;;) {
-			let n = MS(t), i = NS(t), a = t;
+			let n = zS(t), i = BS(t), a = t;
 			if (e.mark(t, "visit"), n < r && e.compare(n, a) && (a = n), i < r && e.compare(i, a) && (a = i), a === t) {
 				e.mark(t, "settled");
 				break;
@@ -27143,13 +27497,13 @@ function LS(e, { inserts: t = [], extracts: n = 0 } = {}) {
 		size: r
 	};
 }
-function RS(e) {
+function GS(e) {
 	let t = 0, n = [];
 	for (let r of e) {
 		n.push(r);
 		let e = n.length - 1;
-		for (; e > 0 && (t++, n[e] < n[jS(e)]);) {
-			let t = jS(e);
+		for (; e > 0 && (t++, n[e] < n[RS(e)]);) {
+			let t = RS(e);
 			[n[e], n[t]] = [n[t], n[e]], e = t;
 		}
 	}
@@ -27161,7 +27515,7 @@ function RS(e) {
 		n[0] = e;
 		let i = 0;
 		for (;;) {
-			let e = MS(i), r = NS(i), a = i;
+			let e = zS(i), r = BS(i), a = i;
 			if (e < n.length && (t++, n[e] < n[a] && (a = e)), r < n.length && (t++, n[r] < n[a] && (a = r)), a === i) break;
 			[n[i], n[a]] = [n[a], n[i]], i = a;
 		}
@@ -27171,11 +27525,11 @@ function RS(e) {
 		comparisons: t
 	};
 }
-var zS = {
+var KS = {
 	"binary-heap": {
 		label: "Binary min-heap",
 		panel: "heap",
-		run: LS,
+		run: WS,
 		complexity: {
 			op: {
 				label: "O(log n) — insert / extract-min",
@@ -27212,7 +27566,7 @@ var zS = {
 	"binary-search-tree": {
 		label: "Binary search tree",
 		panel: "tree",
-		run: ES,
+		run: NS,
 		complexity: {
 			balanced: {
 				label: "O(log n) — balanced",
@@ -27246,12 +27600,12 @@ var zS = {
 			"  return NOT_FOUND;"
 		]
 	}
-}, BS = "http://www.w3.org/2000/svg", VS = (e, t = {}) => {
-	let n = document.createElementNS(BS, e);
+}, qS = "http://www.w3.org/2000/svg", JS = (e, t = {}) => {
+	let n = document.createElementNS(qS, e);
 	for (let [e, r] of Object.entries(t)) n.setAttribute(e, String(r));
 	return n;
 };
-function HS(e) {
+function YS(e) {
 	if (e <= 0) return null;
 	let t = Array.from({ length: e }, (e, t) => ({
 		id: t,
@@ -27265,24 +27619,24 @@ function HS(e) {
 	}
 	return t[0];
 }
-function US({ kind: e = "binary-search-tree", inserts: t, target: n, extracts: r, reducedMotion: i = !1, secondsPerStep: a = .62 } = {}) {
-	let o = zS[e];
-	if (!o) throw Error(`createTreePanel: unknown structure "${e}" (have: ${Object.keys(zS).join(", ")})`);
+function XS({ kind: e = "binary-search-tree", inserts: t, target: n, extracts: r, reducedMotion: i = !1, secondsPerStep: a = .62 } = {}) {
+	let o = KS[e];
+	if (!o) throw Error(`createTreePanel: unknown structure "${e}" (have: ${Object.keys(KS).join(", ")})`);
 	let s = Array.isArray(t) && t.length ? t.slice() : o.defaultInserts.slice(), c = n ?? o.defaultTarget, l = o.panel === "heap", u = Vf(l ? Array(s.length).fill(null) : []), d = l ? {
 		inserts: s,
 		extracts: r ?? o.defaultExtracts ?? 0
 	} : {
 		inserts: s,
 		target: c
-	}, f = o.run(u, d), p = l ? HS(s.length) : f.root, m = u.getOps(), h = u.getKeyframes(), g = Hf(u, { secondsPerStep: a }), _ = yS(p, {
+	}, f = o.run(u, d), p = l ? YS(s.length) : f.root, m = u.getOps(), h = u.getKeyframes(), g = Hf(u, { secondsPerStep: a }), _ = ES(p, {
 		gapX: 1,
 		gapY: 1
-	}), v = bS(p), y = xS(p), b = {
+	}), v = DS(p), y = OS(p), b = {
 		x: 26,
 		y: 24
 	}, x = _.width * 44 + b.x * 2, S = _.height * 56 + b.y * 2, C = document.createElement("div");
 	C.className = "lgr-tree-panel";
-	let w = VS("svg", {
+	let w = JS("svg", {
 		viewBox: `0 0 ${x} ${S}`,
 		role: "img",
 		"aria-label": "binary search tree"
@@ -27296,7 +27650,7 @@ function US({ kind: e = "binary-search-tree", inserts: t, target: n, extracts: r
 		};
 	}, E = /* @__PURE__ */ new Map();
 	for (let [e, t] of v) {
-		let n = T(e), r = T(t), i = VS("line", {
+		let n = T(e), r = T(t), i = JS("line", {
 			x1: n.x,
 			y1: n.y,
 			x2: r.x,
@@ -27309,14 +27663,14 @@ function US({ kind: e = "binary-search-tree", inserts: t, target: n, extracts: r
 	}
 	let D = /* @__PURE__ */ new Map(), O = /* @__PURE__ */ new Map();
 	for (let [e] of _.positions) {
-		let t = T(e), n = VS("g", {}), r = VS("circle", {
+		let t = T(e), n = JS("g", {}), r = JS("circle", {
 			cx: t.x,
 			cy: t.y,
 			r: 15,
 			fill: $.NEUTRAL.surface,
 			stroke: $.NEUTRAL.border,
 			"stroke-width": 1.5
-		}), i = VS("text", {
+		}), i = JS("text", {
 			x: t.x,
 			y: t.y + 4,
 			"text-anchor": "middle",
@@ -27422,7 +27776,7 @@ function US({ kind: e = "binary-search-tree", inserts: t, target: n, extracts: r
 		F.value = String(e);
 		let u = m.slice(0, e).filter((e) => e.type === "compare").length, d = t.size;
 		if (l) {
-			let t = m.slice(0, e).filter((e) => e.type === "get").map((e) => e.value), n = h[Math.min(e, h.length - 1)].arr, r = n[0], i = PS(n.filter((e) => e != null));
+			let t = m.slice(0, e).filter((e) => e.type === "get").map((e) => e.value), n = h[Math.min(e, h.length - 1)].arr, r = n[0], i = VS(n.filter((e) => e != null));
 			A.textContent = `step ${e} / ${m.length} · ${d} in the heap · ${u} comparisons` + (r == null ? "" : i ? ` · root = ${r} — the minimum, read in O(1)` : ` · root = ${r} — mid-sift: the invariant is BROKEN right now, and the sift is what repairs it`) + (t.length ? ` · pulled: ${t.join(" → ")}` : "");
 		} else A.textContent = `step ${e} / ${m.length} · ${d}/${s.length} nodes · ${u} comparisons` + (r ? ` — ${c} is NOT in the tree (the walk fell off the bottom)` : "") + (e >= m.length && !r ? ` — found ${c} · depth ${y} · a balanced tree of ${s.length} would need ~${Math.floor(Math.log2(s.length)) + 1}` : "");
 	}
@@ -27450,4 +27804,4 @@ function US({ kind: e = "binary-search-tree", inserts: t, target: n, extracts: r
 	};
 }
 //#endregion
-export { Gx as ALGORITHMS, db as ALGORITHM_KINDS, Ph as ASTRONOMY_CREDITS, ps as ATMOS_MM, gr as ATV_PROFILE, Pr as BIKE_PROFILE, lo as BIOMES, Ar as BIRD_PROFILE, Or as BOAT_PROFILE, bm as BORTLE_MAX, ym as BORTLE_MIN, Sl as BUNDLE_FORMAT, Cl as BUNDLE_VERSION, Ge as CAM, Uf as CELL_COLORS, lc as CITY_LOOKS, sc as CITY_SURFACES, cm as CLOUD_TIERS, yr as CRAFT_PROFILE, il as DECREPIT_TOWERS, bb as DEEP_CHARS, Db as DEFAULT_RINGS, kt as ERA_ORDER, Ot as ERA_PRESETS, mm as EffectComposer, Mr as FISH_PROFILE, Gs as FORGE_MIN_TEXELS, ib as GRAPH_SPEC_VERSION, Lr as GRAPPLE_PROFILE, fs as GROUND_MM, vb as HEAT_TAU_DAYS, rc as HOARD_SURFACES, ab as KINDS, Rn as LAYOUT, t_ as LAYOUT_ANCHORS, xm as LA_BORTLE, jt as LGR_PALETTES, Sb as MEDIA_GLYPHS, _m as OutputPass, Fm as PLANET_KEYS, mo as PRESET_KEYS, En as PROFILES, Dn as PROFILE_KEYS, Mc as RECIPE_BIOMES, ob as RELS, eb as RISO_INKS, Er as ROAD_PROFILE, hm as RenderPass, At as SCENE_ERA_ORDER, nf as SCENE_SPEC_VERSION, Fn as SEABED, xp as SIM_DEFAULTS, sb as SLOW_MS, qx as SORT_KINDS, pb as STATES, zS as STRUCTURES, po as TERRAIN_PRESETS, $ as THEME, Cd as THEMES, e as THREE, Ih as TREE_KIT_VARIANTS, Pf as TRICK_PROFILE, fl as URBAN_ERAS, Gt as VEC_FRAG_PARS, Wt as VEC_VERT_MAIN, Ut as VEC_VERT_PARS, kl as VIDEO_TYPES, ic as WEAPON_SKINS, nu as ZOMBIE_LOOP_ONCE, tu as ZOMBIE_STATES, mS as ZOOM_DEFAULTS, fS as aggregateEdges, Of as airtimeForFlip, Ve as angleDelta, Zc as applyGlint, Yc as applyGroundMacro, Xl as applyLook, hf as applySceneSpec, Mp as applyStreetGrid, wd as applyThemeToRoot, Lh as assignTreeVariants, Kt as attachVectorUniforms, wc as autoFrame, OS as balancedKeys, Dc as bankAngleFromCurvature, Vx as binarySearch, wS as bstContains, CS as bstFromKeys, TS as bstInOrder, SS as bstInsert, DS as bstSearchCost, Bx as bubbleSort, Og as buildChapterChain, al as buildDecrepitProfile, Qn as buildGraph, Fb as buildGraphSpec, ol as buildIntactProfile, Xo as buildLakeGroup, Dl as buildManifest, Bo as buildScatterGroup, So as buildTerrainMesh, Ke as cameraNearRadius, Ir as carryMomentum, Gy as carveCityPads, nS as chartLayout, ml as cityProfileFromUrban, rl as citySolidsToObstacles, Y as clamp, cb as classifyHealth, xb as classifyMedia, oS as clusterBy, uS as clusterCentroids, sS as clusterIndex, lS as clusterMembersOf, cS as clusterOfNode, Qg as computeNineSliceLayout, Xg as computeTextLayout, zx as countOps, Kg as create2DLayer, Gg as create2DPicking, hg as createAgentRng, mg as createAgentSim, $l as createAimReticle, Jy as createAmbientBed, Ox as createAmbientScheduler, iu as createAnimStateMachine, md as createAppShell, Vp as createAtmosphereGrade, qy as createAudioBus, iv as createAurora, Kh as createBallistics, d_ as createBeautyPresenter, Vy as createBeforeAfter, Nf as createBikeGlbMesh, jf as createBikeMesh, Fr as createBikeModel, jr as createBirdModel, kr as createBoatModel, eg as createBoxArena, A_ as createBuildIn, D_ as createCameraDirector, Ec as createCameraPath, ct as createCameraRig, Pl as createCapture, Qo as createCatalog, wy as createCathedralLight, py as createCaustics, um as createCelestial, zs as createCelestials, Wf as createCellField, Jh as createCharacterController, ug as createCharacterHorde, cd as createCharacterRig, iS as createChart, Un as createCity, $n as createCityLife, xc as createCityWorld, ya as createCloudField, wa as createCockpit, Bs as createColliderWorld, Z_ as createConstellation, uh as createConstellations, qf as createContactShadows, Jf as createCorpsePool, gg as createCrowdTiers, bp as createDebugOverlay, lg as createDecals, Cf as createDevMode, Xf as createDiveController, z_ as createDuskSilk, q_ as createEdgeField, ro as createEditor, Sc as createEngine, bn as createEngineCore, Tt as createEngineProfiler, Ny as createFirstLight, qh as createFirstPersonWalker, Nr as createFishModel, Gh as createFlowField, qc as createForest, Qc as createGlintMaterial, Yg as createGlyphAtlas, Wp as createGodRays, Px as createGraphAmbient, Ex as createGraphAtmosphere, bx as createGraphLabels, kb as createGraphLayout, Cp as createGraphSim, gx as createGraphView, Rr as createGrappleModel, vr as createGroundModel, Bf as createGyroLook, Eg as createHeroBody, f_ as createHeroDirector, v_ as createHeroWipe, Jn as createHiddenProp, ms as createHillaireSky, Hl as createHints, $f as createIndirectField, Sa as createInspector, ha as createLandmarkFactory, Yv as createLattice, yy as createLetterpress, ty as createLiquidMetal, cy as createLivingInk, Yl as createLockMarker, Uy as createLookReel, Uv as createMaterialStudy, Gd as createMatrixGrid, Nh as createMessier, Kp as createMilkyWay, Ed as createMorphTimeline, Mf as createMotoChaseCam, Af as createMotoTerrain, $g as createNineSlicePanel, yv as createObservatory, op as createParticles, ld as createPedestrians, Hr as createPilotController, jv as createPixelMorph, za as createPlacedLife, eu as createPointerLockAim, Xy as createPositionalField, cv as createProductMoment, vf as createProductStage, Gn as createProximityLatch, Dt as createQualityGovernor, Nl as createRecorder, rb as createRiso, Dr as createRoadModel, Qy as createRotor, Jo as createScatter, Tf as createSceneTransition, Dg as createScrollDirector, Ig as createScrollNarrative, dr as createSeatedLook, sp as createSfxKit, j_ as createShadowRig, Lg as createShelfPacker, rs as createSkyAtmosphere, Vg as createSlotAllocator, s_ as createSmoothScroll, bh as createSolarSystem, Tr as createSpacecraftModel, ir as createSpriteAnim, Ug as createSpriteBatcher, aS as createStepPanel, Pp as createStreetKit, rr as createStreetLights, Lp as createStreetPlaces, St as createSunRig, Gl as createTargetLock, Co as createTerrainSampler, Zg as createTextBlock, Rg as createTextureAtlas, Js as createTextureForge, lp as createTorchLight, Ul as createTouchControls, Hf as createTracePlayer, Vf as createTracer, Hh as createTreeKit, US as createTreePanel, Lf as createTrickScorer, kp as createTriplanarForgeMaterial, ah as createTrueStars, tf as createTween, Rl as createViewerUI, lm as createVolumetricClouds, Ya as createWaterFlow, Jr as createWaterLife, ll as createWaterSurface, vp as createWeaponKit, _a as createWeatherRig, _l as createWorldFromRecipe, Zo as createWorldLakes, J as damp, Oc as defaultRecipe, kS as degenerateKeys, nl as deriveHarvest, xl as describeVocabulary, Yo as detectLakes, Ky as dirtyMeshesFor, Td as easeInOutCubic, Pb as extractExcerpt, jb as extractLinks, Mb as extractMarkdownLinks, kf as flipRampSpec, Vt as fogCharm, uc as forgeCityMaterials, oc as forgeHoardMaterials, pf as fromURLParams, an as fullscreenVert, _g as gaitBlend, vg as gaitName, Eo as generateScatter, ho as generateTerrain, Fh as getAttribution, Gb as getKindColors, Up as godRayVisibility, Tb as hasMedia, Vh as hashTreeInstances, PS as heapIsValid, IS as heapPop, FS as heapPush, Wx as heapSort, RS as heapSortCost, yb as heatFromAgeDays, yg as heroPose, Eb as indexNodes, El as isVersionCompatible, Ef as jumpableWavelength, Df as launchSpeed, n_ as layoutBox, Dx as lcg, Sm as limitingMagnitude, or as loadSpriteSheet, $x as logTicks, mt as lowSunWashK, Yx as makeCaseInput, ur as makeContactShadow, Mt as makePaletteTexture, Hn as makePalm, eS as makeScale, zh as makeTreeTints, mr as makeVignette, Rf as mapGyroToLook, AS as measureBST, Cc as measureBounds, Kx as measureComplexity, Cb as mediaGlyph, wb as mediaGlyphCode, Nt as medianCut, jc as mergeRecipes, Hx as mergeSort, xn as mulberry32, gS as nearestCluster, Qx as niceTicks, Ac as normalizeRecipe, Nb as noteToRecords, Ks as nyquistFeatureFloor, Ab as parseFrontmatter, Tl as parseVersion, $h as percentileOf, Wn as pickStreetIntersection, Al as pickVideoType, tl as placeCoverBuildings, Bc as placeForest, ip as planSpawn, Hm as planetPosition, wf as postDiveFrag, pn as postPixelkitFrag, Jl as projectToScreen, Ux as quickSort, Xx as raceAlgorithms, pd as readAppFlags, Ag as readChapterChain, wo as rebuildTerrainChunks, bl as recipeFromText, jl as recorderExt, es as registerAssetCatalog, Rx as renderNoteHtml, qs as repeatFor, qo as reprojectScatter, Wl as resolveAimPoint, Lx as scanFileRefs, Wo as scatterAdd, Go as scatterErase, el as scatterProps, $c as scatterRuins, In as seabedY, $o as seedWorldEditorCatalog, tS as seriesToPoints, yn as showWebGLUnsupported, Dm as skyBrightnessSQM, Tm as skyGlow, Am as skyGlowIntensity, Jt as spliceVectorVertex, dS as summaryLayout, pS as summarySpec, Xh as swingableHeight, Zh as swingableRope, Ap as tilesPerUnit, Tn as tintTower, ar as toLuminanceTexture, mf as toURLParams, Qh as topAtPercentile, cp as torchFlicker, ES as traceBST, LS as traceHeap, xS as treeDepth, bS as treeEdges, yS as treeLayout, _b as validateGraphSpec, Ol as validateManifest, ff as validateSceneSpec, xt as validateSunKeyframes, Pt as vectorOn, Lt as vectorShadow, It as vectorTint, Qt as vectorize, Zt as vectorizeTower, _S as visibleSet, zt as weatherCloud, Bt as weatherCloudOff, Ht as weatherSeason, Rt as weatherSnow, ub as worstState, hS as zoomState };
+export { Qx as ALGORITHMS, vb as ALGORITHM_KINDS, Ph as ASTRONOMY_CREDITS, ps as ATMOS_MM, gr as ATV_PROFILE, Pr as BIKE_PROFILE, lo as BIOMES, Ar as BIRD_PROFILE, Or as BOAT_PROFILE, bm as BORTLE_MAX, ym as BORTLE_MIN, Sl as BUNDLE_FORMAT, Cl as BUNDLE_VERSION, Ge as CAM, Uf as CELL_COLORS, lc as CITY_LOOKS, sc as CITY_SURFACES, cm as CLOUD_TIERS, yr as CRAFT_PROFILE, il as DECREPIT_TOWERS, Db as DEEP_CHARS, Pb as DEFAULT_RINGS, kt as ERA_ORDER, Ot as ERA_PRESETS, mm as EffectComposer, Mr as FISH_PROFILE, Gs as FORGE_MIN_TEXELS, db as GRAPH_SPEC_VERSION, Lr as GRAPPLE_PROFILE, fs as GROUND_MM, Tb as HEAT_TAU_DAYS, rc as HOARD_SURFACES, fb as KINDS, Rn as LAYOUT, t_ as LAYOUT_ANCHORS, xm as LA_BORTLE, jt as LGR_PALETTES, kb as MEDIA_GLYPHS, _m as OutputPass, Fm as PLANET_KEYS, mo as PRESET_KEYS, En as PROFILES, Dn as PROFILE_KEYS, Mc as RECIPE_BIOMES, pb as RELS, sb as RISO_INKS, Er as ROAD_PROFILE, hm as RenderPass, At as SCENE_ERA_ORDER, nf as SCENE_SPEC_VERSION, Fn as SEABED, xp as SIM_DEFAULTS, mb as SLOW_MS, eS as SORT_KINDS, bb as STATES, KS as STRUCTURES, po as TERRAIN_PRESETS, $ as THEME, Cd as THEMES, e as THREE, Ih as TREE_KIT_VARIANTS, Pf as TRICK_PROFILE, Jy as UNASSIGNED, fl as URBAN_ERAS, Gt as VEC_FRAG_PARS, Wt as VEC_VERT_MAIN, Ut as VEC_VERT_PARS, kl as VIDEO_TYPES, ic as WEAPON_SKINS, nu as ZOMBIE_LOOP_ONCE, tu as ZOMBIE_STATES, xS as ZOOM_DEFAULTS, yS as aggregateEdges, Of as airtimeForFlip, Ve as angleDelta, Zc as applyGlint, Yc as applyGroundMacro, Xl as applyLook, hf as applySceneSpec, Mp as applyStreetGrid, wd as applyThemeToRoot, Lh as assignTreeVariants, Kt as attachVectorUniforms, wc as autoFrame, FS as balancedKeys, Dc as bankAngleFromCurvature, Jx as binarySearch, jS as bstContains, AS as bstFromKeys, MS as bstInOrder, kS as bstInsert, PS as bstSearchCost, qx as bubbleSort, Og as buildChapterChain, al as buildDecrepitProfile, Qn as buildGraph, Hb as buildGraphSpec, ol as buildIntactProfile, Xo as buildLakeGroup, Dl as buildManifest, Bo as buildScatterGroup, So as buildTerrainMesh, Ke as cameraNearRadius, Ir as carryMomentum, Gy as carveCityPads, lS as chartLayout, ml as cityProfileFromUrban, rl as citySolidsToObstacles, Y as clamp, hb as classifyHealth, Ob as classifyMedia, pS as clusterBy, _S as clusterCentroids, mS as clusterIndex, gS as clusterMembersOf, hS as clusterOfNode, Qg as computeNineSliceLayout, Xg as computeTextLayout, Kx as countOps, Kg as create2DLayer, Gg as create2DPicking, hg as createAgentRng, mg as createAgentSim, $l as createAimReticle, tb as createAmbientBed, Fx as createAmbientScheduler, iu as createAnimStateMachine, md as createAppShell, Vp as createAtmosphereGrade, eb as createAudioBus, iv as createAurora, Kh as createBallistics, d_ as createBeautyPresenter, Vy as createBeforeAfter, Nf as createBikeGlbMesh, jf as createBikeMesh, Fr as createBikeModel, jr as createBirdModel, kr as createBoatModel, eg as createBoxArena, A_ as createBuildIn, D_ as createCameraDirector, Ec as createCameraPath, ct as createCameraRig, Pl as createCapture, Qo as createCatalog, wy as createCathedralLight, py as createCaustics, um as createCelestial, zs as createCelestials, Wf as createCellField, Jh as createCharacterController, ug as createCharacterHorde, cd as createCharacterRig, dS as createChart, Un as createCity, $n as createCityLife, xc as createCityWorld, ya as createCloudField, wa as createCockpit, Bs as createColliderWorld, Z_ as createConstellation, uh as createConstellations, qf as createContactShadows, Jf as createCorpsePool, gg as createCrowdTiers, bp as createDebugOverlay, lg as createDecals, Cf as createDevMode, Xf as createDiveController, z_ as createDuskSilk, q_ as createEdgeField, ro as createEditor, Sc as createEngine, bn as createEngineCore, Tt as createEngineProfiler, Ny as createFirstLight, qh as createFirstPersonWalker, Nr as createFishModel, Gh as createFlowField, qc as createForest, Qc as createGlintMaterial, Yg as createGlyphAtlas, Wp as createGodRays, Vx as createGraphAmbient, Nx as createGraphAtmosphere, Dx as createGraphLabels, Ib as createGraphLayout, Cp as createGraphSim, Cx as createGraphView, Rr as createGrappleModel, vr as createGroundModel, Bf as createGyroLook, Eg as createHeroBody, f_ as createHeroDirector, v_ as createHeroWipe, Jn as createHiddenProp, ms as createHillaireSky, Hl as createHints, $f as createIndirectField, Sa as createInspector, ha as createLandmarkFactory, Yv as createLattice, yy as createLetterpress, ty as createLiquidMetal, cy as createLivingInk, Yl as createLockMarker, Uy as createLookReel, Uv as createMaterialStudy, Gd as createMatrixGrid, Nh as createMessier, Kp as createMilkyWay, Ed as createMorphTimeline, Mf as createMotoChaseCam, Af as createMotoTerrain, $g as createNineSlicePanel, yv as createObservatory, op as createParticles, ld as createPedestrians, Hr as createPilotController, jv as createPixelMorph, za as createPlacedLife, eu as createPointerLockAim, rb as createPositionalField, cv as createProductMoment, vf as createProductStage, Gn as createProximityLatch, Dt as createQualityGovernor, Nl as createRecorder, ub as createRiso, Dr as createRoadModel, ab as createRotor, Jo as createScatter, Tf as createSceneTransition, Dg as createScrollDirector, Ig as createScrollNarrative, dr as createSeatedLook, sp as createSfxKit, j_ as createShadowRig, Lg as createShelfPacker, rs as createSkyAtmosphere, Vg as createSlotAllocator, s_ as createSmoothScroll, bh as createSolarSystem, Tr as createSpacecraftModel, ir as createSpriteAnim, Ug as createSpriteBatcher, fS as createStepPanel, Pp as createStreetKit, rr as createStreetLights, Lp as createStreetPlaces, St as createSunRig, Gl as createTargetLock, Co as createTerrainSampler, Zg as createTextBlock, Rg as createTextureAtlas, Js as createTextureForge, lp as createTorchLight, Ul as createTouchControls, Hf as createTracePlayer, Vf as createTracer, Hh as createTreeKit, XS as createTreePanel, Lf as createTrickScorer, kp as createTriplanarForgeMaterial, ah as createTrueStars, tf as createTween, Rl as createViewerUI, lm as createVolumetricClouds, Ya as createWaterFlow, Jr as createWaterLife, ll as createWaterSurface, vp as createWeaponKit, _a as createWeatherRig, _l as createWorldFromRecipe, Zo as createWorldLakes, J as damp, Oc as defaultRecipe, IS as degenerateKeys, nl as deriveHarvest, xl as describeVocabulary, Yo as detectLakes, Ky as dirtyMeshesFor, Td as easeInOutCubic, Vb as extractExcerpt, Rb as extractLinks, zb as extractMarkdownLinks, kf as flipRampSpec, Vt as fogCharm, uc as forgeCityMaterials, oc as forgeHoardMaterials, pf as fromURLParams, an as fullscreenVert, _g as gaitBlend, vg as gaitName, Xy as generateRegions, Eo as generateScatter, ho as generateTerrain, Fh as getAttribution, Qb as getKindColors, Up as godRayVisibility, Mb as hasMedia, Vh as hashTreeInstances, VS as heapIsValid, US as heapPop, HS as heapPush, Zx as heapSort, GS as heapSortCost, Eb as heatFromAgeDays, yg as heroPose, Nb as indexNodes, El as isVersionCompatible, Ef as jumpableWavelength, Df as launchSpeed, n_ as layoutBox, Px as lcg, Sm as limitingMagnitude, or as loadSpriteSheet, oS as logTicks, mt as lowSunWashK, nS as makeCaseInput, ur as makeContactShadow, Mt as makePaletteTexture, Hn as makePalm, sS as makeScale, zh as makeTreeTints, mr as makeVignette, Rf as mapGyroToLook, LS as measureBST, Cc as measureBounds, $x as measureComplexity, Ab as mediaGlyph, jb as mediaGlyphCode, Nt as medianCut, jc as mergeRecipes, Yx as mergeSort, xn as mulberry32, CS as nearestCluster, aS as niceTicks, Ac as normalizeRecipe, Bb as noteToRecords, Ks as nyquistFeatureFloor, Lb as parseFrontmatter, Tl as parseVersion, $h as percentileOf, Wn as pickStreetIntersection, Al as pickVideoType, tl as placeCoverBuildings, Bc as placeForest, ip as planSpawn, Hm as planetPosition, wf as postDiveFrag, pn as postPixelkitFrag, Jl as projectToScreen, Xx as quickSort, rS as raceAlgorithms, pd as readAppFlags, Ag as readChapterChain, wo as rebuildTerrainChunks, bl as recipeFromText, jl as recorderExt, $y as regionAt, Zy as regionReport, es as registerAssetCatalog, Gx as renderNoteHtml, qs as repeatFor, qo as reprojectScatter, Wl as resolveAimPoint, Wx as scanFileRefs, Wo as scatterAdd, Go as scatterErase, el as scatterProps, $c as scatterRuins, In as seabedY, $o as seedWorldEditorCatalog, cS as seriesToPoints, Qy as shapeRegionTerrain, yn as showWebGLUnsupported, Dm as skyBrightnessSQM, Tm as skyGlow, Am as skyGlowIntensity, Jt as spliceVectorVertex, vS as summaryLayout, bS as summarySpec, Xh as swingableHeight, Zh as swingableRope, Ap as tilesPerUnit, Tn as tintTower, ar as toLuminanceTexture, mf as toURLParams, Qh as topAtPercentile, cp as torchFlicker, NS as traceBST, WS as traceHeap, OS as treeDepth, DS as treeEdges, ES as treeLayout, wb as validateGraphSpec, Ol as validateManifest, ff as validateSceneSpec, xt as validateSunKeyframes, Pt as vectorOn, Lt as vectorShadow, It as vectorTint, Qt as vectorize, Zt as vectorizeTower, wS as visibleSet, zt as weatherCloud, Bt as weatherCloudOff, Ht as weatherSeason, Rt as weatherSnow, _b as worstState, SS as zoomState };

@@ -37,7 +37,7 @@ import { attachVertexAO } from './vector-style.js';   // L80: beauty-tier baked 
    point; a sample interpolates the dot-products of the 4 corner gradients with the offset to the point,
    through a quintic fade curve (smooth 1st+2nd derivatives → no creases). Seeded by mulberry32 (the
    same deterministic PRNG citygen uses), so a seed → a byte-identical world. Returns ~[-1, 1]. */
-function makeNoise2D(seed) {
+export function makeNoise2D(seed) {
   const rng = mulberry32(seed >>> 0);
   const p = new Uint8Array(256);
   for (let i = 0; i < 256; i++) p[i] = i;
@@ -61,8 +61,12 @@ function makeNoise2D(seed) {
   };
 }
 
-/* fBm — sum `oct` octaves, frequency ×`lac` and amplitude ×`gain` each step; normalised to ~[-1,1]. */
-function fbm(noise, x, y, oct, lac, gain) {
+/* fBm — sum `oct` octaves, frequency ×`lac` and amplitude ×`gain` each step; normalised to ~[-1,1].
+   EXPORTED (A-PATCHWORK, 2026-08-20) alongside makeNoise2D so `regions.js` warps its region field with
+   the SAME noise this file shapes the ground with — one noise implementation, two readers. Forking a
+   second Perlin into the region module would be the "third blended style" Rule 6 forbids; the export is
+   additive and changes nothing here. */
+export function fbm(noise, x, y, oct, lac, gain) {
   let amp = 0.5, freq = 1, sum = 0, norm = 0;
   for (let i = 0; i < oct; i++) { sum += amp * noise(x * freq, y * freq); norm += amp; amp *= gain; freq *= lac; }
   return sum / norm;
@@ -90,6 +94,12 @@ export const BIOMES = [
      writes it (pad + street texels), so every existing consumer is untouched — APPENDING here is the
      additive move (index 7 shifts nothing; catalog/scatter iterate by key or by value, checked). */
   { key: 'pavement',  color: '#63666e' },
+  /* 8 — A-PATCHWORK (2026-08-20): DESERT sand. Same additive move as 7, for the same reason:
+     `classify` never returns it, so no existing world can change. Only `shapeRegionTerrain`
+     (regions.js) writes it, over the low/mid LAND biomes inside a desert REGION — rock (5) and
+     snow (6) survive the paint on purpose, which is how per-texel variety lives INSIDE a region
+     (the arc's own rule: the region decides the CONTENT, elevation still decides the colour). */
+  { key: 'desert',    color: '#d9b775' },
 ];
 const B = Object.fromEntries(BIOMES.map((b, i) => [b.key, i]));
 

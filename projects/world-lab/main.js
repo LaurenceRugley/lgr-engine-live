@@ -1,6 +1,25 @@
 /* ============================================================
-   WORLD LAB — projects/world-lab/main.js  (ARC A-MARRIAGE, 2026-08-19)
+   WORLD LAB — projects/world-lab/main.js  (ARC A-MARRIAGE 2026-08-19 · ARC A-PATCHWORK 2026-08-20)
    ------------------------------------------------------------
+   A-PATCHWORK (the second convergence keystone) turns the marriage room into ONE world made of
+   REGIONS: a city district, open woods, a desert, a lake district and the surrounding sea with its
+   islets — all on the SAME married heightfield, all traversable by the same three verbs through the
+   SAME world bag. What A-MARRIAGE proved about the city is unchanged and re-counted inside the
+   composed world; what is new is that the city is now a DISTRICT inside a legible landscape instead
+   of the whole map.
+     · the region field   → `generateRegions` (engine-core/src/regions.js) — a capacity-constrained
+                            priority flood: contiguous by construction, coverage exact by counting.
+     · the shaping        → `shapeRegionTerrain` — dunes in the desert, bowls in the lake district,
+                            every offset faded to ZERO at its own seam (so the seams are provable).
+     · the water          → `detectLakes` + `buildLakeGroup` (L68, first consumers outside
+                            createCityWorld) filtered to the lake district, plus the sea plane this
+                            room lacked (A-MARRIAGE honest gap #2, closed).
+     · the woods          → `generateScatter` with the new region DENSITY MASK, planted with
+                            `createTreeKit` (A-TREEKIT's conifer kit) — the placer is unchanged.
+   NOTHING here is a capability: this file wires, configures, and shows numbers.
+   `?world=104&grid=336&regions=off` reproduces the A-MARRIAGE config family exactly, which is how
+   the flat-in identity and the pre-patchwork receipts stay reachable rather than remembered.
+
    THE MARRIAGE ROOM. Route 1 of the ratified citygen↔terrain plan
    (docs/design/research-aaa-environments.md §2): the generated city sits ON real terrain instead of
    a flat plinth. Pads carve flat under blocks, streets become grade-budgeted RAMPS between pads,
@@ -29,8 +48,11 @@
    ============================================================ */
 import {
   THREE, createEngineCore, CAM,
-  generateTerrain, buildTerrainMesh, rebuildTerrainChunks, createTerrainSampler,
+  generateTerrain, buildTerrainMesh, rebuildTerrainChunks, createTerrainSampler, BIOMES,
   carveCityPads, dirtyMeshesFor,
+  generateRegions, shapeRegionTerrain, regionAt,
+  generateScatter, buildScatterGroup, createTreeKit,
+  detectLakes, buildLakeGroup,
   createBoxArena, percentileOf,
   createCharacterController, createGrappleModel, GRAPPLE_PROFILE,
   resolveAimPoint, createAimReticle, createPointerLockAim,
@@ -39,6 +61,7 @@ import {
   createBikeModel, BIKE_PROFILE, createBikeMesh, createMotoChaseCam,
 } from '@lgr/engine-core';
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
+import treeKitUrl from '@lgr/engine-core/assets/models/tree_kit.glb?url';   // A-TREEKIT's conifer kit — the woods
 
 const $ = (id) => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
@@ -80,18 +103,78 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
    family, so what the suite counts is what this page stands on.
    --------------------------------------------------------------------------------------------- */
 const WP = {
-  seed: qNum('seed', 11),
+  seed: qNum('seed', 12),
   preset: Q.get('preset') === 'mountains' ? 'mountains' : 'valley',
-  /* 336 texels over 104 u (cell 0.310): sized by TWO constraints, both counted in the proofs —
-     the pad apron (worst base edge 1.34 + one texel ≤ pad half 1.7, carve-pads.test.mjs proof a)
-     and the LOOK (the 58.6 u city needs a real ring of wild island around it — at 88 u the city
-     ate the landmass; judged from the aerial capture, not assumed). */
-  size: qNum('grid', 336),
-  worldSize: qNum('world', 104),
+  /* A-PATCHWORK GREW THE WORLD, 104 u → 128 u, and the grid with it, 336 → 380. The reason is
+     LEGIBILITY, and it is arithmetic rather than taste: the carve's rim rect is 61 u across at cols
+     13, which is 34% of a 104 u world's AREA and only 23% of a 128 u one — so at 104 the city WAS
+     the map and the other four districts were trim. The grid had to follow because the pad apron is
+     a stated constraint, not a preference: A-MARRIAGE's worst tower base edge (1.34 u) plus ONE
+     terrain texel must fit inside the pad plateau's half-side (1.7 u at streetW 1.2), which caps
+     the cell at 0.36 u. 128/379 = 0.3377 → 1.34 + 0.338 = 1.678 ≤ 1.7, so the pad-flatness proof
+     still passes for the same reason it passed before. The cost is counted and reported as a trade,
+     not hidden; `?world=104&grid=336` reproduces A-MARRIAGE's exact config family.
+     SEED 12 is chosen by COUNT, not by eye: it is the only seed of 30 that lands starved 0, three
+     lake basins, 318 islet texels above sea, and a seam grade of 0.1733 against the 0.25 dial. */
+  size: qNum('grid', 380),
+  worldSize: qNum('world', 128),
   maxGrade: qNum('grade', 0.25),
   streetW: qNum('street', 1.2),
+  /* the COVERAGE DIAL the arc exists to make honest: ask for X% woods, count X% off the finished
+     field. Woods and desert share one budget so the plan always sums to 1 (a partition cannot have
+     a spare percent lying around) — dragging the slider trades trees for sand, live. */
+  woods: qNum('woods', 0.26),
+  regions: Q.get('regions') !== 'off',
 };
 const AR = { cols: qNum('cols', 13), rows: qNum('cols', 13), spacing: qNum('spacing', 4.6) };
+
+/* ---------------------------------------------------------------------------------------------
+   2b. THE DISTRICTS. Wants sum to 1 by construction (woods + desert share 0.41). The seed POSITIONS
+   were swept, not guessed: six layouts × six terrain seeds, scored on `starved` (a district enclosed
+   before it reaches quota) and on the largest-connected-component fraction. This layout is the one
+   that reads 0 starved and 100.00% LCC across the sweep.
+   The city is a 'rect' district: the carve's own rim rect is PRE-OWNED, so "the city region IS
+   carveCityPads" is true by construction and not by luck — and the region field's exchange pass is
+   forbidden from taking those texels back (they are the carve's footprint, not spare capacity).
+   The sea is a 'rim' district: it is not a blob, it is the OUTSIDE, so it grows inward from the
+   border as a ring. Its height offset is exactly 0 — the wild field's own radial falloff already
+   sinks the rim, and whatever the falloff leaves above sea level is an ISLET, counted not claimed.
+   --------------------------------------------------------------------------------------------- */
+const REGION_KEYS = ['sea', 'city', 'woods', 'desert', 'lakes'];
+const cityRimOf = () => ((AR.cols - 1) / 2) * AR.spacing + (AR.spacing - WP.streetW) / 2 + WP.streetW;
+function regionPlan() {
+  const rim = cityRimOf();
+  const woods = Math.max(0.05, Math.min(0.36, WP.woods));
+  return [
+    { key: 'sea', want: 0.22, mode: 'rim' },
+    { key: 'city', want: 0.25, mode: 'rect', rect: { x0: -rim, z0: -rim, x1: rim, z1: rim } },
+    { key: 'woods', want: woods, mode: 'seed', at: { x: -34, z: 30 } },
+    { key: 'desert', want: 0.41 - woods, mode: 'seed', at: { x: 34, z: -32 } },
+    { key: 'lakes', want: 0.12, mode: 'seed', at: { x: 30, z: 34 } },
+  ];
+}
+/* the SHAPING dials. seamBlend 8 u is budgeted off the module's own bound
+   |∇(offset·w)| ≤ |∇offset| + max|offset|·1.5/seamBlend: at the dune amplitude 0.45 u that second
+   term is 0.084, leaving the dial's remaining 0.166 for the dune's own slope (0.45·π/12 ≈ 0.118) and
+   the bowls' (0.72·1.5/5.3 ≈ 0.204 at full depth, less when the ground is shallower). Counted on the
+   finished field every build and shown on the HUD — the derivation is the design, the count is the gate. */
+const SHAPE = () => ({
+  seamBlend: 8, seed: WP.seed,
+  desert: { key: 'desert', amp: 0.45, len: 12, angle: 0.6, sharp: 1.6, warp: 0.25 },
+  /* THE LAKE BOWLS ARE SIZED BY THE DIAL, and the arithmetic is the whole story of how they got
+     here. A bowl's steepest wall is depth·1.5/(rimR−flatR), so the dial caps depth at
+     0.25·3.4/1.5 = 0.567 u; and `detectLakes` fills only 0.045 normalised above a local minimum
+     (0.3375 u at this preset's relief), so a bowl shallower than that holds nothing. Depth 0.55
+     sits in that narrow window on purpose. Big deep basins were tried first and are NOT available:
+     at rimR 8.5 the dial forces them so shallow their pools drain, and at rimR 5–6 with a real
+     depth the wall itself reads 0.30–0.36, over the dial. Five small tarns beat one illegal lake. */
+  lakes: { key: 'lakes', bowls: 5, depth: 0.55, flatR: 2.1, rimR: 5.5 },
+});
+/* how thickly each district is dressed — the mask `generateScatter` multiplies its densities by.
+   The city is 0 because it is paved; the desert is 1 because ITS table is already an order sparser
+   than grassland's; the sea is a small number so an islet can carry a couple of trees. */
+const SCATTER_BY_REGION = { sea: 0.30, city: 0, woods: 1.0, desert: 1.0, lakes: 0.55 };
+const BIOME_KEYS = BIOMES.map((b) => b.key);
 /* THE ROPE IS THE HOUSE ROPE, HELD FIXED (A-SKYLINE's own discipline): 4.10 is swing-lab's derived
    constant, and the skyline is generated FROM it (frac 0.70) — so the mechanic is identical across
    rooms and the LEVEL is the only variable. The guarantee is then counted LOCALLY: each tower
@@ -110,6 +193,21 @@ const ARENA_SKY = {
 let T = null, terrainGroup = null, CARVE = null, HEIGHT = () => 0;
 let arena = null;
 let LEVEL_BUILD_MS = 0;
+let REG = null, SHAPED = null;                   // the region field + its shaping report
+let scatterGroup = null, treeGroup = null, lakeGroup = null, seaMesh = null;
+let LAKES = [], TREE_N = 0;
+
+/* ONE WATER MATERIAL for the sea and every lake (world-water.js's own reuse anchor): the sea is not
+   a different substance from a lake, it is the same surface at a different plane, and one material
+   means one place to change how water reads in this room. */
+const waterMat = new THREE.MeshStandardMaterial({
+  color: '#33627f', roughness: 0.18, metalness: 0.30, transparent: true, opacity: 0.86,
+});
+/* the KIT is created ONCE (moto-lab's own rule): the GLB loads a single time and every rebuild
+   re-instances the cached geometry. `?trees=proc` keeps the procedural cones as the control arm, and
+   a load FAILURE rebuilds the room with them, loudly — degrade whole, the house convention. */
+const treeKit = Q.get('trees') === 'proc' ? null : createTreeKit({ url: treeKitUrl });
+if (treeKit) treeKit.ready.then((mode) => { if (mode !== 'kit') buildWorld(); });
 /* the LIVE closures the arena reads — they always point at the CURRENT carve/sampler, so an
    arena.rebuild after a dial change re-lays towers on the new pads with no re-wiring. */
 const groundYAt = (x, z, i, j) => CARVE.padYOf(i, j);
@@ -118,16 +216,28 @@ const heightAt = (x, z) => HEIGHT(x, z);
 function buildWorld() {
   const t0 = performance.now();
   if (terrainGroup) { scene.remove(terrainGroup); terrainGroup.userData.dispose(); }
-  /* generate → WILD mesh → carve → dirty-chunk refresh: the ratified route's exact mechanism,
-     run on stage every build (a carve you can see IS the rebuildTerrainChunks receipt). */
+  for (const g of [scatterGroup, treeGroup, lakeGroup]) if (g) { scene.remove(g); g.userData.dispose(); }
+  scatterGroup = treeGroup = lakeGroup = null;
+  const WORLD_MAP = { worldSize: WP.worldSize, baseY: 0 };
+  /* generate → REGIONS → SHAPE → WILD mesh → carve → dirty-chunk refresh. The ORDER is the
+     architecture: regions and shaping mutate the ONE heightfield BEFORE the mesh is built, the carve
+     mutates it AFTER and refreshes only its dirty chunks — so the room still exercises A-MARRIAGE's
+     ratified dirty-chunk seam on stage at every build (a carve you can SEE is the receipt) while the
+     districts are already under it. */
   T = generateTerrain({ seed: WP.seed, size: WP.size, preset: WP.preset });
+  if (WP.regions) {
+    REG = generateRegions({ size: WP.size, worldSize: WP.worldSize, seed: WP.seed, plan: regionPlan() });
+    SHAPED = shapeRegionTerrain(T, WORLD_MAP, REG, SHAPE());
+  } else { REG = null; SHAPED = null; }
   terrainGroup = buildTerrainMesh(T, { worldSize: WP.worldSize, baseY: 0, chunks: 6 });
   scene.add(terrainGroup);
-  CARVE = carveCityPads(T, { worldSize: WP.worldSize, baseY: 0 },
+  CARVE = carveCityPads(T, WORLD_MAP,
     { cols: AR.cols, rows: AR.rows, spacing: AR.spacing },
     { streetW: WP.streetW, maxGrade: WP.maxGrade, blend: 3.0 });
   rebuildTerrainChunks(terrainGroup, T, dirtyMeshesFor(terrainGroup, CARVE.touched), true);
-  HEIGHT = createTerrainSampler(T, { worldSize: WP.worldSize, baseY: 0 });
+  HEIGHT = createTerrainSampler(T, WORLD_MAP);
+  if (WP.regions) buildWater(WORLD_MAP);
+  if (WP.regions) buildDressing(WORLD_MAP);
 
   const cfg = {
     cols: AR.cols, rows: AR.rows, spacing: AR.spacing,
@@ -138,6 +248,84 @@ function buildWorld() {
   if (!arena) { arena = createBoxArena(cfg); scene.add(arena.group); }
   else arena.rebuild(cfg);
   LEVEL_BUILD_MS = performance.now() - t0;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   2c. THE WATER — the sea plane this room never had (A-MARRIAGE honest gap #2: "the rim jump lands
+   on the sub-sea ocean biome — there is no water in the room; dirt all the way down"), and the lake
+   district's pools through `detectLakes` / `buildLakeGroup` (L68's FIRST consumers outside
+   createCityWorld — the ability existed and only one room had ever asked it anything).
+   THE FILTER is the region field doing its job: detectLakes scans the whole heightfield and will
+   happily call a wild hollow a lake, so we keep only the pools whose centre stands in the lake
+   DISTRICT. That is consuming the orphan, not forking it — its basin maths is untouched.
+   --------------------------------------------------------------------------------------------- */
+function buildWater(WORLD_MAP) {
+  if (!seaMesh) {
+    /* sea level is y = baseY = 0 by terrain.js's own mapping (wy(sea) = baseY). One plane, a hair
+       larger than the world so the horizon has no visible edge inside the fog. */
+    seaMesh = new THREE.Mesh(new THREE.PlaneGeometry(WP.worldSize * 1.6, WP.worldSize * 1.6), waterMat);
+    seaMesh.rotation.x = -Math.PI / 2;
+    seaMesh.position.y = 0;
+    seaMesh.receiveShadow = false; seaMesh.castShadow = false; seaMesh.raycast = () => {};
+    scene.add(seaMesh);
+  }
+  const found = detectLakes(T, { ...WORLD_MAP, maxLakes: 8 });
+  LAKES = found.filter((lk) => regionAt(REG, lk.cx, lk.cz) === 'lakes');
+  /* FIT EACH DISC TO ITS OWN POOL, using the sampler the physics reads. `detectLakes` returns an
+     AREA-matched circle scaled by 0.82 — a heuristic inset for a pool that is never actually round —
+     and the probe caught it costing 6.7 cm of shoreline on one lake: ground standing 0.067 u ABOVE
+     the water inside the disc, which reads as a lawn floating on a pond. Rather than change that
+     shared heuristic (createCityWorld's worlds would move), the ROOM shrinks each disc until the
+     highest ground under it is at or below its own surface. Room-level fitting, engine untouched. */
+  for (const lk of LAKES) {
+    for (let guard = 0; guard < 24; guard++) {
+      let worst = -Infinity;
+      for (let a = 0; a < 24; a++) {
+        const th = a * Math.PI / 12;
+        for (const f of [0.35, 0.7, 1.0]) {
+          worst = Math.max(worst, HEIGHT(lk.cx + Math.cos(th) * lk.radius * f, lk.cz + Math.sin(th) * lk.radius * f));
+        }
+      }
+      if (worst <= lk.y) break;
+      lk.radius *= 0.92;
+    }
+  }
+  LAKES = LAKES.filter((lk) => lk.radius > 0.6);      // a disc smaller than that is a puddle, not a lake
+  lakeGroup = buildLakeGroup(LAKES, { material: waterMat });
+  scene.add(lakeGroup);
+}
+
+/* ---------------------------------------------------------------------------------------------
+   2d. THE DRESSING — trees, rocks and scrub, placed by `generateScatter` (L65) through its new
+   region DENSITY MASK. The placer is UNCHANGED: it still reads the terrain's own biome + height +
+   slope buffers, so every prop sits on the surface for free. What the mask adds is district
+   awareness — the woods get planted, the city gets nothing, the desert gets its own sparse table
+   (reached only because `shapeRegionTerrain` painted BIOMES[8] there).
+   TREES leave the scatter group for the A-TREEKIT conifer kit exactly as moto-lab does it; the
+   scatter group still allocates its (empty) tree mesh, which is buildScatterGroup's contract for
+   the world editor's paint brush.
+   --------------------------------------------------------------------------------------------- */
+function buildDressing(WORLD_MAP) {
+  const size = WP.size;
+  const mask = (i, j) => SCATTER_BY_REGION[REG.keys[REG.region[j * size + i]]] ?? 1;
+  const sc = generateScatter({
+    terrain: T, seed: WP.seed, ...WORLD_MAP, biomeKeys: BIOME_KEYS,
+    density: 0.42, max: 3200, mask,
+  });
+  /* nothing grows ON the spawn or inside a lake's own disc (a tree standing in open water reads as
+     a bug, not a forest — moto-lab's own "no canopy over the opening frame" rule). */
+  for (const type of Object.keys(sc.placements)) {
+    sc.placements[type] = sc.placements[type].filter((p) =>
+      !LAKES.some((lk) => Math.hypot(p.x - lk.cx, p.z - lk.cz) < lk.radius + 0.4));
+  }
+  const useKit = treeKit && treeKit.mode !== 'failed';
+  scatterGroup = buildScatterGroup(useKit ? { ...sc.placements, tree: [] } : sc.placements);
+  scene.add(scatterGroup);
+  TREE_N = sc.placements.tree.length;
+  if (useKit) {
+    treeGroup = treeKit.buildGroup(sc.placements.tree, { seed: WP.seed });
+    scene.add(treeGroup);
+  }
 }
 buildWorld();
 
@@ -282,9 +470,19 @@ addEventListener('blur', () => { held.clear(); webPressed = false; });
    --------------------------------------------------------------------------------------------- */
 const stats = { webs: 0, walkMinClear: Infinity, bikeMinClear: Infinity, fps: 0, t: 0 };
 let hadAnchor = false, lastLandCount = 0, landings = 0, cleans = 0;
+/* A-PATCHWORK: the DISTRICTS this body has actually stood in, and the order it entered them. The
+   composition proof is "crossed ≥3 districts in ONE session", and a claim like that has to be
+   recorded WHILE the body moves — reading the end position only proves where it stopped. */
+let visited = [];
+function noteRegion(x, z) {
+  if (!REG) return;
+  const k = regionAt(REG, x, z);
+  if (k && visited[visited.length - 1] !== k) visited.push(k);
+}
 function resetStats() {
   stats.webs = 0; stats.walkMinClear = Infinity; stats.bikeMinClear = Infinity; stats.t = 0;
   landings = 0; cleans = 0; lastLandCount = 0;
+  visited = [];
 }
 function flash(msg) { const h = $('hint'); if (!h) return; h.innerHTML = `<b>${msg}</b>`; clearTimeout(flash._t); flash._t = setTimeout(() => { h.innerHTML = HINT; }, 1800); }
 const HINT = $('hint') && $('hint').innerHTML;
@@ -319,6 +517,24 @@ function updateHud(dt) {
   const sw = arena.stats.swingable;
   set('v-guar', sw ? `${sw.clearing}/${sw.towers} (${(100 * sw.frac).toFixed(1)}% vs ${(100 * sw.want).toFixed(0)}%)` : '—',
     sw && Math.abs(sw.frac - sw.want) < 0.02 ? 'on' : 'bad');
+  /* ---- the PATCHWORK rows: which district you are standing in, and the three counted properties
+     the arc turns on, read LIVE off the finished field rather than from a build-time memory. ---- */
+  if (REG) {
+    const here = regionAt(REG, x, z);
+    set('v-region', here ? here.toUpperCase() : '—', here ? 'on' : 'off');
+    const per = REG.stats.per;
+    const worstLcc = Math.min(...per.map((p) => p.lccFrac));
+    const worstDrift = Math.max(...per.filter((p) => p.key !== 'city').map((p) => Math.abs(p.frac - p.want)));
+    set('v-partition', `${REG.stats.unassigned} loose · ${per.length} districts`, REG.stats.unassigned === 0 ? 'on' : 'bad');
+    set('v-contig', `${(worstLcc * 100).toFixed(2)}% in ONE blob`, worstLcc >= 0.99 ? 'on' : 'bad');
+    const w = per.find((p) => p.key === 'woods');
+    set('v-cover', `woods ${(w.frac * 100).toFixed(2)}% vs ${(w.want * 100).toFixed(0)}% · drift ${(worstDrift * 100).toFixed(3)}pp`,
+      REG.stats.starved === 0 ? 'on' : 'bad');
+    set('v-seam', `${SHAPED.gradeMax.toFixed(4)} ≤ ${WP.maxGrade.toFixed(2)}`, SHAPED.gradeMax <= WP.maxGrade + 1e-9 ? 'on' : 'bad');
+    set('v-water', `${LAKES.length} lakes · ${SHAPED.bowls.length} basins · ${SHAPED.islandTexels} islet texels`,
+      LAKES.length ? 'on' : 'off');
+    set('v-flora', `${TREE_N} trees · sand ${SHAPED.painted}`, TREE_N ? 'on' : 'off');
+  }
   const ri = renderer.info.render;
   set('v-draws', `${ri.calls} · ${(ri.triangles / 1000).toFixed(0)}k · ${stats.fps.toFixed(0)} fps · build ${LEVEL_BUILD_MS.toFixed(0)} ms`);
 }
@@ -326,12 +542,14 @@ function updateHud(dt) {
 /* ---------------------------------------------------------------------------------------------
    7. THE DOCK.
    --------------------------------------------------------------------------------------------- */
-const DIALS = [['seed', 'seed', WP], ['grade', 'maxGrade', WP], ['street', 'streetW', WP], ['cols', 'cols', AR]];
+const DIALS = [['seed', 'seed', WP], ['grade', 'maxGrade', WP], ['street', 'streetW', WP],
+  ['cols', 'cols', AR], ['woods', 'woods', WP]];
+const decimals = (key) => (key === 'seed' || key === 'cols' ? 0 : 2);
 function syncDock() {
   for (const [id, key, obj] of DIALS) {
     const el = $('p-' + id); if (!el) continue;
     el.value = String(obj[key]);
-    $('n-' + id).textContent = Number(obj[key]).toFixed(key === 'seed' || key === 'cols' ? 0 : 2);
+    $('n-' + id).textContent = Number(obj[key]).toFixed(decimals(key));
   }
 }
 function wireDock() {
@@ -340,9 +558,14 @@ function wireDock() {
     el.addEventListener('input', () => {
       obj[key] = Number(el.value);
       if (key === 'cols') AR.rows = AR.cols;     // square city — two sliders that must agree will drift
-      $('n-' + id).textContent = Number(el.value).toFixed(key === 'seed' || key === 'cols' ? 0 : 2);
+      $('n-' + id).textContent = Number(el.value).toFixed(decimals(key));
       buildWorld(); spawn();
-      flash(`world rebuilt · pads span ${(CARVE.stats.padMax - CARVE.stats.padMin).toFixed(2)} u`);
+      /* the WOODS dial reports itself in the units it was ASKED in — the whole point of the arc is
+         that this number comes back off the finished field, not out of the request. */
+      if (key === 'woods' && REG) {
+        const w = REG.stats.per.find((p) => p.key === 'woods');
+        flash(`asked ${(WP.woods * 100).toFixed(0)}% woods · counted ${(w.frac * 100).toFixed(2)}%`);
+      } else flash(`world rebuilt · pads span ${(CARVE.stats.padMax - CARVE.stats.padMin).toFixed(2)} u`);
     });
   }
   $('b-valley').addEventListener('click', () => { WP.preset = 'valley'; buildWorld(); spawn(); flash('preset: valley'); });
@@ -352,7 +575,9 @@ function wireDock() {
   $('b-copy').addEventListener('click', () => {
     const p = new URLSearchParams();
     p.set('seed', WP.seed); p.set('grade', WP.maxGrade); p.set('street', WP.streetW);
-    p.set('cols', AR.cols); if (WP.preset !== 'valley') p.set('preset', WP.preset);
+    p.set('cols', AR.cols); p.set('woods', WP.woods);
+    if (WP.preset !== 'valley') p.set('preset', WP.preset);
+    if (!WP.regions) p.set('regions', 'off');
     const url = location.origin + location.pathname + '?' + p.toString();
     if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
     flash('url copied');
@@ -407,6 +632,7 @@ function frame() {
     hadAnchor = !!s.anchor;
     const clear = character.y - HEIGHT(character.x, character.z);
     if (clear < stats.walkMinClear) stats.walkMinClear = clear;
+    noteRegion(character.x, character.z);
 
     hero.update(dt, s, { view: character.view, lookYaw: character.lookYaw, anchor: s.anchor });
     if (s.anchor) {
@@ -440,6 +666,7 @@ function frame() {
 
     const clear = bikeState.y - HEIGHT(bikeState.x, bikeState.z);
     if (clear < stats.bikeMinClear) stats.bikeMinClear = clear;
+    noteRegion(bikeState.x, bikeState.z);
     if (bikeState.landing && bikeState.landing.count > lastLandCount) {
       lastLandCount = bikeState.landing.count;
       landings++; if (bikeState.landing.clean) cleans++;
@@ -510,8 +737,44 @@ window.__world = {
   get walkMinClear() { return stats.walkMinClear; },
   get bikeMinClear() { return stats.bikeMinClear; },
   get webs() { return stats.webs; },
+  get visited() { return [...visited]; },
+  get districts() { return [...new Set(visited)]; },
   get landings() { return { landings, cleans }; },
-  layout: () => ({ cols: AR.cols, rows: AR.rows, spacing: AR.spacing, streetW: WP.streetW, maxGrade: WP.maxGrade, seed: WP.seed, preset: WP.preset }),
+  layout: () => ({ cols: AR.cols, rows: AR.rows, spacing: AR.spacing, streetW: WP.streetW, maxGrade: WP.maxGrade, seed: WP.seed, preset: WP.preset, worldSize: WP.worldSize, size: WP.size, cityRim: cityRimOf() }),
+  /* ---- A-PATCHWORK receipts. `regions()` is the page's OWN counted numbers (the probe never
+     re-derives them from pixels); `regionAt` is the ONE "which district is this" answer the mask,
+     the lake filter, the HUD and the probe all share. `crossings` lets a driven run prove it
+     actually TRAVELLED across districts rather than circled inside one. ---- */
+  regions: () => (REG ? {
+    keys: REG.keys,
+    per: REG.stats.per.map((p) => ({ ...p })),
+    unassigned: REG.stats.unassigned, starved: REG.stats.starved, total: REG.stats.total,
+    seamGrade: SHAPED.gradeMax, seamBlend: SHAPED.seamBlend, offMax: SHAPED.offMax,
+    bowls: SHAPED.bowls.map((b) => ({ ...b })), lakes: LAKES.map((l) => ({ ...l })),
+    painted: SHAPED.painted, islandTexels: SHAPED.islandTexels, clamped: SHAPED.clamped,
+    trees: TREE_N, dial: WP.maxGrade, seaY: 0,
+  } : null),
+  regionAt: (x, z) => (REG ? regionAt(REG, x, z) : null),
+  /* the offset field's grade, RE-COUNTED live off the page's own arrays — so the probe's proof (d)
+     reads the thing on screen and not a number cached at build time. */
+  seamSweep: () => {
+    if (!SHAPED) return null;
+    const size = WP.size, cell = WP.worldSize / (size - 1), off = SHAPED.offset;
+    let worst = 0, boundary = 0, nonZero = 0;
+    for (let j = 0; j < size; j++) {
+      for (let i = 0; i < size; i++) {
+        const k = j * size + i, r = REG.region[k];
+        if (i < size - 1) worst = Math.max(worst, Math.abs(off[k + 1] - off[k]) / cell);
+        if (j < size - 1) worst = Math.max(worst, Math.abs(off[k + size] - off[k]) / cell);
+        const diff = (i > 0 && REG.region[k - 1] !== r) || (i < size - 1 && REG.region[k + 1] !== r)
+          || (j > 0 && REG.region[k - size] !== r) || (j < size - 1 && REG.region[k + size] !== r);
+        if (!diff) continue;
+        boundary++;
+        if (Math.abs(off[k]) > 1e-9) nonZero++;
+      }
+    }
+    return { worst, boundary, nonZero };
+  },
   /* rope percentile over RELATIVE tower heights — the married room's own derivation check:
      swingableRope(relRoof at 1−frac) should hand WORLD_ROPE back (the closed loop, locally). */
   relRoofAt: (p) => {

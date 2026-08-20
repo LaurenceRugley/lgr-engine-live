@@ -246,6 +246,13 @@ export { generateTerrain, buildTerrainMesh, rebuildTerrainChunks, createTerrainS
 // groundYAt/heightAt opt-ins: towers stand on pads, heights author relative to pad top, ONE world bag.
 export { carveCityPads, dirtyMeshesFor } from './src/carve-pads.js';
 
+// A-PATCHWORK — REGIONS: a capacity-constrained priority flood that partitions the world into a few
+// large, CONTIGUOUS districts (city · woods · desert · lakes · sea), each of which decides its own
+// CONTENT while the per-texel biome keeps deciding colour. shapeRegionTerrain applies each district's
+// height OFFSET, faded to zero at every seam, so the region system's whole grade contribution is one
+// sweepable field. regionReport is the anti-speckle count (largest connected component per region).
+export { generateRegions, shapeRegionTerrain, regionReport, regionAt, UNASSIGNED } from './src/regions.js';
+
 // L65 — WORLD SCATTER: biome-keyed instanced trees/rocks/tufts on the terrain.
 export { generateScatter, buildScatterGroup, createScatter } from './src/scatter.js';
 

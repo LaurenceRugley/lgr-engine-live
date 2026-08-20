@@ -33,6 +33,11 @@ const SCATTER_TABLE = {
   forest:    [{ type: 'tree', density: 0.62, maxSlope: 0.8 }, { type: 'rock', density: 0.03, maxSlope: 1.2 }],
   hills:     [{ type: 'tree', density: 0.14, maxSlope: 0.7 }, { type: 'rock', density: 0.16, maxSlope: 1.6 }],
   rock:      [{ type: 'rock', density: 0.22, maxSlope: 2.0 }],
+  /* A-PATCHWORK: the DESERT's sparse cover. A desert is not empty — it is scattered boulders and dry
+     scrub at a density an order below grassland's, and NO trees (the one biome in this table with
+     none). Only reachable once `shapeRegionTerrain` paints BIOMES[8]; `classify` never returns it,
+     so no existing world's scatter can change. */
+  desert:    [{ type: 'rock', density: 0.035, maxSlope: 1.3 }, { type: 'tuft', density: 0.05, maxSlope: 0.8 }],
 };
 
 /* ============================================================================================
@@ -40,7 +45,7 @@ const SCATTER_TABLE = {
    Each placement = { x, y, z, s (scale), r (yaw), t (tint 0..1) }. World mapping MATCHES buildTerrainMesh
    (so props land on the surface): cell = worldSize/(size-1), wy(h) = baseY + (h-sea)*relief.
    ============================================================================================ */
-export function generateScatter({ terrain, seed = 1, worldSize = 26, baseY = 0, biomeKeys, density = 1, max = 9000 } = {}) {
+export function generateScatter({ terrain, seed = 1, worldSize = 26, baseY = 0, biomeKeys, density = 1, max = 9000, mask = null } = {}) {
   const { size, height, biome, sea, relief } = terrain;
   const rng = mulberry32((seed ^ 0x5ca77e8) >>> 0);
   const cell = worldSize / (size - 1), half = worldSize / 2;
@@ -63,11 +68,20 @@ export function generateScatter({ terrain, seed = 1, worldSize = 26, baseY = 0, 
       const rules = SCATTER_TABLE[key];
       if (!rules) continue;                           // ocean / snow → nothing
       const slope = slopeAt(i, j);
+      /* A-PATCHWORK (2026-08-20) — the optional DENSITY MASK. `mask(i, j)` returns a per-texel
+         multiplier, which is how a REGION field makes this biome-keyed placer region-aware without
+         forking it: the woods district asks for 1, the lakeshore for a little less, the paved city
+         for 0. NULL-DEFAULT, and the null path is byte-identical BY CONSTRUCTION — the multiplier
+         is 1 and, more importantly, the RNG is still consumed one roll per rule whatever the mask
+         says, so a masked world and an unmasked world differ only in which candidates survive, never
+         in the stream that generated them. (The A-MARRIAGE `groundYAt`/`heightAt`/`ground:false`
+         move, applied to the second orphan.) */
+      const dm = mask ? mask(i, j) : 1;
       for (const rule of rules) {
         // one die per rule (consume RNG in a fixed order → determinism), gated by slope + density.
         const roll = rng();
         if (slope > rule.maxSlope) continue;
-        if (roll > rule.density * density) continue;
+        if (roll > rule.density * density * dm) continue;
         const arr = placements[rule.type];
         if (arr.length >= max) continue;
         // jitter within the cell, look the height back up at the jittered cell for a snug sit
