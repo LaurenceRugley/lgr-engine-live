@@ -44,12 +44,13 @@ jobs:
           npm run build:metropolis
           npm run build:swing-lab
           npm run build:moto-lab
+          npm run build:world-lab
           npm run build:showcase-lab
 
       - name: Assemble site (hub at root · demos under stable paths)
         run: |
           rm -rf _site
-          mkdir -p _site/live _site/hoard _site/hoard2 _site/office _site/metropolis _site/showcase-lab _site/swing-lab _site/moto-lab
+          mkdir -p _site/live _site/hoard _site/hoard2 _site/office _site/metropolis _site/showcase-lab _site/swing-lab _site/moto-lab _site/world-lab
           cp -R projects/city/dist/*   _site/live/
           cp -R projects/hoard/dist/*  _site/hoard/
           cp -R projects/hoard2/dist/* _site/hoard2/    # the one-shot Hoard v2 → /hoard2/ (base:'./')
@@ -64,6 +65,10 @@ jobs:
           # and swing-lab 404'd too because the fix for the first two lives in a different repo.
           cp -R projects/swing-lab/dist/*    _site/swing-lab/
           cp -R projects/moto-lab/dist/*     _site/moto-lab/
+          # world-lab (2026-08-20, A-MARRIAGE). Sixth instance of the omission class — the lab-side
+          # SET was registered at birth this time, but THIS list still lives in a repo the worktree
+          # agent can't reach, so it 404'd for one deploy until the orchestrator added it here.
+          cp -R projects/world-lab/dist/*    _site/world-lab/
           cp -R projects/showcase-lab/dist/* _site/showcase-lab/
           cp -R projects/live-hub/*    _site/          # the capability hub → site root
           touch _site/.nojekyll                        # keep _-prefixed Vite asset dirs
