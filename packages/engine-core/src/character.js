@@ -552,7 +552,29 @@ export function createCharacterController(opts = {}) {
                contract as `yaw`, which also holds its last value). `createHeroBody` turns them into
                the wall PLANE its hands and feet get pinned to; nothing else reads them yet. */
             state.clingNx = -cfx; state.clingNz = -cfz;
-            state.clingDist = t * cling.reach;
+            /* ── A-CONTACT (2026-08-20): PUBLISH THE **TRUE** SURFACE DISTANCE, NOT THE INFLATED RAY'S.
+               `t` above comes from a `segmentHit` at `cling.probeR`, and that call INFLATES every AABB
+               by the radius (collide.js's Minkowski cheat). Excellent for "is a wall within reach" —
+               which is all it was ever asked — and wrong for "where IS the wall", which is what the
+               crawl then built a contact plane from. MEASURED on the lab arena (2026-08-20): body→
+               facade 0.3104 u, published clingDist 0.2397 u, so the plane the hands were pinned to sat
+               **0.0710 u out in open air**, and `createHeroBody`'s hug — which slides the body to
+               `0.30 × height` off that plane — parked the torso 0.071 u too far back. The arm chain is
+               0.11 u, so the real facade was simply OUT OF REACH and the two-bone solver clamped at
+               full extension: every hand hovered, and `contactReport` (measured against the same wrong
+               plane) read 0.000 and called it planted. Correcting the TARGET alone does nothing while
+               the BODY is parked out of range — measured, that fix moved the hands 0.01 u.
+               So: re-cast the SAME ray un-inflated (r = 0) and publish where the surface actually is.
+               Longer than `reach` because the inflated hit is by construction nearer than the true face
+               (by `probeR`, more when the ray is oblique or catches an inflated kerb). Falls back to
+               the old value if the sharp ray finds nothing, so a grazing/corner hit degrades to A-CRAWL
+               behaviour rather than to a wild plane.
+               THE MECHANIC IS UNTOUCHED: `clinging` is still decided by the inflated `t < 1` above —
+               this only corrects a number that, by grep, nothing but `createHeroBody` presentation
+               reads (hug + contact plane). The sim, the collider and the determinism trace never see it. */
+            const _sharpLen = cling.reach + cling.probeR * 2;
+            const _tSharp = world.segmentHit(state.x, cy, state.z, state.x + cfx * _sharpLen, cy, state.z + cfz * _sharpLen, 0);
+            state.clingDist = _tSharp < 1 ? _tSharp * _sharpLen : t * cling.reach;
             /* Hold position against the facade and climb under the lift axis. Zeroing the horizontal
                velocity is what makes it read as ADHESION rather than a very slow slide — pilot.js's
                own wording and its own factor. The walker is told BOTH halves (position then velocity),

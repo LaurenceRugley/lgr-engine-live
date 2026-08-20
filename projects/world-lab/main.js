@@ -406,6 +406,11 @@ const character = createCharacterController({
 });
 const hero = createHeroBody({
   url: survivorUrl,
+  /* A-CONTACT (2026-08-20): this room never named `airMotion`, and its DEFAULT is true — so world-lab
+     has had the wall crawl (and its 0.0710 u float) all along, silently. Wired here in the same commit
+     as the lab and the city precisely because that is the wiring-drift failure CLAUDE.md calls out:
+     the ability living in core while a sibling entry path never inherits it. */
+  surfaceProbe: Q.get('surfaceprobe') === '0' ? null : arena.world.segmentHit,
   skinned: Q.get('hero') !== 'capsule',
   height: HERO_H, walkSpeed: WALK_V, sprintSpeed: SPRINT_V,
   fallback: { radius: 0.06, length: 0.16, color: '#d8482f' },

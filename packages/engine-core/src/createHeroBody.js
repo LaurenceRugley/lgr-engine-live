@@ -91,6 +91,16 @@ export const SURVIVOR_STATES = {
    are for survivor.glb's 1.0 s Jump; a different rig names its own. */
 export const HERO_AIR_POSE = { jump: 0.28, fall: 0.60, swing: 0.52, cling: 0.44 };
 
+/* A-CONTACT (2026-08-20): THE CLING STANDOFF — the rendered body's centre-line distance to the wall
+   while crawling, in body heights. See the long note at the hug itself for why it had to be re-derived:
+   A-CRAWL's 0.30 was fitted against a contact plane that sat 0.0710 u outside the facade, so it was
+   partly compensating for that error, and correcting the plane made the same constant park the torso
+   0.071 u too CLOSE (limbs went from floating to punching through). Tuned by the ruler, not by eye —
+   `node tools/hero-contact-ruler.mjs` at its deterministic site, target = the planted inset (+0.014 u
+   on the 0.30 u hero: joint proud, mesh touching). Exported so a project on a very different rig can
+   re-measure rather than inherit a number fitted to this one. */
+export const HUG_STANDOFF = 0.48;
+
 const _v = new THREE.Vector3();
 const _box = new THREE.Box3();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -104,6 +114,10 @@ export function createHeroBody({
   castShadow = true,
   idleRelax = true,             // survivor.glb's idle is a braced 'lunge' — soften it when truly still
   footIK = null,                // pass a cfg to enable plant-and-hold (scale-aware: caller's numbers)
+  /* A-CONTACT (2026-08-20): the world's own `segmentHit(ox,oy,oz, ex,ey,ez, r) -> t∈[0,1]` (the bag
+     every project already owns: `arena.world.segmentHit`). With it the crawl's hands and feet land on
+     the REAL facade instead of the controller's guessed plane; without it nothing changes. */
+  surfaceProbe = null,
   walkStride = 0, runStride = 0, // A6-2 stride-rate reference speeds (0 = the speed01 heuristic)
   riseEps = 0.05,
   /* ── A-AIR (2026-08-15): THE HELD FRAMES START BREATHING. ────────────────────────────────────────
@@ -224,6 +238,12 @@ export function createHeroBody({
     group.add(handle.object);
     if (idleRelax) handle.setIdleRelax(true);
     if (footIK) handle.setFootIK(footIK);
+    /* A-CONTACT (2026-08-20): HAND THE RIG THE WORLD. The contact ability plants limbs on the surface
+       that is really there rather than on the plane the controller guessed (which measured 0.0710 u
+       outside the facade — see contact.js). The world bag is the PROJECT's content; the ability is the
+       engine's — so this module only forwards it. Absent → the rig keeps trusting the plane, i.e.
+       A-CRAWL's shipped behaviour exactly. */
+    if (surfaceProbe) handle.setSurfaceProbe(surfaceProbe);
     handle.setLocomotion(0);              // arm the idle/walk/run blend from frame one
     for (const name of hideBones) {
       const b = handle.findBone(name);
@@ -343,7 +363,18 @@ export function createHeroBody({
            that put the hips and hands within ±0.05 u of the CAMERA PLANE (view-space z ≈ +0.002 on a
            0.02 near plane), so the whole body fell to the near clip and the FP frame showed bare
            facade. Unslid, the body hangs under the eye exactly as A-BODY's FP capture proved legible. */
-        const hugPull = first ? 0 : (s.clingDist || 0) - height * 0.30;
+        /* A-CONTACT (2026-08-20) RE-DERIVED THE STANDOFF, and the reason is the whole arc in one
+           sentence: **0.30 was fitted against a plane that was 0.0710 u too far out.** A-CRAWL tuned
+           this constant by looking at where the limbs landed, using a `clingDist` that understated the
+           true distance by the cling ray's own probe radius — so part of what 0.30 was "worth" was
+           silently compensating for that error. Correct `clingDist` (character.js) and the same 0.30
+           parks the torso 0.071 u CLOSER than A-CRAWL ever actually had it: measured at the ruler's
+           deterministic lab site, the limbs went from +0.026…+0.060 u of FLOAT to −0.022…−0.025 u
+           INSIDE the facade. A sign flip, not a fix.
+           So the standoff is re-measured against a CORRECT plane rather than inherited: the shoulders
+           must sit far enough out that the arm chain expresses its planted INSET (≈ +0.014 u, the
+           joint proud so the mesh touches) instead of either clamping short or punching through. */
+        const hugPull = first ? 0 : (s.clingDist || 0) - height * HUG_STANDOFF;
         if (hugPull > 0) {
           o.position.x -= s.clingNx * hugPull * faceW;
           o.position.z -= s.clingNz * hugPull * faceW;

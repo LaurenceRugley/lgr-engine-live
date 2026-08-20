@@ -40,6 +40,7 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE, strideTimeScale } from './character-anim.js';
 import { flinchEnvelope, headYawDelta, wrapPi, swingEnvelope, dipEnvelope } from './character-layers.js';
 import { makeAirPose, airPose, riseFall, AIR_POSE_KEYS, CRAWL, CRAWL_PHASE, crawlPhaseRate, crawlLimb } from './hero-air.js';
+import { CONTACT, planeContactTarget, groundContactTarget } from './contact.js';
 import { resolveRig } from './character-rig-profiles.js';
 import { applyNightFill, collectMaterials } from './character-night-fill.js';
 import { damp } from './math.js';
@@ -86,6 +87,9 @@ const _mountTgt = new THREE.Vector3();   // A-WHIP mount-IK: the socket node's w
 // A-CRAWL (2026-08-19) wall-contact scratch — module-level like every other layer's (the contact pass
 // runs synchronously inside one _applyLayers, one limb at a time, so a shared pair is safe + alloc-free).
 const _cR = new THREE.Vector3(), _cE = new THREE.Vector3();
+// A-CONTACT (2026-08-20) — the surface-resolved target, written by contact.js's out-param convention.
+// Module scratch like every other layer's: one limb is solved at a time, synchronously, so it is safe.
+const _cTgt = { x: 0, y: 0, z: 0 };
 /* A-CRAWL — a limb chain's total world length (root→mid + mid→end), measured ONCE off the live bones
    and cached on the chain (`clen`). Measured rather than configured because it is the one number every
    crawl amplitude is expressed in (hero-air.js CRAWL is all in chain-lengths), and the same rig lands
@@ -344,7 +348,14 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
     let _airPhase = 0, _airClimbEase = 0, _contactW = 0;
     let _airWallOn = false, _airWallNx = 0, _airWallNz = 0, _airWallPx = 0, _airWallPz = 0;
     const _crawlOff = { u: 0, lift: 0 };            // crawlLimb's out-param (spawn-owned, zero-alloc per frame)
-    const _contactRep = { active: false, w: 0, handL: -1, handR: -1, footL: -1, footR: -1 };
+    /* A-CONTACT (2026-08-20): THE SURFACE PROBE — the world query that ends the trusted-plane bug.
+       `segmentHit(ox,oy,oz, ex,ey,ez, r)`, the house world-bag seam (see contact.js for the full
+       argument and the measured 0.0710 u the plane was wrong by). Null → every limb keeps its guessed
+       plane target, i.e. EXACTLY A-CRAWL's shipped behaviour, so a consumer that never wires a world
+       is byte-identical to before this arc. `_contactRep.snap` is the new receipt: how far the probe
+       had to MOVE the guess, which is the number that would have caught A-CRAWL's blind spot. */
+    let _surfaceProbe = null;
+    const _contactRep = { active: false, w: 0, handL: -1, handR: -1, footL: -1, footR: -1, snap: 0, probed: false, released: 0 };
     const _crawlLimbs = [
       { ch: _airArmL, hand: true, off: CRAWL_PHASE[0], key: 'handL' },
       { ch: _airArmR, hand: true, off: CRAWL_PHASE[1], key: 'handR' },
@@ -483,6 +494,22 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // off the wall plane, LIVE (read-only by contract; the layer rewrites it every contact frame).
       get airPhase() { return _airPhase; },
       get contactReport() { return _contactRep; },
+      /* ── A-CONTACT (2026-08-20): THE NAMED CONTACT ABILITY — "here is the world; put the limbs on it".
+         THE API, and the whole point of the lift: a surface QUERY in, planted limbs out. Every contact
+         pass in this rig (the crawl's wall, and `groundContact` below) resolves its targets against
+         this one probe, so "hands on a wall" and "feet on a floor" are one ability with one receipt
+         rather than two implementations that drift apart.
+           probe — `segmentHit(ox,oy,oz, ex,ey,ez, r) -> t∈[0,1]` (1 = clear), i.e. the world bag every
+                   project already owns (`arena.world.segmentHit`, `city.world.segmentHit`). Called
+                   with r = 0, because the inflated radius IS the bug this arc measured (contact.js).
+           null  — release: every limb goes back to trusting its caller's plane, which is A-CRAWL's
+                   exact shipped behaviour. A consumer that never calls this is byte-identical to
+                   before this arc, which is what makes the lift safe for the horde/crowd paths.
+         WHY IT LIVES ON THE RIG rather than in each project: engine-first (CLAUDE.md) — the ability is
+         the reusable thing, the world bag is the project's content. hoard/hoard2 inherit it by passing
+         their own `groundAt`-backed probe; nothing about this signature is wall-specific. */
+      setSurfaceProbe(probe) { _surfaceProbe = typeof probe === 'function' ? probe : null; },
+      get surfaceProbed() { return !!_surfaceProbe; },
       /* ── A-WHIP MOUNT-IK: pin hands/feet to a vehicle's socket NODES (see the state block).
          cfg = { handL, handR, footL, footR } — each a THREE.Object3D whose world position is the
          JOINT target (read live every frame, so steering forks carry the grips and the hands
@@ -513,7 +540,18 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       setFootIK(cfg) {
         if (!cfg) { _footIK = null; if (_ikLegs) for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } return; }
         if (!_ikLegs) return;   // not a biped we can plant — stays a no-op
-        _footIK = { plantBand: cfg.plantBand != null ? cfg.plantBand : 0.14, lockRate: cfg.lockRate != null ? cfg.lockRate : 18, unlockRate: cfg.unlockRate != null ? cfg.unlockRate : 12, maxStride: cfg.maxStride != null ? cfg.maxStride : 0.55, kneeFollow: cfg.kneeFollow !== false };
+        _footIK = { plantBand: cfg.plantBand != null ? cfg.plantBand : 0.14, lockRate: cfg.lockRate != null ? cfg.lockRate : 18, unlockRate: cfg.unlockRate != null ? cfg.unlockRate : 12, maxStride: cfg.maxStride != null ? cfg.maxStride : 0.55, kneeFollow: cfg.kneeFollow !== false,
+          /* A-CONTACT (2026-08-20): THE GROUND HALF OF THE CONTACT ABILITY — opt-in, and deliberately
+             so. Without it the contact floor is INFERRED: a leaky-min over the rig's own feet, which
+             converges to whatever stance the feet are already in and therefore CANNOT notice that the
+             body was placed below the real floor (it will happily lock the feet inside a slab — the
+             exact shape of the hoard "characters standing in the ground" report). With it, and with a
+             `setSurfaceProbe` wired, the floor is MEASURED under each foot through the same world
+             query the wall contact uses. Off by default because turning it on MOVES FEET, and the
+             walk/run this repo ships are liked as they are — no project inherits a gait change by
+             accident (CLAUDE.md engine-first: the ability lives here, the decision stays the
+             project's). */
+          groundProbe: cfg.groundProbe === true };
       },
       // A7-2: the horde's distance LOD toggles this — foot IK only runs on near characters (skip the solver
       // + its updateWorldMatrix cost beyond the IK distance; far feet aren't legible anyway).
@@ -781,10 +819,29 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
             lg.fx = fe[12]; lg.fy = fe[13]; lg.fz = fe[14];   // clip-pose foot world pos (before any hold)
             if (lg.fy < minFootY) minFootY = lg.fy;
           }
-          // leaky-min contact floor: on the flat arena it converges to the stance height; it can only rise
-          // slowly (0.5 m/s) so a lifted-both-feet frame never sticks the floor high. No terrain raycast (A3: flat).
-          if (_ikFloorY == null) _ikFloorY = minFootY;
-          else _ikFloorY = Math.min(minFootY, _ikFloorY + 0.5 * dt);
+          /* THE CONTACT FLOOR. Two ways to know where the ground is, and the difference is this arc's
+             whole lesson (A-CONTACT, 2026-08-20):
+             MEASURED (`footIK.groundProbe` + a wired `setSurfaceProbe`) — drop a probe from above the
+               lower foot and take the surface it actually finds. This is the only version that can
+               contradict the pose: a body standing 0.04 u inside a slab reads the slab TOP and lifts
+               the feet out of it. `groundContactTarget` is the same call the wall uses, pointed down.
+             INFERRED (the default, A7-2's original) — a leaky-min over the rig's own feet: it converges
+               to the stance height and can only rise slowly (0.5 m/s), so a lifted-both-feet frame
+               never sticks the floor high. It is self-referential BY CONSTRUCTION, so it cannot ever
+               notice a wrong ground datum — it will lock the feet wherever the body was put. Kept as
+               the default because it needs no world, and changing it would move every shipped gait. */
+          let floorMeasured = false;
+          if (_footIK.groundProbe && _surfaceProbe) {
+            const lowLeg = _ikLegs[0].fy <= _ikLegs[1].fy ? _ikLegs[0] : _ikLegs[1];
+            const L = _chainLenOf(lowLeg) || 0;
+            if (L > 0 && groundContactTarget(_cTgt, _surfaceProbe, lowLeg.fx, lowLeg.fy, lowLeg.fz, 0, L) > 0) {
+              _ikFloorY = _cTgt.y; floorMeasured = true;
+            }
+          }
+          if (!floorMeasured) {
+            if (_ikFloorY == null) _ikFloorY = minFootY;
+            else _ikFloorY = Math.min(minFootY, _ikFloorY + 0.5 * dt);
+          }
           // SUPPORT is STICKY: once a foot plants it STAYS the support (held still) until it LIFTS above the band
           // or the leg OVER-REACHES (the hips walked a full stride past the lock → take a step). Only ONE foot is
           // ever locked (single support); a new plant is allowed only for the lower foot while none is locked.
@@ -846,6 +903,9 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
             _contactW = damp(_contactW, wantContact, wantContact ? 14 : 18, dt);
             _contactRep.active = _contactW > 0.004;
             _contactRep.w = _contactW;
+            _contactRep.snap = 0;                       // per-frame worst probe correction (A-CONTACT)
+            _contactRep.released = 0;                   // limbs with no surface in front of them this frame
+            _contactRep.probed = !!_surfaceProbe;
             const wBase = _contactW * _airW;
             if (_contactRep.active && wBase > 0.004) {
               const nx = _airWallNx, nz = _airWallNz;    // n̂: OUT of the wall, unit, horizontal
@@ -855,6 +915,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
                 const d = _crawlLimbs[i], ch = d.ch;
                 const L = _chainLenOf(ch);
                 if (!(L > 0)) { _contactRep[d.key] = -1; continue; }
+                _contactRep.chainLen = L;      // A-CONTACT receipt: the unit every CRAWL/CONTACT number is in
                 crawlLimb(_crawlOff, _airPhase + d.off, _airClimbEase);
                 ch.upleg.updateWorldMatrix(true, false); ch.upleg.getWorldPosition(_cR);
                 ch.foot.updateWorldMatrix(true, false); ch.foot.getWorldPosition(_cE);
@@ -870,7 +931,41 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
                 const tz = _cR.z - nz * sd + nz * off + tqz * lat;
                 // …and up/down the wall by the limb's rest reach plus the gait's cosine travel.
                 const ty = _cR.y + ((d.hand ? CRAWL.uHand : CRAWL.uFoot) + _crawlOff.u * CRAWL.uAmp) * L;
-                _ikTgt.set(_cE.x + (tx - _cE.x) * wBase, _cE.y + (ty - _cE.y) * wBase, _cE.z + (tz - _cE.z) * wBase);
+                /* ── A-CONTACT (2026-08-20): ASK THE WORLD, DO NOT TRUST THE PLANE. -----------------
+                   Everything above computes the GUESS — the gait's point on the plane the controller
+                   published. Measured, that plane sits 0.0710 u outside the real facade (contact.js
+                   carries the derivation), so a limb solved exactly onto it hovers a quarter of a body
+                   height off the wall while `contactReport` reads 0.000 and calls it planted. So the
+                   guess is now resolved against the ACTUAL geometry, per limb, at that limb's OWN
+                   reach height — which is also the only way four limbs can sit on four different bits
+                   of geometry at a corner. `inset` is subtracted from the guess first because the
+                   guess already carries it (the gait's `off`), and the resolve re-applies it against
+                   the surface it actually found. No probe wired → `moved` is 0 and the guess stands,
+                   i.e. A-CRAWL's exact shipped behaviour. */
+                const inset = (d.hand ? CONTACT.insetHand : CONTACT.insetFoot) * L;
+                const moved = planeContactTarget(_cTgt, _surfaceProbe,
+                  tx - nx * inset, ty, tz - nz * inset, nx, 0, nz, inset, L);
+                if (moved > _contactRep.snap) _contactRep.snap = moved;
+                /* NO SURFACE IN FRONT OF THIS LIMB → DO NOT HOLD ONTO IT. `-1` means a wired probe
+                   looked and found nothing: the limb has reached past the end of the wall, or the body
+                   has mantled over the parapet and the facade is below it now. A-CRAWL kept pinning to
+                   the stale plane through the ease-out (deliberately — on a WALL-JUMP that reads as the
+                   push-off, and it still does: leaping away, the probe still finds the facade it is
+                   leaving). Topping out is the other case, and there the stale pin measured 0.386 u of
+                   float on the roof. Per-limb weight 0 hands the limb straight back to the air pose,
+                   which is the same no-op the whole pass uses at weight 0 — no second mechanism. */
+                const wLimb = moved < 0 ? 0 : wBase;
+                if (wLimb <= 0) {
+                  /* RELEASED. The receipt still reports WHERE THE JOINT IS (measured off the current
+                     pose, un-solved) rather than a sentinel: -1 already means "this rig has no
+                     articulated chain here", and a reader that cannot tell a missing limb from a
+                     released one is a receipt with two meanings — exactly the ambiguity this arc was
+                     sent to remove. `released` counts them so the condition is still visible. */
+                  _contactRep[d.key] = (_cE.x - px) * nx + (_cE.z - pz) * nz;
+                  _contactRep.released++;
+                  continue;
+                }
+                _ikTgt.set(_cE.x + (_cTgt.x - _cE.x) * wLimb, _cE.y + (_cTgt.y - _cE.y) * wLimb, _cE.z + (_cTgt.z - _cE.z) * wLimb);
                 _solveTwoBone(ch, _ikTgt.x, _ikTgt.y, _ikTgt.z);
                 // the receipt: the end joint's MEASURED distance off the plane after the solve — the
                 // number the ledger's acceptance quotes, computed where it cannot drift from the code.

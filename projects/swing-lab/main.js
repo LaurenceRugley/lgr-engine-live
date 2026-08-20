@@ -721,6 +721,14 @@ const character = createCharacterController({
    THE COLLIDER IS UNTOUCHED — this is a costume on a capsule, not a new collision shape. */
 const hero = createHeroBody({
   url: survivorUrl,
+  /* A-CONTACT (2026-08-20): THE WORLD, HANDED TO THE CONTACT ABILITY. The crawl used to pin hands and
+     feet to the plane the cling ray published, and that plane measured 0.0710 u OUTSIDE this arena's
+     facades (the ray is `segmentHit` at the probe RADIUS, which inflates every box) — so the limbs sat
+     in open air while the engine's own receipt read 0.000 and called them planted. With the world bag
+     wired, each limb probes the real surface at its own reach height. `?surfaceprobe=0` is the control
+     arm — it restores A-CRAWL's trusted-plane behaviour in the SAME build, which is how the ruler's
+     before/after columns are two URLs rather than two commits. */
+  surfaceProbe: Q.get('surfaceprobe') === '0' ? null : arena.world.segmentHit,
   /* `?hero=capsule` IS THE CONTROL ARM for the perf question, and it is why the perf table in the
      ledger is trustworthy: the two rows are two URLs of ONE build, so the only thing that differs
      between them is whether the player is a skinned rig or the capsule that was here before. */
@@ -1253,10 +1261,15 @@ window.__hero = {
   /* A-CRAWL receipts, same rule as the A-AIR pair above: "the hands are ON the wall" is a distance and
      "the gait reversed with S" is a phase derivative — both checkable numbers, neither a screenshot. */
   get airPhase() { return +hero.airPhase.toFixed(4); },
-  get contact() { const c = hero.contact; return c ? { active: c.active, w: +c.w.toFixed(3), handL: +c.handL.toFixed(4), handR: +c.handR.toFixed(4), footL: +c.footL.toFixed(4), footR: +c.footR.toFixed(4) } : null; },
+  get contact() { const c = hero.contact; return c ? { active: c.active, w: +c.w.toFixed(3), handL: +c.handL.toFixed(4), handR: +c.handR.toFixed(4), footL: +c.footL.toFixed(4), footR: +c.footR.toFixed(4), snap: +(c.snap || 0).toFixed(4), probed: !!c.probed, released: c.released | 0 } : null; },
   /* the rope's ACTUAL origin this frame, so "does the web leave the hand" is a distance and not an
      impression. Allocates one Vector3 per CALL — a probe read, never a frame path. */
   handPoint() { const v = new THREE.Vector3(); hero.webAnchorPoint(v); return { x: v.x, y: v.y, z: v.z }; },
+  /* A-CONTACT (2026-08-20): A NAMED BONE IN **WORLD** SPACE. `bonePos` below derotates into the rig
+     root's frame, which is the right question for "did the pose move" and the WRONG one for "is this
+     joint inside a wall" — geometry lives in world space, so a contact ruler must read world. The
+     engine already computes it (`bonePoint`); this only publishes it. Probe-only (allocates per call). */
+  boneWorld(name) { const v = new THREE.Vector3(NaN, NaN, NaN); hero.bonePoint(name, v); return Number.isFinite(v.x) ? { x: v.x, y: v.y, z: v.z } : null; },
   /* A NAMED BONE IN THE RIG ROOT'S OWN FRAME — the ONLY frame in which "did the limb move" is a question
      about the POSE rather than about the body. The first version of this derotated by the controller's
      YAW about its origin, and was wrong on exactly the mode it mattered most for: while roped,

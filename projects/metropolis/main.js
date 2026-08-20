@@ -548,6 +548,11 @@ const _q = new URLSearchParams(window.location.search);
 const _qNum = (k, d) => (Number.isFinite(+_q.get(k)) && _q.get(k) !== null ? +_q.get(k) : d);
 const hero = createHeroBody({
   url: survivorUrl,
+  /* A-CONTACT (2026-08-20): the city inherits the contact ability in the SAME commit as the lab — the
+     wiring-drift rule this repo names by name (A-AIR shipped to the lab only and cost a second arc).
+     `charWorld` is the bag this file already hands its own controller; the ability is the engine's.
+     `?surfaceprobe=0` restores the trusted-plane behaviour as the control arm. */
+  surfaceProbe: _q.get('surfaceprobe') === '0' ? null : charWorld.segmentHit,
   skinned: _q.get('hero') !== 'capsule',
   height: HERO_H, walkSpeed: 0.55, sprintSpeed: 0.95,
   /* a capsule of the OLD dimensions carries the frame until the GLB lands, so no capture and no probe
@@ -1596,8 +1601,12 @@ window.__hero = {
   get poseWeight() { return +hero.poseWeight.toFixed(4); },
   // A-CRAWL receipts — identical to the lab's so one harness reads either project (the A-AIR rule).
   get airPhase() { return +hero.airPhase.toFixed(4); },
-  get contact() { const c = hero.contact; return c ? { active: c.active, w: +c.w.toFixed(3), handL: +c.handL.toFixed(4), handR: +c.handR.toFixed(4), footL: +c.footL.toFixed(4), footR: +c.footR.toFixed(4) } : null; },
+  get contact() { const c = hero.contact; return c ? { active: c.active, w: +c.w.toFixed(3), handL: +c.handL.toFixed(4), handR: +c.handR.toFixed(4), footL: +c.footL.toFixed(4), footR: +c.footR.toFixed(4), snap: +(c.snap || 0).toFixed(4), probed: !!c.probed, released: c.released | 0 } : null; },
   handPoint() { const v = new THREE.Vector3(); hero.webAnchorPoint(v); return { x: v.x, y: v.y, z: v.z }; },
+  /* A-CONTACT (2026-08-20): the WORLD-space bone read — identical to the lab's, so one contact ruler
+     reads either project. `bonePos` derotates into the rig frame ("did the pose move"); geometry lives
+     in world space, so "is this joint inside a wall" needs this one. Probe-only (allocates per call). */
+  boneWorld(name) { const v = new THREE.Vector3(NaN, NaN, NaN); hero.bonePoint(name, v); return Number.isFinite(v.x) ? { x: v.x, y: v.y, z: v.z } : null; },
   bonePos(name) {
     const v = new THREE.Vector3();
     v.set(NaN, NaN, NaN); hero.bonePoint(name, v);
