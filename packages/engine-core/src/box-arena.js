@@ -52,6 +52,12 @@
      groundMaterial,
      skyline,             // A-SKYLINE opt-in — see below. null (default) = the uniform grid, untouched.
      silhouette,          // A-SKYLINE opt-in — setbacks/cornices/roof boxes/spires/skybridges. null = boxes.
+     groundYAt,           // A-MARRIAGE opt-in — (x, z, i, j) => world-Y of the PAD under cell (i,j).
+                          //   null (default) = the flat plinth at `groundY`, floats untouched.
+     heightAt,            // A-MARRIAGE opt-in — (x, z) => ground Y for the world bag (a terrain
+                          //   sampler). null = the flat `() => groundY` the bag always had.
+     ground,              // false = no flat floor plane (the married room's terrain mesh IS the
+                          //   ground). Default true — the plane every existing consumer stands on.
    }) -> {
      world,               // { heightAt, surfaceAt, segmentHit, resolveSphere } — the query bag
      collider,            // the raw createColliderWorld handle (depthAt/probe/boxAt for probes)
@@ -260,6 +266,18 @@ export function createBoxArena(opts = {}) {
        projects/swing-lab's 27-check probe is calibrated to that path and must stay on it. */
     skyline: null,
     silhouette: null,
+    /* ---- A-MARRIAGE (2026-08-19): THE CITY SITS ON TERRAIN, and the whole change is three nulls.
+       `groundYAt(x, z, i, j)` is the per-cell PAD height (carveCityPads' padYOf behind a closure);
+       every tower's base becomes its pad and every height stays authored RELATIVE to it, so the
+       A-SKYLINE quantile map — which never knew about absolute ground — cannot notice. `heightAt`
+       replaces the world bag's flat-floor answer with the married terrain sampler. With all three
+       at their defaults the arithmetic below is BIT-IDENTICAL to the flat path (base === P.groundY,
+       the same variable, so every `top`, gate and stat reads the exact floats it read yesterday —
+       pinned by the flat-in hash in world-marriage.test.mjs). FLAT-IN = TODAY-OUT is the contract:
+       a flat heightfield through the married pipeline must hash byte-identical to the plinth. */
+    groundYAt: null,
+    heightAt: null,
+    ground: true,
     ...opts,
   };
   if (P.depth == null) P.depth = P.width;
@@ -313,7 +331,9 @@ export function createBoxArena(opts = {}) {
           const x = (i - cx) * P.spacing, z = (j - cz) * P.spacing;
           const r = hash3(i, j, P.seed);
           const h = Math.max(0.2, P.height * (1 + (r * 2 - 1) * P.heightVary));
-          boxes.push({ x, z, w: P.width, d: P.depth, h, y: P.groundY, top: P.groundY + h, i, j });
+          // A-MARRIAGE: the base is the PAD when a groundYAt is wired; `h` stays relative to it.
+          const gy = P.groundYAt ? P.groundYAt(x, z, i, j) : P.groundY;
+          boxes.push({ x, z, w: P.width, d: P.depth, h, y: gy, top: gy + h, i, j });
         }
       }
       towerRecs = boxes;      // every box IS a tower here, so roofAt and topAt are the same question
@@ -436,7 +456,12 @@ export function createBoxArena(opts = {}) {
          SKYLINE a building sits, not of how tall it happens to be in units. Rank is the level's own
          normalised coordinate (0 = the shortest tower, 1 = the tallest) and it survives a spacing or
          a rope change, which a raw height threshold would not. */
-      towerRecs.push(buildTower(x, z, w, d, top, c.i, c.j, S, need, t, c.dist));
+      /* A-MARRIAGE: `skylineTop` maps rank → a top measured from P.groundY; on a pad the SAME
+         relative height stands on the pad instead. The branch (not `top − P.groundY + gy`
+         unconditionally) is the flat-in guarantee: with groundYAt null the expression is the
+         untouched `top`, so the default path's floats cannot drift by a rounding. */
+      const gy = P.groundYAt ? P.groundYAt(x, z, c.i, c.j) : P.groundY;
+      towerRecs.push(buildTower(x, z, w, d, P.groundYAt ? top - P.groundY + gy : top, c.i, c.j, S, need, t, c.dist, gy));
     }
     if (P.silhouette) buildBridges(towerRecs, S, need);
   }
@@ -453,12 +478,16 @@ export function createBoxArena(opts = {}) {
      topmost tier still ends at the height the quantile map asked for and the swingability guarantee
      survives the silhouette. Roof plant and spires sit ABOVE it and are deliberately NOT counted as the
      tower's roof — `roofAt` must answer "what can I stand on", not "what is the highest object". */
-  function buildTower(x, z, w, d, top, i, j, S, need, t = 0.5, dist = 0) {
+  /* A-MARRIAGE: `base` is the tower's OWN ground (its pad) — P.groundY on the flat path, where every
+     expression below is the same float it always was. All the height GATES in here compare the
+     tower's RELATIVE height (top − base) against the rule's relative minimum (need − P.groundY),
+     which is what decision "author heights relative to pad top" means in arithmetic. */
+  function buildTower(x, z, w, d, top, i, j, S, need, t = 0.5, dist = 0, base = P.groundY) {
     const SIL = P.silhouette;
-    const H = top - P.groundY;
-    const rec = { x, z, w, d, h: H, y: P.groundY, top, kind: 'tower', i, j, parts: 0, rank: t, district: dist };
+    const H = top - base;
+    const rec = { x, z, w, d, h: H, y: base, top, kind: 'tower', i, j, parts: 0, rank: t, district: dist };
     if (!SIL || H < (SIL.minTiered ?? 2.2)) {
-      push(x, P.groundY, z, w, d, H, 'tower', i, j);
+      push(x, base, z, w, d, H, 'tower', i, j);
       return rec;
     }
     /* ---- WHY A CORNICE IS 0.22 u THICK AND NOT 0.10, WHICH IS WHAT IT LOOKS LIKE IT WANTS TO BE.
@@ -478,7 +507,7 @@ export function createBoxArena(opts = {}) {
     const fr = nTier === 3 ? [0.50, 0.31, 0.19] : [0.66, 0.34];
     const scale = [1.0, 0.80, 0.63];
     const body = H - cH * (nTier - 1);          // the cornices eat their own height out of the stack
-    let y = P.groundY;
+    let y = base;
     for (let k = 0; k < nTier; k++) {
       const th = body * fr[k];
       const tw = w * scale[k], td = d * scale[k];
@@ -507,7 +536,7 @@ export function createBoxArena(opts = {}) {
        identity (the ledger's governing line), so the resource a level supplies is anchor HEIGHT ABOVE
        YOU — and a mast is 2 u of that for one thin box. Only on towers that already clear the rule, so
        the spires stand where the swinging happens instead of on the low-rise. */
-    if (top - P.groundY > (need - P.groundY) * 1.15 && hash3(i + 11, j + 13, (P.seed ^ 0x5e1) >>> 0) < (SIL.spire ?? 0.4)) {
+    if (top - base > (need - P.groundY) * 1.15 && hash3(i + 11, j + 13, (P.seed ^ 0x5e1) >>> 0) < (SIL.spire ?? 0.4)) {
       const sh = 0.6 + 1.8 * hash3(i + 3, j + 11, (P.seed ^ 0x5e2) >>> 0);
       const sw = 0.10 + 0.06 * hash3(i + 13, j + 5, (P.seed ^ 0x5e3) >>> 0);
       push(x, capTop, z, sw, sw, sh, 'spire', i, j);
@@ -623,9 +652,15 @@ export function createBoxArena(opts = {}) {
         if (!b) continue;
         if (hash3(a.i * 2 + di, a.j * 2 + dj, (P.seed ^ 0xbc1d) >>> 0) >= rate) continue;
         const lo = Math.min(a.top, b.top);
-        if (lo - P.groundY < (need - P.groundY) * 0.9) continue;       // both ends must be real towers
+        /* A-MARRIAGE: both gates relative to each tower's OWN base, and the deck hung off the
+           HIGHER pad (the deck must clear the ground at both ends; the higher pad is the binding
+           one). Flat path: a.y === b.y === P.groundY, so min(a.top−a.y, b.top−b.y) is exactly
+           lo − P.groundY (min and an exact common subtraction commute) and bHi === P.groundY —
+           the same floats as before, which the flat-in hash pins. */
+        if (Math.min(a.top - a.y, b.top - b.y) < (need - P.groundY) * 0.9) continue;   // both ends must be real towers
         const f = 0.42 + 0.34 * hash3(a.i + dj, a.j + di, (P.seed ^ 0xbc2e) >>> 0);
-        const y = P.groundY + (lo - P.groundY) * f;
+        const bHi = Math.max(a.y, b.y);
+        const y = bHi + (lo - bHi) * f;
         if (di) {
           const x0 = a.x + a.w / 2, x1 = b.x - b.w / 2;
           if (x1 - x0 < 0.35) continue;
@@ -776,6 +811,13 @@ export function createBoxArena(opts = {}) {
       if (emMesh.instanceColor) emMesh.instanceColor.needsUpdate = true;
     } else if (emMesh) { group.remove(emMesh); emMesh.dispose(); emMesh = null; }
 
+    /* A-MARRIAGE: `ground: false` = no flat floor plane — the married room's terrain mesh IS the
+       ground, and a plinth poking through a hillside would be the exact two-representations drift
+       the one-field rule forbids. Default true: every existing consumer keeps its floor. */
+    if (P.ground === false) {
+      if (ground) { group.remove(ground); ground = null; }
+      return;
+    }
     const gs = P.groundSize != null ? P.groundSize : Math.max(P.cols, P.rows) * P.spacing + P.spacing * 4;
     if (!ground) {
       if (!P.groundMaterial && !ownedGroundMat) {
@@ -792,12 +834,15 @@ export function createBoxArena(opts = {}) {
   }
 
   /* ---- THE WORLD QUERY BAG — the four functions every body in this engine reads.
-     `heightAt` is the FLAT FLOOR ONLY. Rooftops arrive through `surfaceAt`, exactly as they do in
-     metropolis, and keeping them apart is load-bearing rather than tidy: the grapple's `arcClear`
-     test asks `heightAt` "would this arc hit the GROUND", and folding roofs into that answer would
-     reject every arc that passes over a building — which is most of the good ones. ---- */
+     `heightAt` is the GROUND ONLY (the flat floor, or — A-MARRIAGE — the married terrain sampler).
+     Rooftops arrive through `surfaceAt`, exactly as they do in metropolis, and keeping them apart
+     is load-bearing rather than tidy: the grapple's `arcClear` test asks `heightAt` "would this arc
+     hit the GROUND", and folding roofs into that answer would reject every arc that passes over a
+     building — which is most of the good ones. The ONE bag serves the married geometry: heightAt
+     reads the carved field, the other three read the packed boxes standing on it. Read through P
+     live (not captured) so a rebuild that swaps the sampler swaps the bag with it. ---- */
   const world = {
-    heightAt: () => P.groundY,
+    heightAt: (x, z) => (P.heightAt ? P.heightAt(x, z) : P.groundY),
     surfaceAt: (x, z, yMax, r) => collider.surfaceAt(x, z, yMax, r),
     segmentHit: (ox, oy, oz, ex, ey, ez, r) => collider.segmentHit(ox, oy, oz, ex, ey, ez, r),
     resolveSphere: (st, dt, cfg) => collider.resolveSphere(st, dt, cfg),
@@ -821,7 +866,11 @@ export function createBoxArena(opts = {}) {
        instead of the swing looking broken three arcs later. */
     if (sky) {
       let clearing = 0;
-      for (const r of towerRecs) if (r.top > sky.need) clearing++;
+      /* A-MARRIAGE: the rule is LOCAL — a tower on a pad clears it when its top beats the arc-bottom
+         minimum measured from ITS OWN ground, i.e. top > need + (padY − P.groundY). On the flat path
+         r.y − P.groundY is 0 by identity (same variable) and x + 0 === x in IEEE, so the comparison
+         is bit-for-bit the old `r.top > sky.need` — the guarantee count cannot move. */
+      for (const r of towerRecs) if (r.top > sky.need + (r.y - P.groundY)) clearing++;
       const rt = towerRecs.map((r) => r.top).sort((a, b) => a - b);
       s.towers = towerRecs.length;
       s.parts = boxes.length - towerRecs.length;
@@ -884,7 +933,8 @@ export function createBoxArena(opts = {}) {
     openSpot(x = 0, z = 0) {
       const gx = Math.round(x / P.spacing) * P.spacing + P.spacing / 2;
       const gz = Math.round(z / P.spacing) * P.spacing + P.spacing / 2;
-      return { x: gx, y: P.groundY, z: gz };
+      // A-MARRIAGE: on married ground the open spot's floor is wherever the street actually is.
+      return { x: gx, y: P.heightAt ? P.heightAt(gx, gz) : P.groundY, z: gz };
     },
     rebuild(next = {}) {
       Object.assign(P, next);

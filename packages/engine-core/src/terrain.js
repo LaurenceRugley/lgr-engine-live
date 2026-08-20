@@ -86,6 +86,10 @@ export const BIOMES = [
   { key: 'hills',     color: '#8a8a55' },   // 4 — mid elevation
   { key: 'rock',      color: '#7d7468' },   // 5 — high, exposed
   { key: 'snow',      color: '#eef2f6' },   // 6 — the peaks
+  /* 7 — A-MARRIAGE (2026-08-19): city ground. `classify` never returns it; only `carveCityPads`
+     writes it (pad + street texels), so every existing consumer is untouched — APPENDING here is the
+     additive move (index 7 shifts nothing; catalog/scatter iterate by key or by value, checked). */
+  { key: 'pavement',  color: '#63666e' },
 ];
 const B = Object.fromEntries(BIOMES.map((b, i) => [b.key, i]));
 
@@ -249,6 +253,46 @@ export function buildTerrainMesh(terrain, { worldSize = 26, baseY = 0, chunks = 
   }
   group.userData.dispose = () => group.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
   return group;
+}
+
+/* ============================================================================================
+   createTerrainSampler (A-MARRIAGE, 2026-08-19) — the WORLD-Y ground query over the ONE field.
+   ------------------------------------------------------------
+   `generateTerrain` gives a NORMALISED [0,1] grid and `buildTerrainMesh` maps it to world Y as
+   `wy(h) = baseY + (h − sea) · relief`. Until now the only world-Y bilinear sampler in the engine
+   lived inside `createMotoTerrain` (moto.js), private to its own analytic grid — so a consumer that
+   wanted "what height is the ISLAND terrain at (x,z)" had nowhere to ask. The citygen↔terrain
+   marriage needs exactly that question answered by the physics (`world.heightAt`), so the sampler
+   moves HERE, beside the buffer it reads and the mapping it inverts — one field, one mapping, and
+   now one query (the box-arena "two ground functions that disagree by centimetres" lesson).
+
+   BILINEAR, moto.js's own idiom verbatim: clamped at the rim (the world continues flat past the
+   edge rather than cliffing) and exact at the LAST vertex (the i >= size−1 clamp sets u = 1 rather
+   than leaving the sample an epsilon inside the final cell). Reads the buffer LIVE — a sculpt, a
+   paint or a `carveCityPads` mutation is visible to the very next call with no rebuild.
+
+   The render mesh triangulates each cell into two flat triangles while this interpolates the
+   bilinear patch; the two differ mid-cell by at most the patch's twist term |h00+h11−h10−h01|/4
+   (in world units, after ·relief) — measured and pinned in carve-pads.test.mjs rather than assumed.
+
+   C++ anchor: a texture2D bilinear fetch on a CLAMP_TO_EDGE heightmap, done by hand.
+   `world` takes the SAME { worldSize, baseY } object handed to buildTerrainMesh — one mapping,
+   two readers, so they cannot drift. */
+export function createTerrainSampler(terrain, { worldSize = 26, baseY = 0 } = {}) {
+  const { size, height, sea, relief } = terrain;
+  const cell = worldSize / (size - 1), half = worldSize / 2;
+  return (x, z) => {
+    const fx = Math.min(size - 1, Math.max(0, (x + half) / cell));
+    const fz = Math.min(size - 1, Math.max(0, (z + half) / cell));
+    let i = Math.floor(fx), j = Math.floor(fz);
+    let u = fx - i, v = fz - j;
+    if (i >= size - 1) { i = size - 2; u = 1; }
+    if (j >= size - 1) { j = size - 2; v = 1; }
+    const h00 = height[j * size + i], h10 = height[j * size + i + 1];
+    const h01 = height[(j + 1) * size + i], h11 = height[(j + 1) * size + i + 1];
+    const h = h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
+    return baseY + (h - sea) * relief;
+  };
 }
 
 /* L69/L71 — rebuild ONLY the chunk meshes a brush edit touched: recompute position + flat normals from the

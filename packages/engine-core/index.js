@@ -236,7 +236,15 @@ export { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 // L64 — PROCEDURAL TERRAIN: seeded heightfield + biome generator + flat-shaded chunked mesh.
 // L69 — `rebuildTerrainChunks` for live sculpting (dirty-chunk update).
-export { generateTerrain, buildTerrainMesh, rebuildTerrainChunks, BIOMES, TERRAIN_PRESETS, PRESET_KEYS } from './src/terrain.js';
+// A-MARRIAGE — `createTerrainSampler`: the world-Y bilinear ground query over the ONE field (world.heightAt's terrain half).
+export { generateTerrain, buildTerrainMesh, rebuildTerrainChunks, createTerrainSampler, BIOMES, TERRAIN_PRESETS, PRESET_KEYS } from './src/terrain.js';
+
+// A-MARRIAGE (2026-08-19) — THE CITYGEN↔TERRAIN MARRIAGE, route 1 (research-aaa-environments.md §2):
+// carveCityPads flattens a PAD under each city cell and RAMPS the streets between pads (smoothstep,
+// grade-budgeted, embankment-blended), writing into the EXISTING heightfield — mutate the one field,
+// then rebuildTerrainChunks the dirty meshes (dirtyMeshesFor picks them). Pairs with createBoxArena's
+// groundYAt/heightAt opt-ins: towers stand on pads, heights author relative to pad top, ONE world bag.
+export { carveCityPads, dirtyMeshesFor } from './src/carve-pads.js';
 
 // L65 — WORLD SCATTER: biome-keyed instanced trees/rocks/tufts on the terrain.
 export { generateScatter, buildScatterGroup, createScatter } from './src/scatter.js';

@@ -221,6 +221,22 @@
         </div>
       </section>
 
+      <!-- WORLD LAB — the citygen↔terrain marriage room. Card added 2026-08-19 WITH the room
+           (A-MARRIAGE), not two arcs later — the registration-omission class this hub has already
+           paid for twice. Thumb is a real capture (chrome hidden) at 720x405: the generated city
+           terraced onto its island. -->
+      <section class="card" style="--edge: var(--accent5)">
+        <img class="thumb" src="img/world-lab.jpg" alt="The World Lab — a generated city of setback towers terraced onto a green island, streets ramping between pads down to the shore" loading="lazy" width="720" height="405">
+        <span class="tag new">The city marries the terrain</span>
+        <h2>The World Lab</h2>
+        <p>The generated city finally sits <b>on real terrain</b> instead of a flat plinth: a pad is carved flat under every block, the streets between pads become <b>ramps</b> with a hard grade budget, and every tower authors its height off its <b>own pad</b>. Then all three of the engine's bodies run on that one ground: <b>walk</b> the ramped streets, <b>lock + web + swing</b> between towers standing on different pad heights, and press <b>B</b> for the <b>dirtbike</b> — ride a street corridor out over the city's rim and jump the embankment into the wild.</p>
+        <div class="fact"><b>The interesting part:</b> the carve mutates the ONE heightfield the renderer and the physics both read, so nothing can drift — and the swing city's 70% guarantee survives the hills because each tower is now counted against its <i>local</i> street level, not a global zero. Ask for 70% swingable on a hillside and the finished geometry counts exactly 117/168.</div>
+        <div class="controls"><b>Controls:</b> WASD walk · <b>LMB</b> lock a tower · <b>RMB</b> web it · <b>Space</b> jump / release · <b>B</b> mount the dirtbike (<b>W</b> throttle, <b>↓</b> leans back) · <b>V</b> camera · <b>R</b> respawn.</div>
+        <div class="actions">
+          <a class="btn" href="world-lab/">Enter the married world →</a>
+        </div>
+      </section>
+
       <!-- CITY — the engine showcase -->
       <section class="card" style="--edge: var(--accent2)">
         <img class="thumb" src="img/city.jpg" alt="The Open City — a procedural skyline at golden hour, toon-style rendering" loading="lazy" width="720" height="405">
