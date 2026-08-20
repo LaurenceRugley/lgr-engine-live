@@ -297,6 +297,11 @@ export { createDiveController } from './src/createDiveController.js';
 // colliders). Sibling of scatter.js (terrain scatter); this is the flat-arena, gameplay-collider forest.
 export { createForest, placeForest } from './src/createForest.js';
 
+// ARC A-TREEKIT — the MODELED forest: the Blender conifer kit (4 variants, one generator, albedo×AO in
+// COLOR_0) instanced over any placer's placements, with seeded per-instance hue/value tints — the bounded
+// proof's colour-variety gap, closed as an engine seam. Pure helpers exported for node tests + receipts.
+export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS } from './src/createTreeKit.js';
+
 // Beauty B1 GROUND TRUTH — the GPU TEXTURE FORGE: seeded procedural PBR (albedo/ORM/Sobel-normal) baked
 // at boot from periodic-noise family shaders, so a world stops being flat-coloured. Recipes live in
 // forge-recipes.js; a project wires the materials. supported=false on iOS-p0 (bake skipped, flat fallback).

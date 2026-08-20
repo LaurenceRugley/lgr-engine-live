@@ -89,6 +89,8 @@ export { generateScatter, buildScatterGroup, createScatter } from './src/scatter
 // Arena game abilities (flat-arena forest + flow-field horde pathing) — reusable engine modules, so the
 // no-build lib barrel exposes them too (engine-first: every consumer, build or no-build, can inherit).
 export { createForest, placeForest } from './src/createForest.js';
+// A-TREEKIT — modeled conifer kit loader + per-instance tint seam (pure helpers included: receipts + tests)
+export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS } from './src/createTreeKit.js';
 export { createFlowField } from './src/createFlowField.js';
 export { createBallistics } from './src/createBallistics.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';

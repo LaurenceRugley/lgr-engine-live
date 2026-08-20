@@ -345,6 +345,42 @@
     "meshes": null
   },
   {
+    "path": "packages/engine-core/assets/models/moto_bike.glb",
+    "home": "engine-core-library",
+    "label": "moto_bike.glb",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 81804,
+    "sha256": "79140cd89ba256e64ab98f90349c3623b711727ec10d70d6907be7b3a3774b38",
+    "tris": 948,
+    "meshes": 4
+  },
+  {
+    "path": "packages/engine-core/assets/models/moto_bike.usdz",
+    "home": "engine-core-library",
+    "label": "moto_bike.usdz",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 38963,
+    "sha256": "33aafcaf7fc3f09eebf23c24fa7feea4357356d74c8e373d1301d3a5e302ef64",
+    "tris": null,
+    "meshes": null
+  },
+  {
     "path": "packages/engine-core/assets/models/survivor.glb",
     "home": "engine-core-library",
     "label": "survivor.glb",
@@ -361,6 +397,60 @@
     "sha256": "ce4d543e82e455d5a1253798c9759f12b9eec74929ddbca464447eeaa3a42c5d",
     "tris": 1578,
     "meshes": 1
+  },
+  {
+    "path": "packages/engine-core/assets/models/survivor_ride.glb",
+    "home": "engine-core-library",
+    "label": "survivor_ride.glb",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 43212,
+    "sha256": "f3d3be95afdc53044d80f01f2ef42c360a84dac9d34162c459442a9a171d6d0f",
+    "tris": null,
+    "meshes": null
+  },
+  {
+    "path": "packages/engine-core/assets/models/tree_kit.glb",
+    "home": "engine-core-library",
+    "label": "tree_kit.glb",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 41440,
+    "sha256": "a117731e1170d450e366f7ef00947597e0a1b3f372aa176e064361d05e6bb95c",
+    "tris": 432,
+    "meshes": 4
+  },
+  {
+    "path": "packages/engine-core/assets/models/tree_kit.usdz",
+    "home": "engine-core-library",
+    "label": "tree_kit.usdz",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 24971,
+    "sha256": "729e308f6051ee9ddb2ed053bc62cfdd657b6620ef3b60e990b4b7a68d73de8a",
+    "tris": null,
+    "meshes": null
   },
   {
     "path": "packages/engine-core/assets/models/veh_box_van.glb",

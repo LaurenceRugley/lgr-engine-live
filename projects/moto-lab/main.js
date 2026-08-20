@@ -29,6 +29,7 @@ import {
   createMotoTerrain, createBikeMesh, createBikeGlbMesh, createMotoChaseCam, launchSpeed,
   createTrickScorer,
   generateScatter, buildScatterGroup, BIOMES,
+  createTreeKit, hashTreeInstances,
   createCharacterRig,
 } from '@lgr/engine-core';
 /* the ASSETS (A-MOTO-ASSET, 2026-08-19) — `?url` in the PROJECT, per pedestrians.js's rule (a ?url
@@ -36,6 +37,7 @@ import {
    content-hashed; they are runtime fetches, NOT entry JS (size-budget: moto_bike.glb has its own
    fixed-file budget row; survivor.glb is the same shipped asset hoard2/swing-lab already fetch). */
 import motoBikeUrl from '@lgr/engine-core/assets/models/moto_bike.glb?url';
+import treeKitUrl from '@lgr/engine-core/assets/models/tree_kit.glb?url';             // A-TREEKIT: the conifer kit (own budget row)
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
 import survivorRideUrl from '@lgr/engine-core/assets/models/survivor_ride.glb?url';   // the (B)-path seated pose clip
 
@@ -98,13 +100,26 @@ const TP = {
   size: qNum('grid', 256),
 };
 const BIOME_KEYS = BIOMES.map((b) => b.key);
-let T = null, scatterGroup = null;
+let T = null, scatterGroup = null, treeGroup = null;
 let LEVEL_BUILD_MS = 0;
+
+/* A-TREEKIT — TWO ARMS, ONE PLACER (the ?bike=box discipline, applied to the forest): the Blender
+   conifer kit is the default tree; `?trees=proc` keeps the procedural cones as the control arm.
+   The PLACER never changes arms — generateScatter runs identically and the kit consumes the SAME
+   filtered `placements.tree` list, so procedural-vs-kit is a pure ART A/B (position hash equal by
+   construction; `__moto.forest()` is the receipt). The kit handle is created ONCE — the GLB loads
+   a single time and every terrain rebuild re-instances the cached geometry (C++ anchor: the mesh
+   is a shared_ptr'd resource; a rebuild only re-fills the per-instance buffer). Load failure
+   resolves 'failed' and the room REBUILDS with procedural trees, loudly — the same degrade-whole
+   convention the bike loader follows. */
+const treeKit = Q.get('trees') === 'proc' ? null : createTreeKit({ url: treeKitUrl });
+if (treeKit) treeKit.ready.then((mode) => { if (mode !== 'kit') buildTerrain(); });
 
 function buildTerrain() {
   const t0 = performance.now();
   if (T) { scene.remove(T.group); T.dispose(); }
   if (scatterGroup) { scene.remove(scatterGroup); scatterGroup.userData.dispose(); scatterGroup = null; }
+  if (treeGroup) { scene.remove(treeGroup); treeGroup.userData.dispose(); treeGroup = null; }
   T = createMotoTerrain({
     seed: TP.seed, size: TP.size, worldSize: TP.worldSize,
     speed: BIKE.maxSpeed, g: BIKE.gravity, pitchRate: BIKE.airPitchRate,
@@ -125,8 +140,17 @@ function buildTerrain() {
       // …and nothing grows ON the spawn (a canopy over the opening frame reads as a bug, not a forest)
       && Math.hypot(p.x - T.spawn.x, p.z - T.spawn.z) > 4);
   }
-  scatterGroup = buildScatterGroup(sc.placements);
+  /* kit arm: rocks + tufts stay procedural (out of this arc's scope — HANDOFF names them as the
+     next parameter sets); TREES leave the scatter group for the kit's instanced variant meshes.
+     The scatter group still allocates its (empty) tree mesh — buildScatterGroup's contract for
+     the world editor's paint brush — it just draws zero instances here. */
+  const useKit = treeKit && treeKit.mode !== 'failed';
+  scatterGroup = buildScatterGroup(useKit ? { ...sc.placements, tree: [] } : sc.placements);
   scene.add(scatterGroup);
+  if (useKit) {
+    treeGroup = treeKit.buildGroup(sc.placements.tree, { seed: TP.seed });
+    scene.add(treeGroup);
+  }
   LEVEL_BUILD_MS = performance.now() - t0;
   return T;
 }
@@ -475,6 +499,18 @@ window.__moto = {
   /* A-MOTO-ASSET receipts: which visual arm is actually on screen ('glb' | 'box' | 'loading' —
      the box control arm reports 'box'), and whether the seated rider handle mounted. */
   bikeMode: () => bike.mode || 'box',
+  /* A-TREEKIT receipts: which FOREST arm is on screen, the order-independent position hash over
+     every rendered tree instance (engine-computed from the GPU-bound matrices — the pure-art-A/B
+     proof: both arms must print the SAME hash for one seed), and the kit's own tint report
+     (realized hue/value ranges + per-variant counts + sampled instance colours). */
+  forest: () => ({
+    mode: treeKit ? treeKit.mode : 'proc',
+    /* hashed over the WHOLE scene, not just the active group — if a bug ever leaves BOTH arms
+       planted (kit trees + a populated procedural tree mesh), the count doubles and the A/B
+       identity check goes loudly red instead of quietly comparing half a truth. */
+    ...hashTreeInstances(scene),
+    tints: treeKit && treeKit.mode === 'kit' ? treeKit.tintReport() : null,
+  }),
   riderMounted: () => !!(riderRig && riderRig.count > 0),
   /* A-WHIP receipts: the mount-IK's own measured joint→socket distances (engine-computed, the
      A-CRAWL contactReport pattern — the probe asserts these, never re-derives from pixels),

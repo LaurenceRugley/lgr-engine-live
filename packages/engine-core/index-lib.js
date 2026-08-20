@@ -123,6 +123,8 @@ export { createSolarSystem } from './src/createSolarSystem.js';
 export { createMessier } from './src/createMessier.js';
 export { ASTRONOMY_CREDITS, getAttribution } from './src/astronomy-credits.js';
 export { createForest, placeForest } from './src/createForest.js';
+// A-TREEKIT — modeled conifer kit loader + per-instance tint seam (pure helpers included: receipts + tests)
+export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS } from './src/createTreeKit.js';
 export { createFlowField } from './src/createFlowField.js';
 export { createBallistics } from './src/createBallistics.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';

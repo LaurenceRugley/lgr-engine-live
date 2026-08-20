@@ -36,3 +36,4 @@ them adopt our art direction (vector tiers / day-night / windows / palettes) —
 | `veh_{fire_truck,box_van,sedan}.glb/.usdz` | `tools/blender/build_vehicles.py` | parts-grammar bounded proof |
 | `moto_bike.glb/.usdz` | `tools/blender/build_moto_bike.py` | A-MOTO-ASSET (2026-08-19): the articulated stylized dirtbike (4 named nodes, material slots, baked vertex AO, 948 tris) |
 | `survivor_ride.glb` | `tools/blender/build_ride_clip.py` | A-MOTO-ASSET: the survivor's seated 'Ride' pose clip, authored on its own imported rig (the (B) path) — plays on survivor.glb above via `extraClips` |
+| `tree_kit.glb/.usdz` | `tools/blender/build_tree_kit.py` | A-TREEKIT (2026-08-19): the conifer kit — 4 variants from ONE parameterized generator (432 tris total), albedo×AO collapsed into COLOR_0, one primitive per variant (one instanced draw each) |
