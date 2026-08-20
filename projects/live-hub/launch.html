@@ -29,11 +29,14 @@
 
        NO NEW IMAGES. Every thumb here is one the gallery already ships, so this page costs the
        live-hub size budget (tools/size-budget.test.mjs) only its own HTML — the budget had 21.5KB gz
-       of headroom measured before this arc and the hub is ~98% images.
+       of headroom measured before this arc and the hub is 95.9% images (measured, not estimated).
        ============================================================================================ -->
   <style>
     :root {
-      --bg: #0b0e0c; --ink: #eaf0e2; --muted: #9aa891; --line: #ffffff1a; --dim: #6f7a68;
+      /* --dim was #6f7a68 until the A-LAUNCH refute pass measured it at 4.31:1 — under WCAG AA's
+         4.5:1 for the 9.9px .lbl group labels and the 12.8px .note. Raised to clear AA against BOTH
+         ends of the body gradient (the lighter #16211c top is the worse case, not --bg). */
+      --bg: #0b0e0c; --ink: #eaf0e2; --muted: #9aa891; --line: #ffffff1a; --dim: #8a9683;
       --accent: #8fd94a; --accent2: #4aa3d9; --accent3: #d98f4a; --accent4: #b06ad9; --accent5: #e0c34a;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }

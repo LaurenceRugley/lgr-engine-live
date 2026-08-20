@@ -671,7 +671,13 @@ const character = createCharacterController({
      cuts (character.js's own seam note). */
   eyeHeight: EYE, radius: 0.09, footR: 0.12, collideYOff: 0.14,
   moveSpeed: WALK_V, sprintSpeed: SPRINT_V, accel: 14,
-  jumpSpeed: JUMP_V, gravity: SWING.gravity,
+  /* A FUNCTION, not the number — OPEN #36, closed. `SWING.gravity` is live-mutable (the dock's TUNE
+     list and the URL sweep both write it), and createGrappleModel re-reads its profile every frame.
+     Passing the number captured it once, so the dial moved the SWING's gravity and not the FALL's —
+     the body got lighter the instant a web cut, which is the exact mismatch the note above forbids.
+     The A-LAUNCH seam accepts a function and re-reads it per step; at rest it returns the same 5.4,
+     so the default is unchanged. (C++: a `const float` captured by value vs. a `const float&`.) */
+  jumpSpeed: JUMP_V, gravity: () => SWING.gravity,
   /* THE CHASE IS SIZED TO THIS LEVEL'S STREETS, and that is the kind of thing a lab exists to find.
      metropolis uses 0.9 u because its street canyon is 0.55 u wide and anything longer spends the
      whole game clipped against a facade. Here the street is 2.5 u, so the arm has room — and it needs
