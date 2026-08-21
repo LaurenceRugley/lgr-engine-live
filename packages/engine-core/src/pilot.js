@@ -103,6 +103,34 @@ function bk(profile, axes, key) {
   return 1 + (m - 1) * clamp(axes.boost || 0, 0, 1);
 }
 
+/* ── SCALE A PROFILE TO A WORLD (A-DRIVE, 2026-08-21) ────────────────────────
+   The A-HELI finding, generalized off the one model that had it. Every profile in this file was
+   authored against the ORIGINAL ~26-unit city, and a room that is 128 units across inherits craft
+   that crawl — createSpacecraftModel already carries `mediumScale` for exactly this, and the other
+   seven models carry nothing, so each new room re-discovers the problem by flying something slow.
+
+   THE DIMENSIONAL RULE, which is the whole reason this is four lines and not a table: scale every
+   LENGTH, VELOCITY and ACCELERATION by k and leave every RATE alone. Then the trajectory is
+   geometrically similar at the same time constants — a turn circle grows with the world, a climb
+   takes as long as it did, the craft simply covers more ground. Scaling the rates instead (rad/s,
+   1/s) would change how the craft FEELS rather than how far it reaches, which is the mistake the
+   mediumParams note above already refuses to make for drag/vDrag/buoyancy.
+
+   `keys` IS REQUIRED, deliberately. A default list would have to guess which of an arbitrary
+   profile's keys are dimensional, and it would guess wrong the first time someone adds one —
+   `turnRate` and `maxSpeed` are both numbers and only one of them scales. The caller knows its own
+   profile; making it say so is cheaper than a silent wrong answer (Rule 15).
+   C++ anchor: a units-aware scale applied through an explicit field list, not a blanket memcpy. */
+export function scaleProfileSpeeds(profile, k, keys) {
+  const out = { ...profile };
+  if (k === 1) return out;
+  for (const key of keys) {
+    if (typeof out[key] === 'number') out[key] *= k;
+    else console.warn(`scaleProfileSpeeds: '${key}' is not a number on this profile — nothing scaled for it`);
+  }
+  return out;
+}
+
 /* ── THE GROUND MOVEMENT MODEL (Strategy) ────────────────────────────────────
    A PURE arcade integrator: throttle → speed along heading, steer → heading, project onto the
    terrain heightfield, orient the chassis to the slope. No physics engine — the research's "feel =
@@ -309,8 +337,26 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
       state.vy = clamp(state.vy, -profile.maxV, profile.maxV);
       state.y += state.vy * dt;
       if (state.y < terrainY) { state.y = terrainY; if (state.vy < 0) state.vy = 0; }   // can't sink through the ground
-      // WATER SURFACE FLOOR: only block DOWNWARD motion — positive lift always escapes, no sticky latch.
-      if (waterY > NO_WATER && state.y < waterY) { state.y = waterY; if (state.vy < 0) state.vy = 0; }
+      /* WATER SURFACE FLOOR: only block DOWNWARD motion — positive lift always escapes, no sticky latch.
+         ── A-DRIVE (2026-08-21): THE FLOOR MADE THIS MODEL'S OWN WATER MEDIUM UNREACHABLE. ────────
+         Found by flying the spaceship out over world-lab's sea and holding descend: it settled to
+         exactly y = 0.00 (the sea plane) and reported medium 'air', for six seconds. The arithmetic
+         says it could never have done anything else, and it is a genuine contradiction rather than a
+         tuning miss:
+           · probeMedium enters water only at `y < waterY − SKIN` (SKIN 0.4),
+           · this line clamps `y ≥ waterY` every frame,
+           · so the entry condition is unsatisfiable, and MEDIUM_PARAMS.water (drag 4.6, buoyancy
+             1.1) — a whole row of the force table — was dead code in every consumer.
+         It also contradicts the model's OWN header, which lists "descend into ocean, surface, land"
+         among the L77 criteria it claims to hit. Rule 0: a rule that contradicts reality gets fixed,
+         not quietly picked a side of.
+         THE FIX IS OPT-IN AND THE DEFAULT IS PROVABLY INERT, because "can go underwater" is not a
+         property of the integrator, it is a property of the CRAFT: a spaceplane submerges, and the
+         helicopter that shares this exact model must not. `submersible` is absent from every shipped
+         profile, so metropolis's heli and every other consumer keep the floor bit-for-bit; world-lab's
+         spaceship row is the only thing that sets it. The SEABED clamp above still applies, so a
+         submersible craft is bounded by the ground rather than by nothing. */
+      if (waterY > NO_WATER && state.y < waterY && !profile.submersible) { state.y = waterY; if (state.vy < 0) state.vy = 0; }
       // ORIENT: a saucer — yaw + a coordinated BANK into turns + a little PITCH from climb/dive. Small cosmetic
       // angles, so an Euler→quaternion build is safe (gimbal lock only bites near ±90° pitch, which we never reach).
       // H — coordinated bank: derive from the EASED steer (axes is _ax from the controller) × speed fraction.
@@ -328,6 +374,30 @@ export function createSpacecraftModel(profile = CRAFT_PROFILE) {
   }
   return { step };
 }
+
+/* ---- THE HELICOPTER (A-HELI 2026-08-06, LIFTED to the engine by A-DRIVE 2026-08-21).
+   NOT A MODEL — a PROFILE, and that is the finding worth keeping. A-HELI's whole result was that
+   "a helicopter" needed no new physics: createSpacecraftModel above is already a yaw + throttle +
+   vertical-lift machine that hovers, crosses mediums and lands, which is the entire flight
+   envelope of a light utility helicopter at this fidelity. What a heli needs is SLOWER and
+   TIGHTER than a saucer, and both are numbers.
+   It was born as a project-local `const` in metropolis/main.js, where it stayed for a fortnight —
+   exactly the project-local-ability drift the project CLAUDE.md names. These are metropolis's own
+   values, character for character.
+   ⚠ THE LIFT IS HALF-DONE ON PURPOSE, AND THIS IS THE OTHER HALF'S RECEIPT. metropolis/main.js:675
+   still declares its own identical `const HELI_PROFILE`, so the value now lives in TWO places and
+   can drift. That duplicate was NOT removed because A-DRIVE's brief listed projects/metropolis as
+   do-not-touch with an explicit "stop and report, do not proceed unilaterally" escape hatch. The
+   one-line swap DESIGN needs to approve is:
+       -  const HELI_PROFILE = { ...CRAFT_PROFILE, mediumScale: 0.30, chaseDist: 2.6, chaseElev: 0.34 };
+       +  (delete; import HELI_PROFILE from '@lgr/engine-core' — and drop CRAFT_PROFILE from the
+          import list, which becomes unused)
+   Until then, a change to either copy must be made to both. Flagged in HANDOFF as an OPEN.
+   `mediumScale` IS PER-WORLD and must be re-chosen by every room: 0.30 is fitted to metropolis's
+   ~15-unit island (air cruise 2.4 u/s, so the island crosses in ~6 s instead of 2). A 128-unit
+   world wants a bigger number and world-lab spreads-and-overrides it — which is what a profile
+   parameterized on world scale is FOR. Copying 0.30 into a large world would strand the pilot. */
+export const HELI_PROFILE = { ...CRAFT_PROFILE, mediumScale: 0.30, chaseDist: 2.6, chaseElev: 0.34 };
 
 /* ---- THE ROAD CAR (A-FEEL, 2026-08-05) — a car that can actually turn a corner on a street grid.
    WHY A THIRD MODEL rather than tuning ATV_PROFILE: createGroundModel is an ALL-TERRAIN model and its
@@ -409,8 +479,24 @@ export function createRoadModel(profile = ROAD_PROFILE) {
     state.x += s * state.speed * dt;
     state.z += c * state.speed * dt;
 
-    // 4) SIT ON THE ROAD — damp to ground height (a road car does not conform to slope normals).
-    state.y = damp(state.y, H(state.x, state.z), 18, dt);
+    /* 4) SIT ON THE ROAD — damp to ground height (a road car does not conform to slope normals),
+       then FLOOR IT. The floor is not belt-and-braces; the damp alone is wrong on a hill and had
+       been since A-FEEL. A damp LAGS its target, and on a CLIMB the target rises faster than the
+       lag can follow, so `y` ends up UNDER the ground — measured on world-lab's terrain the moment
+       a car was driven on it: min(y − heightAt) = −0.100 / −0.091 / −0.120 u for the sedan, the van
+       and the fire truck, i.e. a quarter of a car body underground on the way up a slope.
+       IT NEVER SHOWED BEFORE BECAUSE THE ONLY CONSUMER DROVE ON A PLINTH. metropolis's city is
+       flat, and on flat ground damp(y, gy) with y already == gy returns gy EXACTLY (b−a is 0, so
+       the result is `a + 0`), which makes this clamp a bit-exact no-op there — the existing
+       consumer cannot move. That is the whole shape of the bug class the project CLAUDE.md calls
+       wiring drift: an ability is fine until a sibling path asks it something the first one never
+       did. Only ever upward, like the ground clamp: a car may fly off a crest, never sink.
+       (createGroundModel's terrain-follow has the same damp and the same latent issue, but its
+       consumers are the ATV and placed-life — Rule 7 says grep before widening, and the ATV was
+       not driven in this arc, so it is REPORTED rather than silently changed.) */
+    const gy = H(state.x, state.z);
+    state.y = damp(state.y, gy, 18, dt);
+    if (state.y < gy) state.y = gy;
 
     // 5) BANK into the corner, proportional to actual lateral acceleration (v·ω), so it reads as
     //    weight transfer rather than a steering-input animation.
@@ -612,6 +698,53 @@ export function createBirdModel(profile = BIRD_PROFILE) {
   }
   return { step };
 }
+
+/* ---- THE FIXED-WING AEROPLANE (A-DRIVE, 2026-08-21) — a PROFILE on the bird, not a new model.
+   The brief asked this to be PROVEN before a new integrator was written, so here is the proof,
+   which is just reading createBirdModel above and listing what a fixed wing needs:
+     energy trade (dive buys speed, climb spends it) ....... step 3, `gravityTrade`
+     a stall that drops the nose until speed returns ...... step 4, `stallSpeed`
+     turns that come from BANK, not from yaw .............. step 2, `turnFromBank`
+     thrust that can sustain a climb ...................... step 3, `flap`
+     a floor it skims rather than tunnels through ......... step 6, `skim`
+   That is a fixed-wing aircraft. The bird IS an aeroplane whose engine is a wing; `flap` is
+   thrust either way, and the only reason the key is named after a gull is that a gull got there
+   first. A new integrator would have been the same five lines with different variable names.
+
+   THE NUMBERS, derived the way BIRD_PROFILE derives its own (the arithmetic IS the design):
+     · CLIMB MUST BE SUSTAINABLE, which is the exact bug the gull's `flap` note records. A full
+       climb drains sin(pitchMax)·gravityTrade + glideDrag = sin(0.40)·3.2 + 0.22 = 1.466 u/s².
+       Thrust 2.6 clears it by +1.13 u/s², so holding the nose up and the throttle open CLIMBS —
+       and releasing the throttle immediately resumes the glide, which is the whole model.
+     · TURN RATE FALLS WITH SPEED in a real aircraft (ω = g·tan φ / v), and this model's coupling
+       is a linear constant, so the constant absorbs the speed ratio: the plane cruises at ~1.7×
+       the gull's 1.5 u/s, so turnFromBank drops from 1.5 to 0.8 rather than being inherited. A
+       plane that turned like a gull at twice the speed would pull an impossible arc.
+     · STALL 1.1 against cruise 2.6 — a wing loaded like an aeroplane's quits earlier in
+       proportional terms than a gull's does, and the gap is what makes a landing approach a
+       thing you can get wrong.
+     · BOOST IS THRUST ONLY (`flap`), deliberately carrying the gull's own rule forward: you
+       cannot out-throttle terminal velocity, so a dive stays the only way to reach maxSpeed.
+   HONEST LIMIT: `pitchRate` is carried for symmetry with BIRD_PROFILE and is INERT — the model
+   damps pitch on a hard-coded 0.25 s constant and never reads the key (true of the gull too).
+   Left alone rather than quietly wired, because changing it would move the gull (Rule 7). */
+export const PLANE_PROFILE = {
+  cruiseSpeed: 2.6,       // u/s the wing settles at in level flight — a light single, not a gull
+  maxSpeed: 5.0,          // the dive limit; thrust alone never reaches it (see boost)
+  stallSpeed: 1.1,
+  flap: 2.6,              // ENGINE THRUST (u/s²) — the key is the gull's; the meaning is a propeller
+  glideDrag: 0.22,        // a clean airframe glides well with the engine at idle
+  gravityTrade: 3.2,      // height <-> speed exchange; steeper than the gull's, it is heavier
+  pitchRate: 0.9,         // INERT — see the note above; kept for profile symmetry
+  pitchMax: 0.40,         // rad (23 deg) climb/dive limit — the number the thrust budget is sized on
+  bankRate: 1.4,          // rad/s of roll — slower than a gull's 1.8; ailerons, not shoulders
+  bankMax: 0.95,          // rad (54 deg) — a genuinely steep turn
+  turnFromBank: 0.8,      // see the derivation above
+  skim: 0.03,             // the gear's own height above the surface on touchdown
+  chaseDist: 3.2, chaseElev: 0.20,
+  eye: { x: 0, y: 0.14, z: 0.06 },   // the cockpit, for a consumer that flies it first-person
+  boost: { flap: 1.6 },
+};
 
 /* ---- THE FISH (A-FISH, 2026-08-07) — the sixth body, and the first one that does not FALL.
    ---------------------------------------------------------------------------------------------

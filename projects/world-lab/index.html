@@ -69,6 +69,9 @@
       border-radius: 3px; padding: 4px 0; cursor: pointer; font-size: 10px; letter-spacing: 0.06em;
     }
     #dock .btns button:hover { border-color: #b89968; }
+    /* A-DRIVE: the craft you are IN is lit, so the dock and the HUD cannot disagree about what
+       you are — the roster chips are the only buttons in this dock with a persistent state. */
+    #dock .btns button[aria-pressed="true"] { background: #3a2f2b; border-color: #f0a86a; color: #f0a86a; }
     #dock .note { color: #6a6055; font-size: 9px; line-height: 1.5; }
 
     #hint {
@@ -87,6 +90,7 @@
   <div id="hud">
     <div class="title">LIVE STATE</div>
     <div class="row"><span class="k">state</span><span class="v"><span id="state-chip" class="walk">WALK</span></span></div>
+    <div class="row"><span class="k">body</span><span class="v off" id="v-veh">on foot</span></div>
     <div class="row"><span class="k">speed</span><span class="v" id="v-speed">0.00</span></div>
     <div class="row"><span class="k">height y</span><span class="v" id="v-y">0.00</span></div>
     <div class="row"><span class="k">terrain under</span><span class="v" id="v-ground">0.00</span></div>
@@ -143,10 +147,16 @@
       <label>gravity<input id="p-gravity" type="range" min="1" max="16" step="0.1" /><span class="n" id="n-gravity">5.40</span></label>
       <label>assist<input id="p-assist" type="range" min="0" max="12" step="0.2" /><span class="n" id="n-assist">4.20</span></label>
       <label>maxSpeed<input id="p-maxSpeed" type="range" min="2" max="24" step="0.5" /><span class="n" id="n-maxSpeed">9.00</span></label>
+      <!-- ---- A-DRIVE: THE ROSTER. This bay is EMPTY on purpose — main.js builds one chip per row
+           of its vehicle table, so the dock cannot drift from the roster (an eighth craft appears
+           here the moment its row exists, and a deleted row cannot leave a dead button). Each chip
+           carries its key hint and the district it suits as a title. ---- -->
+      <div class="grp">THE ROSTER (a number key each · B gets back in)</div>
+      <div class="btns" id="veh-bay"></div>
+      <div class="btns"><button id="b-walk">on foot (B)</button></div>
       <div class="grp">VERBS</div>
       <div class="btns">
         <button id="b-spawn">respawn (R)</button>
-        <button id="b-bike">walk/bike (B)</button>
         <button id="b-reset">reset physics</button>
         <button id="b-copy">copy url</button>
       </div>
@@ -161,7 +171,8 @@
   </div>
 
   <div id="hint"><b>WASD</b> walk · <b>LMB</b> lock a tower · <b>RMB</b> web it · <b>SPACE</b> jump / release ·
-    <b>B</b> the dirtbike (W throttle · ↓ lean back) · <b>V</b> camera · <b>R</b> respawn</div>
+    <b>B</b> get in / out · <b>1-6</b> car · van · truck · helicopter · plane · spaceship ·
+    <b>V</b> camera · <b>R</b> respawn</div>
 
   <script type="module" src="./main.js"></script>
 </body>

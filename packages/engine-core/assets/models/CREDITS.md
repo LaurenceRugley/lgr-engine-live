@@ -33,7 +33,8 @@ them adopt our art direction (vector tiers / day-night / windows / palettes) —
 | File | Generator | Notes |
 |---|---|---|
 | `kit_tower_[a-e].glb/.usdz` | `tools/blender/build_building_kit.py` | hip-roof kit family (A-KIT) |
-| `veh_{fire_truck,box_van,sedan}.glb/.usdz` | `tools/blender/build_vehicles.py` | parts-grammar bounded proof |
+| `veh_{fire_truck,box_van,sedan}.glb/.usdz` | `tools/blender/build_vehicles.py` | parts-grammar bounded proof (2026-08-06). RE-CUT by A-DRIVE (2026-08-21) on their first wiring: the nose was authored at −Z against pilot.js's +Z convention, so all three drove tail-first; material slots + a baked-AO COLOR_0 pass landed in the same run (252/160/148 tris) |
+| `veh_{heli,plane,shuttle}.glb/.usdz` | `tools/blender/build_vehicles.py` | A-DRIVE (2026-08-21): the flyers the road family lacked — an articulated helicopter (body + main rotor + tail rotor, 396 tris), an aeroplane with an articulated propeller (270 tris) and a static lifting-body spaceplane (172 tris). All three fly on movement models that already existed; only the art was missing |
 | `moto_bike.glb/.usdz` | `tools/blender/build_moto_bike.py` | A-MOTO-ASSET (2026-08-19): the articulated stylized dirtbike (4 named nodes, material slots, baked vertex AO, 948 tris) |
 | `survivor_ride.glb` | `tools/blender/build_ride_clip.py` | A-MOTO-ASSET: the survivor's seated 'Ride' pose clip, authored on its own imported rig (the (B) path) — plays on survivor.glb above via `extraClips` |
 | `tree_kit.glb/.usdz` | `tools/blender/build_tree_kit.py` | A-TREEKIT (2026-08-19): the conifer kit — 4 variants from ONE parameterized generator (432 tris total), albedo×AO collapsed into COLOR_0, one primitive per variant (one instanced draw each) |

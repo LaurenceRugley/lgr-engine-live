@@ -38,6 +38,11 @@
                                 (`groundYAt` = pads, `heightAt` = the sampler, `ground: false`)
      · walk/jump/web/swing    → `createCharacterController` + `createGrappleModel` (+ hero body)
      · the bike               → `createBikeModel` (pilot.js) + `createBikeMesh` + `createMotoChaseCam`
+     · A-DRIVE, the ROSTER    → `createRoadModel` (the cars) · `createSpacecraftModel` (the
+                                helicopter and the spaceship) · `createBirdModel` (the aeroplane —
+                                the bird IS fixed-wing physics) · `createVehicleGlbMesh` (every
+                                modelled body, articulated rotors and all). SEVEN craft, ZERO new
+                                integrators: §4 is a data table, not a physics file.
    What is here is WIRING, a key map, some DOM, and the dials that make it a lab.
    C++ anchor: this file is `main()` — construct subsystems, own the frame loop, implement nothing.
 
@@ -59,9 +64,22 @@ import {
   createTargetLock, createLockMarker, cameraNearRadius,
   createHeroBody,
   createBikeModel, BIKE_PROFILE, createBikeMesh, createMotoChaseCam,
+  createRoadModel, ROAD_PROFILE, createSpacecraftModel, HELI_PROFILE,
+  createBirdModel, PLANE_PROFILE, CRAFT_PROFILE, scaleProfileSpeeds,
+  createVehicleGlbMesh, NO_WATER,
 } from '@lgr/engine-core';
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
 import treeKitUrl from '@lgr/engine-core/assets/models/tree_kit.glb?url';   // A-TREEKIT's conifer kit — the woods
+/* A-DRIVE: the roster's bodies. Six GLBs from ONE generator (tools/blender/build_vehicles.py) —
+   the three road vehicles had been shipped and imported by NOTHING since 2026-08-06; these are
+   their first consumers. The `?url` import lives HERE and not in the engine because a ?url inside
+   the lib base64-inlines the asset into every bundle (the pedestrians.js rule). */
+import sedanUrl from '@lgr/engine-core/assets/models/veh_sedan.glb?url';
+import vanUrl from '@lgr/engine-core/assets/models/veh_box_van.glb?url';
+import truckUrl from '@lgr/engine-core/assets/models/veh_fire_truck.glb?url';
+import heliUrl from '@lgr/engine-core/assets/models/veh_heli.glb?url';
+import planeUrl from '@lgr/engine-core/assets/models/veh_plane.glb?url';
+import shuttleUrl from '@lgr/engine-core/assets/models/veh_shuttle.glb?url';
 
 const $ = (id) => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
@@ -506,45 +524,258 @@ renderer.domElement.addEventListener('pointerdown', () => { if (!lockAim.locked)
 const webTarget = () => (targetLock.has ? targetLock.point : aimHit);
 
 /* ---------------------------------------------------------------------------------------------
-   4. THE BIKE — the second body on the SAME bag. `createBikeModel` reads only world.heightAt (the
-   married sampler); tower collision is the bag's own resolveSphere run after the step — one line
-   of wiring, no second collider, which is what "ONE world bag serves the married geometry" means.
-   Box bike deliberately (the GLB bike is moto-lab's art arm; here the subject is the GROUND).
-   --------------------------------------------------------------------------------------------- */
-const BIKE = { ...BIKE_PROFILE };
-const bikeModel = createBikeModel(BIKE);
-const bike = createBikeMesh({});
-bike.group.visible = false;
-scene.add(bike.group);
-const bikeState = { x: 0, y: 0, z: 0, yaw: 0, speed: 0, quat: new THREE.Quaternion() };
-const bikeCam = createMotoChaseCam({});
-const BIKE_WORLD = { heightAt };                 // reused every frame (no-hot-alloc)
+   4. THE ROSTER (ARC A-DRIVE, 2026-08-21) — seven bodies on the SAME bag, driven by a DATA TABLE.
+   ---------------------------------------------------------------------------------------------
+   A-PATCHWORK left this room with a `MODE === 'walk' ? … : bike` binary and one hard-wired craft.
+   The owner asked for "cars, helicopters, planes, the spaceship, things like that so I can move
+   around the world that way", and the honest answer was that the ENGINE ALREADY HAD ALL OF IT:
 
-let MODE = 'walk';                               // 'walk' | 'bike'
-let view = 'third';                              // the bike's own V toggle (walker has its own)
+     ask            what it needed                                        what was built new
+     ─────────────  ────────────────────────────────────────────────────  ──────────────────
+     cars           createRoadModel (A-FEEL, 2026-08-05) + a numbers row   nothing
+     helicopters    createSpacecraftModel + HELI_PROFILE (A-HELI proved    nothing
+                    this on 2026-08-06 — a heli is a saucer with slower
+                    numbers, not a second integrator)
+     planes         createBirdModel — which IS fixed-wing physics: energy  PLANE_PROFILE
+                    trade, stall, banked turns, thrust. See the profile's  (numbers only)
+                    own derivation in pilot.js.
+     the spaceship  createSpacecraftModel + CRAFT_PROFILE, shipped L77     nothing
+
+   So this section adds NO physics. What it adds is the SEAM: adding a vehicle is a ROW plus a
+   GLB, never a branch. Everything below is per-row data, and the frame loop (§8) has exactly one
+   vehicle path that reads it. C++ anchor: a table of Strategy instances keyed by name — the
+   controller never learns what a helicopter is.
+
+   ── THE WORLD BAG IS THE CONTRACT. Every craft runs against the room's existing
+   heightAt / surfaceAt / segmentHit / resolveSphere, the same bag walking, swinging and the bike
+   already use. ONE thing had to be ADDED, and it is a fact about this room rather than a
+   capability: `waterHeightAt`. The spacecraft's medium probe and the bird's floor both ask the
+   world where its water is, this room has a sea plane and lake discs, and nobody had ever told
+   them. metropolis solved the identical gap with engine.setPilotWaterSampler; here the bag is
+   the room's own object, so it is one function. Without it the medium probe would have read
+   NO_WATER everywhere and the spaceship could never have entered the sea. --------------------- */
+const VEH_WORLD = {
+  heightAt,
+  /* WHERE THE WATER IS, answered from the room's own geometry rather than a second sampler:
+     a lake disc reports its own surface, and everywhere the terrain falls below sea level the
+     sea plane (y = 0, terrain.js's own baseY mapping) is overhead. Anywhere else there is no
+     water, which is what NO_WATER means. Hot path — squared distance, no Math.hypot, no alloc. */
+  waterHeightAt(x, z) {
+    for (let i = 0; i < LAKES.length; i++) {
+      const lk = LAKES[i], dx = x - lk.cx, dz = z - lk.cz;
+      if (dx * dx + dz * dz <= lk.radius * lk.radius) return lk.y;
+    }
+    return HEIGHT(x, z) < 0 ? 0 : NO_WATER;
+  },
+};
+
+/* ---- THE SPEED SCALE, and why every row states one. Every profile in pilot.js was authored
+   against the ORIGINAL ~26-unit city; this world is 128 u across. A-HELI already paid for this
+   lesson in the other direction (a craft tuned for a big world crossed metropolis's island in two
+   seconds). The reference here is the BIKE, which this room already ships at its native 7.5 u/s
+   and which crosses the world in ~17 s — so a car is scaled to sit just above it and an aircraft
+   to a little over twice it. `scaleProfileSpeeds` (engine-core) scales LENGTHS/VELOCITIES/
+   ACCELERATIONS and leaves RATES alone, so the craft covers more ground at the same feel. ---- */
+const ROAD_KEYS = ['maxSpeed', 'accel', 'drag', 'turnRadiusMin', 'latAccelMax'];
+const BIRD_KEYS = ['cruiseSpeed', 'maxSpeed', 'stallSpeed', 'flap', 'glideDrag', 'gravityTrade', 'skim'];
+/* the three road vehicles are ONE profile with three MASSES. The differences are deliberately the
+   ones you can feel through the wheel rather than read on a badge: a fire truck takes half again
+   as long to reach a lower top speed and needs a corner twice as wide as the sedan's. */
+const roadCar = (k, { top, accel, rMin, aLat, bank }) => ({
+  ...scaleProfileSpeeds(ROAD_PROFILE, k, ROAD_KEYS),
+  maxSpeed: top, accel, turnRadiusMin: rMin, latAccelMax: aLat, bankMax: bank,
+  collide: { ...ROAD_PROFILE.collide, r: 0.30, yOff: 0.16 },
+});
+/* AIRCRAFT ARE BIGGER THAN CARS, and the mesh scale says so: a light helicopter is ~2.7x a car in
+   the real world and the generator authored them all at road-vehicle size so ONE dial covers it.
+   The scale is VISUAL ONLY — no flyer uses resolveSphere, so nothing collides at the wrong size
+   (an honest limit, not a claim: a scaled ground vehicle WOULD need its collider scaled too). */
+const AIR_MESH_SCALE = 1.8;
+
+const ROSTER = [
+  {
+    key: 'bike', label: 'dirtbike', chip: 'B',
+    hint: 'the dirtbike — W throttle · S brake · ↑↓ lean in the air',
+    profile: { ...BIKE_PROFILE },
+    make: (p) => createBikeModel(p),
+    body: () => createBikeMesh({}),          // box bike: this room's subject is the GROUND, not the art
+    cam: { dist: 2.8, height: 1.05, aheadUp: 0.45 },
+    collide: true, mount: 'ground',
+    where: 'land — it climbs anything, which is what a dirtbike is for',
+  },
+  {
+    key: 'car', label: 'sedan', chip: '1',
+    hint: 'the sedan — W throttle · A/D steer · it washes wide when you carry speed',
+    profile: roadCar(3.4, { top: 8.6, accel: 12, rMin: 1.4, aLat: 14, bank: 0.10 }),
+    make: (p) => createRoadModel(p),
+    body: () => createVehicleGlbMesh({ url: sedanUrl, fallback: { w: 0.42, h: 0.4, l: 0.74 } }),
+    cam: { dist: 3.0, height: 1.10, aheadUp: 0.40 },
+    collide: true, mount: 'ground',
+    where: 'the city district — it is a ROAD car and the curvature law says so',
+  },
+  {
+    key: 'van', label: 'box van', chip: '2',
+    hint: 'the box van — heavier than the sedan, and it leans',
+    profile: roadCar(3.4, { top: 7.0, accel: 8.5, rMin: 2.0, aLat: 10, bank: 0.16 }),
+    make: (p) => createRoadModel(p),
+    body: () => createVehicleGlbMesh({ url: vanUrl, fallback: { w: 0.47, h: 0.8, l: 0.9 } }),
+    cam: { dist: 3.4, height: 1.30, aheadUp: 0.45 },
+    collide: true, mount: 'ground',
+    where: 'the city district, and it will grind up a shallow hill',
+  },
+  {
+    key: 'truck', label: 'fire truck', chip: '3',
+    hint: 'the fire truck — slow to wind up, and its corner is twice the sedan\'s',
+    profile: roadCar(3.4, { top: 5.8, accel: 6.0, rMin: 2.8, aLat: 7, bank: 0.13 }),
+    make: (p) => createRoadModel(p),
+    body: () => createVehicleGlbMesh({ url: truckUrl, fallback: { w: 0.49, h: 0.58, l: 1.3 } }),
+    cam: { dist: 4.0, height: 1.40, aheadUp: 0.50 },
+    collide: true, mount: 'ground',
+    where: 'the city district — anywhere else it is a very large brick',
+  },
+  {
+    key: 'heli', label: 'helicopter', chip: '4',
+    /* mediumScale is the spacecraft's OWN per-world dial (pilot.js). HELI_PROFILE carries
+       metropolis's 0.30, fitted to a 15-unit island; 1.15 puts air cruise at 9.2 u/s here, just
+       over the bike, so the world crosses in ~14 s instead of ~53. This override IS the reason
+       the profile is parameterized — see the lift note in pilot.js. */
+    profile: { ...HELI_PROFILE, mediumScale: 1.15, chaseDist: 5.0, chaseElev: 0.34 },
+    make: (p) => createSpacecraftModel(p),
+    body: () => createVehicleGlbMesh({
+      url: heliUrl, scale: AIR_MESH_SCALE, fallback: { w: 0.6, h: 0.6, l: 1.0 },
+      /* the two rotors, as DATA. Constant rate, not speed-linked: a helicopter's rotor turns
+         because the engine is running, so a hovering ship still spins. Runtime axes — main about
+         +Y, tail about +X (the generator's own node names are the contract). */
+      spin: [{ node: 'veh_heli_rotor', axis: 'y', rate: 26 },
+             { node: 'veh_heli_tail_rotor', axis: 'x', rate: 40 }],
+    }),
+    cam: { dist: 5.5, height: 2.2, aheadUp: 0.8 },
+    collide: false, mount: 'ground', air: true,
+    hint: 'the helicopter — W forward · ↑↓ climb/descend · it hovers when you let go',
+    where: 'anywhere, including over the sea and the lakes — it is the sightseeing body',
+  },
+  {
+    key: 'plane', label: 'aeroplane', chip: '5',
+    /* the bird has no mediumScale, so the room scales the dimensional keys itself. 2.7 puts
+       cruise at 7.0 u/s and the dive limit at 13.5 — and because gravityTrade scales with them,
+       the energy trade keeps its shape: a dive still buys speed at the same RATE per radian. */
+    profile: { ...scaleProfileSpeeds(PLANE_PROFILE, 2.7, BIRD_KEYS), chaseDist: 7.0 },
+    make: (p) => createBirdModel(p),
+    body: () => createVehicleGlbMesh({
+      url: planeUrl, scale: AIR_MESH_SCALE, fallback: { w: 0.6, h: 0.4, l: 1.15 },
+      spin: [{ node: 'veh_plane_prop', axis: 'z', rate: 48 }],
+    }),
+    cam: { dist: 7.0, height: 2.4, aheadUp: 1.0 },
+    collide: false, mount: { fly: 9 }, air: true,
+    hint: 'the aeroplane — ↑ nose up (it costs speed) · ↓ dive for speed · W throttle · A/D bank to turn',
+    where: 'anywhere at height; it CANNOT hover — hold the nose up without throttle and it stalls',
+  },
+  {
+    key: 'ship', label: 'spaceship', chip: '6',
+    /* CRAFT_PROFILE unscaled but for the medium dial: this is pilot.js's "all-medium master
+       rule-breaker", and the point of taking it out is that AIR -> WATER -> GROUND is one craft.
+       1.6 is the fastest thing in the roster (air cruise 12.8 u/s) because it is the one you take
+       when you want to be somewhere else. */
+    /* `submersible` is A-DRIVE's own engine finding, opted into HERE and nowhere else: the
+       spacecraft model's water medium was unreachable because the surface was a hard floor (see
+       pilot.js). This row is the reason the flag exists — and metropolis's helicopter, which runs
+       the SAME model, deliberately does not set it. */
+    profile: { ...CRAFT_PROFILE, mediumScale: 1.6, chaseDist: 6.0, chaseElev: 0.36, submersible: true },
+    make: (p) => createSpacecraftModel(p),
+    body: () => createVehicleGlbMesh({
+      url: shuttleUrl, scale: 2.2, fallback: { w: 1.0, h: 0.4, l: 1.25 },
+    }),
+    cam: { dist: 6.5, height: 2.3, aheadUp: 0.9 },
+    collide: false, mount: 'ground', air: true,
+    hint: 'the spaceship — ↑↓ climb/descend · hold ↓ over water and you go UNDER it',
+    where: 'every district, and it is the only body that crosses AIR -> WATER -> GROUND',
+  },
+];
+const BY_KEY = new Map(ROSTER.map((v) => [v.key, v]));
+
+/* ---- lazily built, because a roster of seven that all load their GLB at boot would pay six
+   fetches nobody asked for. First selection builds the model, the mesh and the state; after that
+   the entry is cached, so re-entering a craft is free and it REMEMBERS where you left it. ---- */
+function instance(spec) {
+  if (spec._inst) return spec._inst;
+  const body = spec.body();
+  body.group.visible = false;
+  scene.add(body.group);
+  spec._inst = {
+    model: spec.make(spec.profile),
+    body,
+    cam: createMotoChaseCam(spec.cam),
+    state: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, bank: 0, speed: 0, vy: 0, quat: new THREE.Quaternion() },
+  };
+  return spec._inst;
+}
+
+let MODE = 'walk';                               // 'walk' | any ROSTER key
+let ACTIVE = null;                               // the live { model, body, cam, state } or null
+let view = 'third';                              // the vehicle's own V toggle (walker has its own)
+/* THE ONE MOUNT PATH. Every craft is entered from wherever the walker is standing, facing where
+   the walker was looking, from rest — the property that makes "a vehicle you can get into from
+   normal play" true for all seven rather than for the one that was wired by hand. The only
+   per-row difference is HOW FAR OFF THE GROUND, and that is data (`mount`), because a plane
+   cannot be entered from rest on a hillside: the bird model has no thrust-from-standstill and
+   would stall on the spot. It is launched already flying, exactly as pilot.js's own gull comment
+   describes ("a bird never starts from rest mid-air"). */
 function setMode(m) {
   if (m === MODE) return;
+  const spec = BY_KEY.get(m);
+  if (m !== 'walk' && !spec) return;              // an unknown key lands you on foot, never nowhere
+  if (ACTIVE) ACTIVE.body.group.visible = false;  // leaving one craft for another: park the old body
   MODE = m;
-  if (m === 'bike') {
-    /* mount where you stand: the bike takes the walker's spot + heading, from rest. */
-    bikeState.x = character.x; bikeState.z = character.z;
-    bikeState.y = HEIGHT(bikeState.x, bikeState.z);
-    bikeState.yaw = character.lookYaw;
-    bikeState.speed = 0; bikeState.vy = 0; bikeState.pitch = 0; bikeState.airborne = false;
-    bikeState.upX = 0; bikeState.upY = 1; bikeState.upZ = 0;
-    bike.group.visible = true;
+  if (spec) {
+    const inst = instance(spec);
+    ACTIVE = inst;
+    const st = inst.state;
+    st.x = character.x; st.z = character.z;
+    st.yaw = character.lookYaw;
+    st.speed = 0; st.vy = 0; st.pitch = 0; st.bank = 0;
+    st.airborne = false; st.upX = 0; st.upY = 1; st.upZ = 0;
+    st.medium = 'air'; st.crossingT = 0; st.crossFrom = null; st.stalling = false;
+    const g = HEIGHT(st.x, st.z);
+    st.y = g + (spec.mount && spec.mount.fly ? spec.mount.fly : 0);
+    inst.body.group.visible = true;
     hero.group.visible = false;
     rope.visible = false; anchorDot.visible = false;
-    bikeCam.reset(bikeState.yaw);
-    flash('the dirtbike — W throttle · ↓ leans back · B to dismount');
+    inst.cam.reset(st.yaw);
+    flash(spec.hint);
   } else {
-    /* dismount where the ride ended — the composition loop closes on the same ground. */
-    character.setPosition(bikeState.x, null, bikeState.z);
-    bike.group.visible = false;
+    /* dismount where the ride ended — the composition loop closes on the same ground. A null Y
+       makes the controller snap the walker to the surface, so stepping out of a helicopter at
+       height puts you on the ground under it rather than in a fall. */
+    const st = ACTIVE ? ACTIVE.state : { x: character.x, z: character.z };
+    character.setPosition(st.x, null, st.z);
+    ACTIVE = null;
     hero.group.visible = true;
     flash('on foot — LMB lock · RMB web · SPACE launch');
   }
 }
+/* the previous vehicle, so B and the dock button toggle back to what you last drove rather than
+   always to the bike — the roster's own answer to "one key, seven bodies". */
+let lastVehicle = 'bike';
+/* THE ONE PLACE A BODY CHANGES. setMode owns the craft; `pick` owns everything that has to agree
+   WITH it — the remembered vehicle and the dock's pressed chip. metropolis's own setMode comment
+   names this exact trap ("setMode is the only path that keeps mode, the aria-pressed attributes
+   and the hint in agreement"), and with seven chips the cost of a second path is seven lies. */
+function pick(m) {
+  setMode(m);
+  if (MODE !== 'walk') lastVehicle = MODE;
+  syncChips();
+}
+function syncChips() {
+  for (const v of ROSTER) {
+    const el = $('b-veh-' + v.key);
+    if (el) el.setAttribute('aria-pressed', String(MODE === v.key));
+  }
+}
+/* the bike's own state, for the two HUD rows and the probe handle that are ABOUT the bike (air
+   time, jumps, the landing verdict). Empty until the bike has been ridden once — a receipt about
+   a craft nobody has entered would be a lie with formatting (createTreeKit's tintReport rule). */
+const NO_BIKE = {};
+const bikeState = () => (BY_KEY.get('bike')._inst ? BY_KEY.get('bike')._inst.state : NO_BIKE);
 
 /* ---------------------------------------------------------------------------------------------
    5. INPUT — one key map, the axis vocabulary every project sends.
@@ -553,7 +784,7 @@ const held = new Set();
 let spacePulse = false;
 const spawn = () => {
   const p = arena.openSpot(0, -((AR.cols - 1) / 2) * AR.spacing * 0.7);
-  setMode('walk');
+  pick('walk');                                  // through `pick`, so respawning also un-presses the roster chip
   character.setPosition(p.x, null, p.z);
   character.setYaw(0); character.recenterPitch();
   resetStats();
@@ -566,7 +797,14 @@ addEventListener('keydown', (e) => {
   if (k === ' ') spacePulse = true;
   if (k === 'v') { if (MODE === 'walk') character.toggleView(); else { view = view === 'third' ? 'first' : 'third'; flash(`view: ${view}`); } }
   if (k === 'r') { spawn(); flash('respawned'); }
-  if (k === 'b') setMode(MODE === 'walk' ? 'bike' : 'walk');
+  /* B is the GET IN / GET OUT key it always was, but it now returns you to the craft you last
+     drove rather than always to the bike — with seven bodies, "the toggle" has to remember. */
+  if (k === 'b') pick(MODE === 'walk' ? lastVehicle : 'walk');
+  /* the roster on the number row: one key per craft, and pressing the one you are already in
+     gets you out. Switching craft-to-craft is allowed and goes through setMode, so the parked
+     body, the hint and the seven dock chips can never disagree about what you are. */
+  const spec = ROSTER.find((v) => v.chip === k);
+  if (spec) pick(MODE === spec.key ? 'walk' : spec.key);
 });
 addEventListener('keyup', (e) => held.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
 addEventListener('blur', () => { held.clear(); webPressed = false; });
@@ -576,7 +814,15 @@ addEventListener('blur', () => { held.clear(); webPressed = false; });
    `minClear` per mode = min(y − heightAt) over frames: the NO-SINK receipt, the moto arc's
    containment analog, live on the HUD for BOTH bodies.
    --------------------------------------------------------------------------------------------- */
-const stats = { webs: 0, walkMinClear: Infinity, bikeMinClear: Infinity, fps: 0, t: 0 };
+/* A-DRIVE: the NO-SINK receipt is now PER BODY, one map instead of two fields, because seven
+   bodies each need their own and a shared minimum would let a good craft launder a bad one. The
+   figure means the same thing for all of them — min(y − heightAt) over the frames that body was
+   driven — so a flyer's number is its lowest pass and a car's is how far it dipped into the road.
+   `walkMinClear`/`bikeMinClear` survive as views onto this map (§9) because the probe reads them
+   by name and this arc must not move what A-PATCHWORK proved. */
+const minClear = { walk: Infinity };
+for (const v of ROSTER) minClear[v.key] = Infinity;
+const stats = { webs: 0, fps: 0, t: 0 };
 let hadAnchor = false, lastLandCount = 0, landings = 0, cleans = 0;
 /* A-PATCHWORK: the DISTRICTS this body has actually stood in, and the order it entered them. The
    composition proof is "crossed ≥3 districts in ONE session", and a claim like that has to be
@@ -588,7 +834,8 @@ function noteRegion(x, z) {
   if (k && visited[visited.length - 1] !== k) visited.push(k);
 }
 function resetStats() {
-  stats.webs = 0; stats.walkMinClear = Infinity; stats.bikeMinClear = Infinity; stats.t = 0;
+  stats.webs = 0; stats.t = 0;
+  for (const k of Object.keys(minClear)) minClear[k] = Infinity;
   landings = 0; cleans = 0; lastLandCount = 0;
   visited = [];
 }
@@ -600,24 +847,38 @@ let hudT = 0;
 function updateHud(dt) {
   hudT += dt; if (hudT < 0.1) return; hudT = 0;
   const chip = $('state-chip');
-  const st = MODE === 'bike' ? (bikeState.airborne ? 'air' : 'ride')
+  const A = ACTIVE, sp = A ? BY_KEY.get(MODE) : null;
+  /* the state word, one expression for seven bodies. A flyer reports its MEDIUM (the spacecraft's
+     own air/water/ground probe) or STALL (the bird's), because those are the words that tell you
+     what the craft is about to do; a ground vehicle reports ride/air off the bike's airborne flag
+     or simply RIDE. The walker keeps A-PATCHWORK's four words exactly. */
+  const st = A
+    ? (A.state.stalling ? 'stall'
+      : A.state.medium && A.state.medium !== 'air' ? A.state.medium
+        : sp.air ? 'fly'
+          : A.state.airborne ? 'air' : 'ride')
     : character.swinging ? 'swing' : character.clinging ? 'climb' : (character.grounded ? 'walk' : 'air');
-  chip.className = st === 'ride' || (MODE === 'bike' && st === 'air') ? (st === 'ride' ? 'ride' : 'air') : st;
+  chip.className = st === 'walk' || st === 'swing' || st === 'climb' || st === 'air' ? st : 'ride';
   chip.textContent = st.toUpperCase();
-  const x = MODE === 'bike' ? bikeState.x : character.x, z = MODE === 'bike' ? bikeState.z : character.z;
-  const y = MODE === 'bike' ? bikeState.y : character.y;
+  const x = A ? A.state.x : character.x, z = A ? A.state.z : character.z;
+  const y = A ? A.state.y : character.y;
   const g = HEIGHT(x, z);
-  set('v-speed', (MODE === 'bike' ? bikeState.speed : character.state.speed).toFixed(2));
+  set('v-speed', (A ? A.state.speed : character.state.speed).toFixed(2));
   set('v-y', y.toFixed(2));
   set('v-ground', `${g.toFixed(2)} (pad Δ ${(y - g).toFixed(2)})`);
-  const mc = MODE === 'bike' ? stats.bikeMinClear : stats.walkMinClear;
+  const mc = minClear[MODE];
   set('v-sink', mc === Infinity ? '—' : mc.toExponential(1), mc < -1e-4 ? 'bad' : 'on');
+  /* A-DRIVE: which craft, and where the roster says it belongs. `where` is a stated OPINION about
+     districts, printed beside the district you are actually standing in so the two can disagree
+     in front of you — a fire truck in the desert is allowed, it is just slow. */
+  set('v-veh', sp ? `${sp.label} · ${sp.chip}` : 'on foot', sp ? 'on' : 'off');
   const s = character.state;
   set('v-web', s.anchor ? `YES · ${s.anchor.y.toFixed(2)}` : `${stats.webs} fired`, s.anchor ? 'on' : '');
   set('v-rope', `${SWING.ropeMax.toFixed(2)} · ${aimReach().toFixed(1)} u`);
   set('v-lock', targetLock.has ? `y ${targetLock.point.y.toFixed(2)}` : 'none — LMB to lock', targetLock.has ? 'on' : 'off');
-  set('v-bike', MODE === 'bike' ? `${bikeState.airborne ? bikeState.airtime.toFixed(2) + ' s' : '—'} · ${bikeState.jumps || 0}` : '—', MODE === 'bike' ? 'on' : 'off');
-  const L = bikeState.landing;
+  const bs = bikeState();
+  set('v-bike', MODE === 'bike' ? `${bs.airborne ? bs.airtime.toFixed(2) + ' s' : '—'} · ${bs.jumps || 0}` : '—', MODE === 'bike' ? 'on' : 'off');
+  const L = bs.landing;
   set('v-land', L && L.count ? `${deg(L.err)}°·${deg(L.yawErr || 0)}° · kept ${(L.kept * 100).toFixed(0)}% · ${cleans}/${landings}` : '—', L && L.count ? (L.clean ? 'on' : 'bad') : '');
   const cs = CARVE.stats;
   set('v-pads', `${cs.pads} · ${(cs.padMax - cs.padMin).toFixed(2)} u`);
@@ -716,7 +977,24 @@ function wireDock() {
   $('b-valley').addEventListener('click', () => { WP.preset = 'valley'; buildWorld(); spawn(); flash('preset: valley'); });
   $('b-mountains').addEventListener('click', () => { WP.preset = 'mountains'; buildWorld(); spawn(); flash('preset: mountains'); });
   $('b-spawn').addEventListener('click', spawn);
-  $('b-bike').addEventListener('click', () => setMode(MODE === 'walk' ? 'bike' : 'walk'));
+  /* ---- THE ROSTER IS THE DOCK'S, TOO (A-DRIVE). The chips are BUILT FROM THE TABLE rather than
+     written into index.html, so the two can never drift: an eighth craft appears in the dock the
+     moment its row exists, and a removed row cannot leave a dead button behind. Each carries its
+     key hint and its "where it belongs" line as the title, so the roster's stated opinion about
+     districts is one hover away instead of buried in this file. ---- */
+  const bay = $('veh-bay');
+  if (bay) {
+    for (const v of ROSTER) {
+      const b = document.createElement('button');
+      b.id = 'b-veh-' + v.key;
+      b.textContent = `${v.label} (${v.chip})`;
+      b.title = `${v.hint}\nbest in: ${v.where}`;
+      b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', () => pick(MODE === v.key ? 'walk' : v.key));
+      bay.appendChild(b);
+    }
+  }
+  $('b-walk').addEventListener('click', () => pick('walk'));
   $('b-copy').addEventListener('click', () => {
     const p = new URLSearchParams();
     p.set('seed', WP.seed); p.set('grade', WP.maxGrade); p.set('street', WP.streetW);
@@ -736,7 +1014,7 @@ function wireDock() {
   const dock = $('dock');
   $('dock-toggle').addEventListener('click', (e) => { e.stopPropagation(); dock.classList.toggle('min'); $('dock-toggle').textContent = dock.classList.contains('min') ? '+' : '–'; });
 }
-wireDock(); syncDock();
+wireDock(); syncDock(); syncChips();
 
 /* ---------------------------------------------------------------------------------------------
    8. THE FRAME.
@@ -746,13 +1024,15 @@ const _bCamPos = new THREE.Vector3(), _bCamDir = new THREE.Vector3();
 const _hand = new THREE.Vector3();
 const AXES = { throttle: 0, steer: 0, lift: 0, boost: 0 };
 spawn();
-/* ---- A-LAUNCH: THE BODY IS A URL PARAM. `?mode=bike` starts you on the dirtbike instead of on foot.
-   It is applied AFTER `spawn()` deliberately — spawn's own contract is "put the walker at the city
-   edge facing in", and it forces walk mode, so asking for the bike first would be silently undone.
-   This is what makes a launcher entry able to promise a BODY as well as a world: the menu is links,
-   and a link can only carry what the room agrees to read. Anything that is not 'bike' is walk, so a
-   typo lands you on foot rather than nowhere. ---- */
-if (Q.get('mode') === 'bike') setMode('bike');
+/* ---- A-LAUNCH: THE BODY IS A URL PARAM. `?mode=bike` starts you on the dirtbike instead of on
+   foot. It is applied AFTER `spawn()` deliberately — spawn's own contract is "put the walker at
+   the city edge facing in", and it forces walk mode, so asking for a craft first would be silently
+   undone. This is what makes a launcher entry able to promise a BODY as well as a world: the menu
+   is links, and a link can only carry what the room agrees to read.
+   A-DRIVE widened the vocabulary from one key to the whole ROSTER — `?mode=heli`, `?mode=car`,
+   `?mode=ship` — with no change to the rule that an unknown value lands you on foot rather than
+   nowhere (setMode refuses a key it cannot find). `?mode=bike` still means exactly what it did. */
+pick(Q.get('mode') || 'walk');
 let last = performance.now(), fpsAcc = 0, fpsN = 0;
 
 function frame() {
@@ -789,7 +1069,7 @@ function frame() {
     if (s.anchor && !hadAnchor) stats.webs++;
     hadAnchor = !!s.anchor;
     const clear = character.y - HEIGHT(character.x, character.z);
-    if (clear < stats.walkMinClear) stats.walkMinClear = clear;
+    if (clear < minClear.walk) minClear.walk = clear;
     noteRegion(character.x, character.z);
 
     hero.update(dt, s, { view: character.view, lookYaw: character.lookYaw, anchor: s.anchor });
@@ -812,28 +1092,36 @@ function frame() {
     const wantFov = character.cameraFov(dt);
     if (Math.abs(rig.camera.fov - wantFov) > 0.01) { rig.camera.fov = wantFov; rig.camera.updateProjectionMatrix(); }
   } else {
-    /* THE BIKE FRAME — moto-lab's loop on the married bag: step, then the bag's OWN resolveSphere
-       so towers are solid to the wheel (the one line that makes the city more than scenery). */
+    /* ---- THE VEHICLE FRAME — ONE path, seven craft (A-DRIVE). This is A-PATCHWORK's bike loop
+       with every `bike*` identifier replaced by the ACTIVE roster entry and two lines made
+       conditional on data. Nothing here knows what a helicopter is; adding an eighth craft adds
+       no code to this block, which is the entire claim the roster makes. ---- */
+    const spec = BY_KEY.get(MODE), st = ACTIVE.state;
     AXES.throttle = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
     AXES.steer = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
     AXES.lift = (held.has('ArrowUp') ? 1 : 0) - (held.has('ArrowDown') ? 1 : 0);
     AXES.boost = held.has('Shift') ? 1 : 0;
-    bikeModel.step(bikeState, AXES, dt, BIKE_WORLD);
-    arena.world.resolveSphere(bikeState, dt, BIKE.collide);
+    ACTIVE.model.step(st, AXES, dt, VEH_WORLD);
+    /* tower collision is the bag's OWN resolveSphere run after the step — one line of wiring, no
+       second collider, which is what "ONE world bag serves the married geometry" means. Flyers
+       opt OUT by data: a helicopter that got pushed out of a tower would also get pushed out of
+       the sky above it, because resolveSphere is a depenetration and not a ceiling test. That is
+       an HONEST GAP, not a fix: an aircraft can currently fly through a tower. */
+    if (spec.collide) arena.world.resolveSphere(st, dt, spec.profile.collide);
     spacePulse = false; webPressed = false;
 
-    const clear = bikeState.y - HEIGHT(bikeState.x, bikeState.z);
-    if (clear < stats.bikeMinClear) stats.bikeMinClear = clear;
-    noteRegion(bikeState.x, bikeState.z);
-    if (bikeState.landing && bikeState.landing.count > lastLandCount) {
-      lastLandCount = bikeState.landing.count;
-      landings++; if (bikeState.landing.clean) cleans++;
+    const clear = st.y - HEIGHT(st.x, st.z);
+    if (clear < minClear[MODE]) minClear[MODE] = clear;
+    noteRegion(st.x, st.z);
+    if (st.landing && st.landing.count > lastLandCount) {
+      lastLandCount = st.landing.count;
+      landings++; if (st.landing.clean) cleans++;
     }
-    bike.update(bikeState, dt);
-    key.position.set(bikeState.x + 9, 16, bikeState.z + 7);
-    key.target.position.set(bikeState.x, 0, bikeState.z);
+    ACTIVE.body.update(st, dt);
+    key.position.set(st.x + 9, 16, st.z + 7);
+    key.target.position.set(st.x, 0, st.z);
     key.target.updateMatrixWorld();
-    bikeCam.pose(bikeState, view, dt, heightAt, _bCamPos, _bCamDir);
+    ACTIVE.cam.pose(st, view, dt, heightAt, _bCamPos, _bCamDir);
     rig.setEye(_bCamPos, _bCamDir);
   }
   /* A-MARRIAGE capture seam (moto-lab's __camOverride, absolute form only): a harness may pin the
@@ -891,10 +1179,31 @@ window.__world = {
   heightAt: (x, z) => HEIGHT(x, z),
   /* the guarantee + level facts, read live (the __level pattern) */
   get stats() { return arena.stats; },
-  bike: bikeState,
-  get walkMinClear() { return stats.walkMinClear; },
-  get bikeMinClear() { return stats.bikeMinClear; },
+  /* A-PATCHWORK's three handles, UNCHANGED IN NAME AND MEANING — the probe reads them and this
+     arc must not move what an earlier one proved. They are now VIEWS onto the per-body map. */
+  get bike() { return bikeState(); },
+  get walkMinClear() { return minClear.walk; },
+  get bikeMinClear() { return minClear.bike; },
   get webs() { return stats.webs; },
+  /* ---- A-DRIVE receipts. `roster` is the table as SHIPPED (what a probe should assert against,
+     rather than a list it carries its own copy of); `veh` is the live craft; `minClear` is every
+     body's NO-SINK figure in one object so a run can prove all seven at once. `bodies` reports
+     what each mesh actually RESOLVED TO — 'glb' or the 'box' fallback — because a roster that
+     silently degraded to seven boxes would otherwise report a perfect drive. ---- */
+  roster: () => ROSTER.map((v) => ({
+    key: v.key, label: v.label, chip: v.chip, air: !!v.air, collide: !!v.collide,
+    model: v.make.name || 'model', where: v.where,
+    maxSpeed: v.profile.maxSpeed ?? null, mediumScale: v.profile.mediumScale ?? null,
+    built: !!v._inst,
+  })),
+  get veh() { return ACTIVE ? ACTIVE.state : null; },
+  minClear: () => ({ ...minClear }),
+  bodies: () => ROSTER.map((v) => ({
+    key: v.key,
+    mode: v._inst && v._inst.body.mode ? v._inst.body.mode : (v._inst ? 'procedural' : 'unbuilt'),
+    spins: v._inst && v._inst.body.nodes ? v._inst.body.nodes : [],
+  })),
+  waterHeightAt: (x, z) => VEH_WORLD.waterHeightAt(x, z),
   get visited() { return [...visited]; },
   get districts() { return [...new Set(visited)]; },
   get landings() { return { landings, cleans }; },
@@ -943,7 +1252,23 @@ window.__world = {
   buildMs: () => LEVEL_BUILD_MS,
 };
 window.__spawn = spawn;
-window.__setMode = (m) => { setMode(m === 'bike' ? 'bike' : 'walk'); return MODE; };
+/* A-DRIVE: clear the receipt counters WITHOUT moving the body. `spawn` already does this, but it
+   also teleports the walker to the city edge — so a probe that wants each craft's NO-SINK figure
+   to be ITS OWN run, starting from a chosen district seam, had no way to ask. Without this the
+   seventh craft inherits the worst dip of the six before it and the number means nothing. */
+window.__resetStats = resetStats;
+/* A-DRIVE widened this from the bike-or-walk pair to the whole roster. It goes through `pick`, not
+   `setMode`, so a probe-driven change moves the dock chips exactly as a human's click does — a
+   handle that took a shortcut past the UI would let the probe prove a state the player cannot
+   reach. An unknown key still lands on foot (setMode's own refusal), never nowhere. */
+window.__setMode = (m) => { pick(m); return MODE; };
+/* the body loaders' readiness, so a probe can WAIT for the GLB instead of racing it (a capture
+   taken mid-fetch shows a fallback box and would be filed as an art failure). Only built craft
+   have a promise — an unentered one has loaded nothing, which is the point of lazy building. */
+window.__vehReady = (k) => {
+  const v = BY_KEY.get(k);
+  return v && v._inst && v._inst.body.ready ? v._inst.body.ready : Promise.resolve('procedural');
+};
 /* the determinism receipt (moto-lab's own): FNV-1a over the CARVED height buffer — two boots of one
    URL must agree byte-for-byte. */
 window.__terrainChecksum = () => {

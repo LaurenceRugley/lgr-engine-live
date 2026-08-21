@@ -68,6 +68,8 @@
     "moto-probe": "node tools/moto-probe.mjs",
     "build:world-lab": "npm run build -w projects/world-lab",
     "world-lab-probe": "node tools/world-lab-probe.mjs",
+    "vehicle-probe": "node tools/vehicle-probe.mjs",
+    "vehicle-probe:prove-red": "node tools/vehicle-probe.mjs --prove-red",
     "walkrun-guard": "node tools/walkrun-guard.mjs",
     "city-legibility": "node tools/city-legibility.mjs",
     "city-visibility-bench": "node tools/city-visibility-bench.mjs",
