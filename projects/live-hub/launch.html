@@ -200,22 +200,36 @@
 
     <h2 class="section"><b>Worlds</b> — the big rooms, and the bodies they hold</h2>
 
-    <!-- METROPOLIS. Six bodies, but they are chosen from the in-page dock rather than the URL, so the
-         menu says so instead of inventing `?body=` links that would 200 and do nothing. The ONE URL
-         state it really has is the palette, which the gallery already ships. -->
+    <!-- METROPOLIS. Until A-KEEP (2026-08-21) this card carried a note explaining that the bodies were
+         dock-only and therefore deliberately NOT linked — "instead of inventing `?body=` links that
+         would 200 and do nothing", which is this page's one rule. metropolis now reads `?body=` for
+         real (main.js, right before shell.start), so the row is honest and the note is retired.
+         The eight values below are the room's OWN vocabulary, read off `BODIES` in main.js rather than
+         guessed, and every one was DRIVEN — the page reports mode == the asked body with exactly one
+         aria-pressed dock button and the right craft possessed. `fly` is the default, so it is the
+         primary link with no parameter rather than a ninth chip saying the same thing. -->
     <section class="world" style="--edge: var(--accent4)">
       <img src="img/metropolis.jpg" alt="Metropolis at golden hour — a harbour city from the air, thousands of lit windows, the sea burning orange to the horizon" loading="lazy" width="720" height="405">
       <div>
         <h3>Metropolis</h3>
-        <p class="what">The full engine in one place: fly, drive, walk, take a boat's helm, ride as a gull, then
-          break the surface as a fish. Click a tower to dive through the glass.</p>
-        <span class="lbl">Enter</span>
+        <p class="what">The full engine in one place: fly, walk, drive, fly the helicopter, take a boat's helm,
+          ride as a gull, break the surface as a fish, or web-swing the canyons. Click a tower to dive
+          through the glass.</p>
+        <span class="lbl">Body</span>
         <div class="modes">
-          <a class="primary" href="metropolis/">Open Metropolis →</a>
+          <a class="primary" href="metropolis/">Fly in →</a>
+          <a href="metropolis/?body=walk">Walk</a>
+          <a href="metropolis/?body=drive">Drive</a>
+          <a href="metropolis/?body=heli">Helicopter</a>
+          <a href="metropolis/?body=boat">Boat</a>
+          <a href="metropolis/?body=bird">Gull</a>
+          <a href="metropolis/?body=fish">Fish</a>
+          <a href="metropolis/?body=swing">Web-swing</a>
+        </div>
+        <span class="lbl">Palette</span>
+        <div class="modes">
           <a href="metropolis/?profile=neoTokyo">Neo-Tokyo palette</a>
         </div>
-        <p class="what" style="margin: 0.55rem 0 0">The six bodies are picked from the dock inside the page — they
-          are not URL state, so they are not links here.</p>
       </div>
     </section>
 

@@ -165,17 +165,68 @@ const cityRimOf = () => ((AR.cols - 1) / 2) * AR.spacing + (AR.spacing - WP.stre
    arc's scope, and it is written up in HANDOFF as an OPEN. ---- */
 const SEED_REACH = 34;      // max(|x|,|z|) of the three swept seed positions below
 const SEED_PAD = 3.0;       // u — how far outside the city rect a seed must stand to survive it
+/* ---- A-KEEP: THE CITY'S WANT IS NOW MEASURED, NOT DECLARED (ledger OPEN #35, closed-in-part). ----
+   `city.want` was the constant 0.25 while the rect it describes GROWS with the `cols` and `spacing`
+   dials. Past roughly a third of the world the declared want and the real footprint part company, and
+   the four other districts are then asked to fill a remainder that no longer exists — so the flood
+   reports `starved`, and, worse and much quieter, the COVERAGE DIAL STOPS MEANING WHAT IT SAYS. That
+   second half is the real damage and it starts INSIDE the range the room already calls safe: at
+   `?cols=15` today the worst non-city district misses its asked share by 4.96 pp while `starved` is
+   still 0 and the HUD is still green. A dial that is 5 points wrong with a green light beside it is
+   the exact failure A-PATCHWORK exists to prevent.
+   THE FIX IS ONE MEASUREMENT AND ONE RESCALE: ask the rect how much of the world it actually covers
+   (clipped to the world, because a big enough dial pushes it past the border) and give the other four
+   whatever is left, in their existing ratios. `Math.max(CITY_WANT, …)` is the whole reason this can
+   ship inside an arc whose first rule is "defaults must not move" — the same shape as A-LAUNCH's
+   `Math.max(1, …)` seed push. At the shipped cols 13 the rect measures 22.71%, BELOW the declared
+   0.25, so the floor holds, `k` is exactly 1, and the returned plan is not merely equivalent but
+   JSON-IDENTICAL to the old one. Verified as identical FIELDS across all 30 terrain seeds (0 of 30
+   moved), not reasoned about — A-PATCHWORK's swept layout is untouched.
+   MEASURED, over a 99-configuration grid (cols 5–25 × nine spacings):
+     · drift: better on 62, WORSE ON NONE — the coverage dial never becomes less honest
+     · `starved`: better on 6, unchanged on 89, WORSE ON 4 (cols 11/sp 6.6 · 13/5.8 · 19/4.0 · 21/3.4)
+     · the case OPEN #35 names, `?cols=17`, across 30 terrain seeds: starves on 25 of 30 seeds today
+       and on 0 of 30 after, with worst drift 9.310 pp → 0.091 pp
+   THE FOUR WORSE CELLS ARE A REAL TRADE AND ARE NOT SWEPT UNDER, and they were counted rather than
+   characterised: in all four it is `lakes`, short of an HONEST target by 0.251–0.257 pp, where before
+   it met a DISHONEST one and the non-city drift sat at 5.88–8.02 pp. `starved` flips 0→1 and the HUD
+   goes red. I judge a small true shortfall better than a large false success —
+   the room's own doctrine is "reporting honestly rather than a range that hides the boundary" — but
+   it is a judgement, it is the owner's to overturn, and it is why OPEN #35 is only closed IN PART:
+   at `cols ≥ 18` the lakes district still cannot reach even its honest share. See the ledger.
+   ONE SEMANTIC CHANGE, STATED PLAINLY, because it is the price of the rescale: once the city outgrows
+   its declared 0.25, the `woods` slider reads as "26% of what is NOT city" rather than "26% of the
+   world" — at `?cols=17` asking 26% now yields 21.24% of the world (26% of the 81.7% that is left) and
+   the HUD says exactly that. It is not a smaller promise, it is the only promise the world can keep:
+   the same ask under the old plan produced 16.69%, a 9.31 pp shortfall reported as a green dial. Below
+   the threshold `k` is 1 and the two readings are the same number. */
+const CITY_WANT = 0.25;     // the DECLARED floor — the swept layout's own number, never gone below
+const REST_WANT = 0.75;     // what the other four sum to today; they keep their ratios inside 1 − city
+function cityAreaFrac(rim) {
+  /* A WORLD WITH NO AREA HAS NO FRACTION, and the guard is here because I introduced the hole and
+     then went looking for it: `?world=0` makes this a 0/0, `Math.max(0.25, NaN)` is NaN, and a NaN
+     want propagates into `wantSum` and out through `Math.floor` into an Int32Array, where it lands as
+     a silent 0 target for every district. Nonsense with no error attached is the one outcome this
+     repo will not ship. Returning 0 degrades the plan to EXACTLY the pre-change constants — which is
+     what the old code did at that dial anyway — so a degenerate world is no worse than it was. */
+  if (!(WP.worldSize > 0)) return 0;
+  const H = WP.worldSize / 2;                       // the rect is clipped to the world before measuring
+  const w = Math.max(0, Math.min(rim, H) - Math.max(-rim, -H));
+  return (w * w) / (WP.worldSize * WP.worldSize);
+}
 function regionPlan() {
   const rim = cityRimOf();
   const woods = Math.max(0.05, Math.min(0.36, WP.woods));
   const push = Math.max(1, (rim + SEED_PAD) / SEED_REACH);
   const at = (x, z) => ({ x: x * push, z: z * push });
+  const city = Math.max(CITY_WANT, cityAreaFrac(rim));
+  const k = (1 - city) / REST_WANT;                 // exactly 1 at the shipped config, by construction
   return [
-    { key: 'sea', want: 0.22, mode: 'rim' },
-    { key: 'city', want: 0.25, mode: 'rect', rect: { x0: -rim, z0: -rim, x1: rim, z1: rim } },
-    { key: 'woods', want: woods, mode: 'seed', at: at(-34, 30) },
-    { key: 'desert', want: 0.41 - woods, mode: 'seed', at: at(34, -32) },
-    { key: 'lakes', want: 0.12, mode: 'seed', at: at(30, 34) },
+    { key: 'sea', want: 0.22 * k, mode: 'rim' },
+    { key: 'city', want: city, mode: 'rect', rect: { x0: -rim, z0: -rim, x1: rim, z1: rim } },
+    { key: 'woods', want: woods * k, mode: 'seed', at: at(-34, 30) },
+    { key: 'desert', want: (0.41 - woods) * k, mode: 'seed', at: at(34, -32) },
+    { key: 'lakes', want: 0.12 * k, mode: 'seed', at: at(30, 34) },
   ];
 }
 /* the SHAPING dials. seamBlend 8 u is budgeted off the module's own bound

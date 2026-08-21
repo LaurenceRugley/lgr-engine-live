@@ -1701,4 +1701,59 @@ window.__reticle = reticle;
 window.__frame = frame;   // debug/verification probe (matches house convention — see docs/engine-invariants.md)
 window.__cityReady = true;
 
+/* ---- A-KEEP (2026-08-21): THE BODY IS A URL PARAM. `?body=swing` boots you into the swinger. ------
+   Metropolis has wired eight bodies since A-SPRINT and every one of them was reachable ONLY by
+   clicking a dock button, so a launcher link could open the room but never promise what you would be
+   in it. The World Lab (`?mode=bike`) and the Swing Lab (21 URL-addressable constants) already read
+   their setup off the query string; this is metropolis joining them. A link is the only handle an
+   outside page has, and the room has to agree to read it.
+
+   IT SITS HERE, LAST, AND THAT POSITION COST A REAL FAILURE TO FIND. The obvious home is beside the
+   eight `addEventListener` lines that call the same function — and there it BLEW UP: `setMode` ends in
+   `refreshHint()`, which reaches for the touch rocker (`touch.setLift`), and `touch` is not constructed
+   until 250 lines further down. Module evaluation aborted before `window.__loaded`, so `?body=walk`,
+   `drive`, `heli`, `boat`, `bird`, `fish` and `swing` all served a DEAD PAGE. Only `?body=fly` looked
+   fine, because `setMode`'s `next === mode` early-return meant it never entered the body of the
+   function at all — the one value that could not detect the bug was the one that passed.
+   `setMode` is not a pure switch: it possesses craft, moves the camera rig, arms a crosshair and
+   repaints the hint bar, so it may only be called once EVERYTHING it touches exists. That is here,
+   after the last `window.__*` receipt and immediately before `shell.start(frame)`. World Lab's
+   `?mode=bike` carries the same ordering note for the same class of reason (its `spawn()` would have
+   silently undone an earlier call); this one is louder because ours did not fail silently, it failed
+   the whole page.
+
+   THE VOCABULARY IS THE DOCK'S, NOT A SECOND COPY OF IT. `BODIES` is the eight keys `setMode` branches
+   on, and `_bodyBtn` maps each to the button that already drives it — so the boot check below can
+   assert the list against the REAL dock instead of against my memory of it. Two hand-maintained lists
+   of the same fact is how a ninth body ships reachable by click and not by link, silently.
+
+   AN UNKNOWN VALUE IS LOUD, and it has to be: `setMode`'s final `else` is the fly camera, so
+   `?body=fly1ng` would have set `mode` to a string nothing matches, left all eight aria-pressed
+   attributes false, and parked you at the establishing shot looking correct. A typo that LOOKS like
+   the default is worse than a typo that errors. So the room refuses it, says so on the hint bar (the
+   one surface a visitor is already reading) and in the console, and stays fly — the honest default,
+   announced rather than impersonated.
+   NO PARAMETER IS BYTE-IDENTICAL TO BEFORE: `mode` is already 'fly', nothing below runs, and
+   `setMode`'s own `next === mode` early-return means even `?body=fly` cannot re-enter the branch.
+   (C++: the query string is argv; this is the switch that validates it before main() acts on it.) */
+const BODIES = ['fly', 'walk', 'drive', 'heli', 'boat', 'bird', 'fish', 'swing'];
+const _bodyBtn = (k) => document.getElementById(`mode${k[0].toUpperCase()}${k.slice(1)}`);
+const _bodyOrphans = BODIES.filter((k) => !_bodyBtn(k));
+if (_bodyOrphans.length) console.warn(`[metropolis] ?body= vocabulary names ${_bodyOrphans.join(', ')} but the dock has no button for it — the two lists have drifted.`);
+const _bodyAsked = app.q.get('body');
+let _bodyApplied = null;
+if (_bodyAsked !== null) {
+  if (BODIES.includes(_bodyAsked)) { setMode(_bodyAsked); _bodyApplied = _bodyAsked; }
+  else {
+    const msg = `?body=${_bodyAsked} is not a body in this city — pick one of: ${BODIES.join(' · ')}`;
+    console.warn(`[metropolis] ${msg}`);
+    const h = document.getElementById('hint');
+    if (h) h.textContent = `⚠ ${msg}`;
+  }
+}
+/* The receipt, house convention (`window.__seed`, `window.__mobile`, `window.__heli` above): a probe
+   asks what was ASKED FOR and what was APPLIED as two separate facts, so "the link did nothing" and
+   "the link was refused" cannot be confused for each other, or for a body the user picked by hand. */
+window.__body = { asked: _bodyAsked, applied: _bodyApplied, vocabulary: BODIES };
+
 shell.start(frame);
