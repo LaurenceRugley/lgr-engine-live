@@ -64,8 +64,12 @@
 
    PRESENTATION-ONLY, and that is load-bearing. The clamp writes `object.position.y` AFTER the consumer
    has placed the body and never reports it back: the sim's authoritative position is untouched, so the
-   hoard2 determinism trace must hash identical with the clamp on and off. `_baseY` below is how that is
-   kept true without assuming a call order.
+   hoard2 determinism trace must hash identical with the clamp on and off. The idempotence that keeps
+   that true without assuming a call order is `_clampBaseY`/`_clampWroteY` — and they are NOT "below":
+   they live in `createCharacterRig.js` (declared :342, restored :347, argued :331). This sentence used
+   to say "`_baseY` below", naming a variable that exists nowhere and pointing at the wrong file; the
+   A-CLAMP refutation caught it. A pointer comment that misnames its target is worse than no comment,
+   because the next reader greps for a symbol that was never there.
 
    C++ anchor: an out-of-band presentation offset applied to a transform each frame and re-derived from
    scratch the next — like a render-thread jitter/interpolation term that never writes back into the
