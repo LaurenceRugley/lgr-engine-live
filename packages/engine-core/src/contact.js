@@ -119,3 +119,41 @@ export function planeContactTarget(out, probe, gx, gy, gz, nx, ny, nz, inset, L,
 export function groundContactTarget(out, probe, gx, gy, gz, inset, L, cfg = CONTACT) {
   return planeContactTarget(out, probe, gx, gy, gz, 0, 1, 0, inset, L, cfg);
 }
+
+/* ── THE ADAPTER THAT MADE THE GROUND HALF REACHABLE (ARC A-GROUND, 2026-08-20) ─────────────────────
+   A-CONTACT shipped the ground ability "PROVEN BUT UNREACHABLE" (its honest gap #5), and the reason was
+   not the arithmetic above — that was tested. It was that the ability speaks ONE dialect, `segmentHit`,
+   the ray seam the wall path already had, while the projects that need GROUND publish a completely
+   different authority: a HEIGHT FIELD, `groundAt(x,z) -> y`. hoard2's is `groundAt: () => GROUND_Y`.
+   With no translation between the two, a project could hold a perfectly good ground authority and still
+   have nothing to hand `setSurfaceProbe`. This function is that translation, and it lives here — beside
+   the ability it feeds — because every project with a floor needs the same three lines (CLAUDE.md
+   engine-first: the ability in core, the content in the project).
+
+   THE CONTRACT IS DELIBERATELY NARROW, AND THE NARROWNESS IS THE HONEST PART. A height field knows how
+   high the floor is under a point. It does NOT know whether there is a wall in front of you — that
+   question has no answer in `groundAt`, and inventing one would be worse than declining. So a segment
+   that is not travelling DOWNWARD reports 1 ("clear"), which is the same answer the caller would get
+   from an empty world. Consequence a future consumer must know: a rig wired with ONLY this probe gets
+   the measured floor, and its WALL contact (`planeContactTarget` on the cling path) will read "no
+   surface" and RELEASE — correct in a project with no climbing (hoard2 has none: it never calls
+   setAirMotion or createHeroBody), and wrong in one that does. A climbing project wants a real
+   `segmentHit` over its solids, and should pass that instead.
+
+     groundAt — (x, z) -> surface Y. Anything non-finite is read as "no floor here" → clear.
+     returns  — a `segmentHit(ox,oy,oz, ex,ey,ez, r) -> t∈[0,1]` closure, or null if given no function.
+   Zero-alloc per call (the closure is built once at wiring time and only does arithmetic after).
+   C++ anchor: a thin adaptor object wrapping a callback to satisfy a different interface — the same
+   shape as an STL-style projection, not a new hierarchy. */
+export function heightFieldProbe(groundAt) {
+  if (typeof groundAt !== 'function') return null;
+  return (ox, oy, oz, ex, ey, ez) => {
+    const dy = ey - oy;
+    if (!(dy < 0)) return 1;                 // not a downward cast → a height field has no answer
+    const gy = groundAt(ox, oz);
+    if (!Number.isFinite(gy)) return 1;      // the field declines to answer here → clear
+    if (oy <= gy) return 0;                  // the ray STARTS at or under the floor → hit at t = 0
+    const t = (gy - oy) / dy;                // dy < 0 and (gy - oy) < 0 → t > 0
+    return t < 1 ? t : 1;                    // the floor is past the segment's end → clear
+  };
+}

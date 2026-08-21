@@ -137,6 +137,7 @@ export { createDecals } from './src/createDecals.js';
 export { createCharacterRig } from './src/createCharacterRig.js';
 export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/character-anim.js';
 export { createCharacterHorde } from './src/createCharacterHorde.js';
+export { heightFieldProbe } from './src/contact.js';   // A-GROUND: groundAt(x,z) → the segmentHit probe setSurfaceProbe wants
 // A-CITIZENS (2026-08-12): the SEIR agent population (THREE-free, node-tested) + the tier A/B crowd
 // renderer over it (rigs near, one instanced-capsule draw far). Lifted from hoard2 — engine-first.
 export { createAgentSim, createAgentRng } from './src/createAgentSim.js';

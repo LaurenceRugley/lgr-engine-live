@@ -105,6 +105,7 @@ export { createDecals } from './src/createDecals.js';
 export { createCharacterRig } from './src/createCharacterRig.js';
 export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/character-anim.js';
 export { createCharacterHorde } from './src/createCharacterHorde.js';
+export { heightFieldProbe } from './src/contact.js';   // A-GROUND: groundAt(x,z) → the segmentHit probe setSurfaceProbe wants
 // A-CITIZENS (2026-08-12): the SEIR agent sim + tier A/B crowd renderer ride with the horde/flow-field
 // family — general capability, not city content (createAgentSim imports nothing; tiers import the horde).
 export { createAgentSim, createAgentRng } from './src/createAgentSim.js';

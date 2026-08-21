@@ -117,6 +117,18 @@ export function createCharacterHorde(rig, opts = {}) {
     // handle so recycled slots inherit it; the per-frame distance gate (update) skips far rigs. no-op on a rig
     // whose skeleton isn't a resolvable biped.
     setFootIK(cfg) { for (let i = 0; i < size; i++) slots[i].handle.setFootIK(cfg); },
+    /* A-GROUND (2026-08-20): THE MISSING HALF OF THE FAN-OUT, and its absence is why A-CONTACT's ground
+       ability could not run in any shipped build. `setFootIK` was forwarded to the pool; `setSurfaceProbe`
+       was not — and the rig needs BOTH to take the measured path (createCharacterRig.js:834 tests
+       `_footIK.groundProbe && _surfaceProbe`). A horde could therefore ask for a measured floor and
+       silently keep the inferred one, with nothing anywhere reporting a problem: the config was accepted,
+       the flag was true, and the probe it depended on had no way in. Forwarded to EVERY slot, not just
+       the active ones, so a recycled slot inherits it exactly as it inherits setFootIK. */
+    setSurfaceProbe(probe) { for (let i = 0; i < size; i++) slots[i].handle.setSurfaceProbe(probe); },
+    /* Read-back so a probe can verify the wiring landed rather than assuming it did — the count of slots
+       that actually hold a probe. A number, not a boolean, because "some slots wired" is a real failure
+       mode (a fan-out that ran before the pool finished spawning) and a boolean would hide it. */
+    get surfaceProbedCount() { let n = 0; for (let i = 0; i < size; i++) if (slots[i].handle.surfaceProbed) n++; return n; },
     playAction(i, name, timeScale) { slots[i].handle.playAction(name, timeScale); },   // A1: one-shot (hit/attack) over the blend · A8-4: per-type rate
     lunge(i) { slots[i].handle.lunge(); },                                    // A5: forward attack lunge (procedural layer; no-op if motionLayers off)
     // A2 NIGHT FILL: lift the swarm off black at night. The project OVERRIDES slot materials (setType tints),

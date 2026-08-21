@@ -421,6 +421,14 @@ export { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE } from './src/c
 // Hoard swaps its instanced-capsule zombies for these, same sim).
 export { createCharacterHorde } from './src/createCharacterHorde.js';
 
+/* ARC A-GROUND (2026-08-20) — the adapter that lets a project with a HEIGHT FIELD feed the A-CONTACT
+   ground ability. contact.js's other exports stay off this list under the A-AIR rule three notes below
+   (a barrel export with no consumer is ORPHANED): `planeContactTarget` / `groundContactTarget` /
+   `surfaceAlong` still have exactly one runtime consumer, createCharacterRig, which imports them
+   directly. `heightFieldProbe` is here because it now has a real second consumer — hoard2 wires its
+   `world.groundAt` through it to arm the measured floor on the survivor and both hordes. */
+export { heightFieldProbe } from './src/contact.js';
+
 /* ARC A-BODY (2026-08-13) — THE PLAYER GETS A BODY. The engine could render a CROWD of skinned humans
    (rig → horde → tiers) but not the ONE human the player is, so every project hung a CapsuleGeometry
    off createCharacterController and called it a stand-in. createHeroBody reads a controller state and

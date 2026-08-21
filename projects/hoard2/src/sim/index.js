@@ -18,7 +18,7 @@
    per-frame allocation in update (all scratch hoisted). C++ anchor: ctx ≈ a service locator handed to a
    subsystem's ctor; the facade ≈ its public vtable.
    ============================================================ */
-import { createCharacterRig, createCharacterHorde, createFlowField } from '@lgr/engine-core';
+import { createCharacterRig, createCharacterHorde, createFlowField, heightFieldProbe } from '@lgr/engine-core';
 import { createSurvival } from './survival.js';
 import { createWaveDirector } from './wave-director.js';
 import { createZombiePool } from './zombies.js';
@@ -253,6 +253,21 @@ export function createSim(ctx) {
   // DEFAULT OFF pending the owner's by-feel review (his ruling 2026-07-29) — ?footik=1 opts in (the A/B lever;
   // the slip probe measured NEAR-cohort plantRatio 0.041 → 0.005 with it on). Flip the default back once reviewed.
   const _footIkOn = !!(_zq && _zq.get('footik') === '1');
+  /* ── ARC A-GROUND (2026-08-20) — ARM THE MEASURED FLOOR. The rig takes the measured path only when it
+     has BOTH halves (createCharacterRig.js:834 `_footIK.groundProbe && _surfaceProbe`); with either
+     missing it silently computes the original INFERRED floor — a leaky-min over the rig's own feet,
+     which is self-referential and therefore cannot notice that a body was placed below the real ground.
+     `heightFieldProbe` is the engine's adapter from this project's ground AUTHORITY (`world.groundAt`,
+     a flat constant here by ratification #8) to the `segmentHit` dialect the ability speaks. The world
+     is resolved LAZILY, inside the rig's async ready callback, because this runs after a GLB fetch and
+     the registry is not guaranteed populated at module-construction time. Presentation-only: the probe
+     is read by the foot-lock, which moves BONES — never a sim position, never the determinism trace. */
+  function armGroundProbe(h) {
+    const w = registry.has('world') ? registry.get('world') : null;
+    const p = w && heightFieldProbe(w.groundAt);
+    if (p) h.setSurfaceProbe(p);
+    return !!p;
+  }
   zRig = createCharacterRig({ url: 'models/zombie.glb' });
   zRig.ready.then(() => {
     // M1 MOBILE TRUTH: on mobile the horde opts OUT of shadow-casting (characters leave the shadow pass, so
@@ -263,7 +278,7 @@ export function createSim(ctx) {
     // A7-2: enable plant-and-hold foot IK on the whole zombie pool (near rigs only — the horde's ikDistance
     // gates it to lodDistance). Presentation-only → the determinism trace is untouched. Opt-in (?footik=1)
     // until the owner's by-feel review; default OFF ships the pre-A7-2 clip-only locomotion.
-    if (!ctx.mobile && _footIkOn) horde.setFootIK({ plantBand: 0.14 });
+    if (!ctx.mobile && _footIkOn) { armGroundProbe(horde); horde.setFootIK({ plantBand: 0.14, groundProbe: true }); }
     buildTypeMaterials();
   }).catch(() => { /* asset missing → sim still runs headless-correct; render is graceful (HitReact) */ });
 
@@ -347,6 +362,17 @@ export function createSim(ctx) {
     civRig.ready.then(() => {
       cHorde = createCharacterHorde(civRig, { size: civs.max, lodDistance: 14, lodHz: 3, baseScale: CIV_SCALE, castShadow: !ctx.mobile, motionLayers: !ctx.mobile });
       scene.add(cHorde.group);
+      /* A-GROUND: THE CIVILIANS WERE THE SUNK CLASS, AND THEY HAD NO FOOT-LOCK AT ALL. The A-CONTACT
+         recon read four sunk feet and attributed them to the horde; the A-GROUND census (35 bodies, one
+         per rig root — tools/hoard2-ground-census.mjs) showed the sunk readings were CIVILIANS: 10 of 24
+         below ground, worst −0.078 u, while the zombies read +0.0178 and the survivor +0.0009. The cause,
+         measured on a single tracked body over 90 frames, is NOT placement — the group origin holds a
+         constant 0.3000 — it is the walk clip's TOE dipping to −0.0784 below its own origin plane at
+         toe-off. Civilians use the SAME survivor.glb as the hero, so they inherit the same dip; the hero
+         had the foot-lock wired and they never did. This is CLAUDE.md's named wiring-drift failure:
+         the ability lived in core, one sibling path wired it, another never did.
+         Same flag as the horde and the survivor, so one switch still A/B-s all three (see _footIkOn). */
+      if (!ctx.mobile && _footIkOn) { armGroundProbe(cHorde); cHorde.setFootIK({ plantBand: 0.22 * CIV_SCALE, maxStride: 1.25 * CIV_SCALE, groundProbe: true }); }
       buildCivMaterials();
     }).catch(() => { /* asset missing → sim still runs headless-correct (the zombie-rig precedent) */ });
   }
@@ -476,6 +502,19 @@ export function createSim(ctx) {
     // OUTBREAK: force-bite n susceptible civilians THROUGH the real bite path (flag consumed by the
     // next civs.step — the incubation roll + infection:bite fire exactly as a street bite would).
     probe.infect = (n = 1) => civs.forceExpose(n, _player.x, _player.z); // nearest-to-survivor first (on-camera)
+    /* A-GROUND: report how many pooled rigs ACTUALLY hold a surface probe, per horde. The measured
+       ground path needs `groundProbe` AND a wired probe (createCharacterRig.js:834), and the failure
+       mode this exposes is silent by construction: the config is accepted, the flag reads true, and the
+       probe it depends on never arrived. Without this hook a harness can only observe that foot
+       positions CHANGED and infer the probe landed — but `setFootIK` alone moves feet too, so that
+       inference cannot separate the two halves. A count, not a boolean, because a fan-out that ran
+       before the pool finished spawning would wire SOME slots, and a boolean would call that success. */
+    probe.groundProbeCount = () => ({
+      zombies: horde ? horde.surfaceProbedCount : -1,
+      civilians: cHorde ? cHorde.surfaceProbedCount : -1,
+      zombieSlots: horde ? horde.size : -1,
+      civilianSlots: cHorde ? cHorde.size : -1,
+    });
   }
 
   registry.register('sim', facade);

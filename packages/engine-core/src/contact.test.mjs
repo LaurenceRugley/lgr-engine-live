@@ -9,7 +9,7 @@
    ============================================================ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTACT, surfaceAlong, planeContactTarget, groundContactTarget } from './contact.js';
+import { CONTACT, surfaceAlong, planeContactTarget, groundContactTarget, heightFieldProbe } from './contact.js';
 
 /* A synthetic world: one AABB, queried through the house `segmentHit` seam (t∈[0,1], 1 = clear).
    Slab method, un-inflated — the same arithmetic collide.js runs, small enough to read. */
@@ -144,4 +144,50 @@ test('GROUND is the same ability pointed down — and it can contradict a sunken
      the foot sideways would skate the plant, which is the bug foot-lock exists to prevent. */
   assert.equal(out.x, 0, 'ground contact must not move the foot in X');
   assert.equal(out.z, 0, 'ground contact must not move the foot in Z');
+});
+
+/* ── ARC A-GROUND (2026-08-20): heightFieldProbe — the adapter that made the ground half REACHABLE ──
+   WHY THESE TESTS EXIST (Rule 9 — intent, not behaviour): A-CONTACT shipped the ground ability
+   "proven but unreachable", and the reason was a DIALECT MISMATCH, not bad arithmetic. The ability
+   speaks `segmentHit`; the projects that need a floor publish `groundAt(x,z)`. So what must be pinned
+   here is not "the division is right" but the three contract properties a caller depends on:
+     1 · a downward cast through the floor reports the floor, in the segment's own t units;
+     2 · the adapter DECLINES questions a height field genuinely cannot answer (anything not downward),
+         because inventing a wall would be worse than saying "clear" — this is the property that makes
+         it safe to hand to a rig whose wall path might also read the probe;
+     3 · it composes with groundContactTarget to LIFT A SUNK FOOT — the whole point of the arc. */
+
+test('A-GROUND heightFieldProbe — a downward cast reports the floor at the right t', () => {
+  const probe = heightFieldProbe(() => 0.30);
+  // cast from y=0.50 down to y=0.10 (span 0.40); floor at 0.30 is 0.20 along → t = 0.5
+  assert.ok(Math.abs(probe(0, 0.50, 0, 0, 0.10, 0) - 0.5) < 1e-9, 'floor 0.20 into a 0.40 segment must read t = 0.5');
+  assert.equal(probe(0, 0.50, 0, 0, 0.35, 0), 1, 'a segment that stops above the floor must report clear (1)');
+  assert.equal(probe(0, 0.20, 0, 0, 0.00, 0), 0, 'a cast starting below the floor must report t = 0, not clear');
+});
+
+test('A-GROUND heightFieldProbe — it DECLINES the questions a height field cannot answer', () => {
+  const probe = heightFieldProbe(() => 0.30);
+  /* THE HONEST-NARROWNESS PROPERTY. A height field knows how high the floor is; it does not know
+     whether a wall is in front of you. Answering a horizontal or upward cast with anything but
+     "clear" would fabricate geometry — and the rig's WALL path reads the same probe object, so a
+     fabricated answer would silently move a hand. Upward/horizontal must be 1. */
+  assert.equal(probe(0, 0.50, 0, 1, 0.50, 0), 1, 'a HORIZONTAL cast has no answer in a height field → clear');
+  assert.equal(probe(0, 0.10, 0, 0, 0.90, 0), 1, 'an UPWARD cast has no answer in a height field → clear');
+  assert.equal(heightFieldProbe(null), null, 'given no function there is nothing to adapt → null, not a broken closure');
+  const nan = heightFieldProbe(() => NaN);
+  assert.equal(nan(0, 0.50, 0, 0, 0.10, 0), 1, 'a field that declines to answer (non-finite) must read clear, never NaN-propagate');
+});
+
+test('A-GROUND heightFieldProbe + groundContactTarget — the sunk foot is actually lifted out', () => {
+  /* THE ARC'S OWN SENTENCE, end to end and through the real adapter rather than a hand-built probe:
+     hoard2's ground authority is `groundAt: () => GROUND_Y` with GROUND_Y = 0.30, and a foot placed
+     0.04 u under it must come out. The literals are hand-derived so a changed insetFoot turns this
+     red instead of quietly following it (the tautology trap the A-CONTACT mutation matrix names). */
+  const L = 0.13, inset = CONTACT.insetFoot * L;          // 0.10 × 0.13 = 0.0130 of sole
+  const out = { x: 0, y: 0, z: 0 };
+  const moved = groundContactTarget(out, heightFieldProbe(() => 0.30), 0, 0.26, 0, inset, L);
+  assert.ok(Math.abs(out.y - 0.3130) < 1e-9, `foot must land at 0.3130 (floor 0.30 + a 0.0130 sole), got ${out.y}`);
+  assert.ok(Math.abs(moved - 0.0530) < 1e-9, `moved must BE the 0.0530 climb out of the floor, got ${moved}`);
+  assert.equal(out.x, 0, 'a ground probe answers "how high", never "where" — X must not drift');
+  assert.equal(out.z, 0, 'a ground probe answers "how high", never "where" — Z must not drift');
 });

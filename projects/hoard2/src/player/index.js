@@ -19,7 +19,7 @@
    The pure maths (movement clamp / push-out / aim / ballistics adapters / melee gate) live in movement.js +
    combat.js and are unit-tested THREE-free.
    ============================================================ */
-import { createCharacterRig, createFirstPersonWalker, createBallistics, createWeaponKit } from '@lgr/engine-core';
+import { createCharacterRig, createFirstPersonWalker, createBallistics, createWeaponKit, heightFieldProbe } from '@lgr/engine-core';
 import { clampToRadius, resolveCircles, resolveAabbs, aimFacing, isoStep } from './movement.js';
 import { makeCastWorld, makeCastTargets, meleeArcHits, gateMelee } from './combat.js';
 
@@ -107,7 +107,21 @@ export function createPlayer(ctx) {
     // Params are SCALE-AWARE: the survivor renders at 0.32 (a ~1.68-unit body), so its foot-lift + stride in
     // WORLD metres are ~0.32× a full-scale rig — plantBand/maxStride scale with CHAR_SCALE so the contact
     // test tracks the survivor's actual gait, not the zombie's. Desktop-only (mobile skips the motion layers).
-    if (!ctx.mobile && _footIkOn) survivor.setFootIK({ plantBand: 0.22 * CHAR_SCALE, maxStride: 1.25 * CHAR_SCALE });
+    /* A-GROUND (2026-08-20): the foot-lock's floor goes from INFERRED to MEASURED. Without a wired
+       surface probe the rig computes a leaky-min over its own feet — self-referential, so it locks the
+       feet wherever the body was put and can never contradict a sunk stance. `heightFieldProbe` adapts
+       this project's ground authority (`world.groundAt`) to the `segmentHit` dialect the ability speaks.
+       BOTH halves are required (createCharacterRig.js:834), which is why the probe is wired on the same
+       line as the flag rather than somewhere it could drift away from it. */
+    if (!ctx.mobile && _footIkOn) {
+      // Resolved INSIDE the guard so the default (flag-off) path stays a true no-op — it does not even
+      // look the world up. Lazily, because this runs after a GLB fetch and the registry is not
+      // guaranteed populated at module-construction time.
+      const _w = registry.has('world') ? registry.get('world') : null;
+      const _gp = _w && heightFieldProbe(_w.groundAt);
+      if (_gp) survivor.setSurfaceProbe(_gp);
+      survivor.setFootIK({ plantBand: 0.22 * CHAR_SCALE, maxStride: 1.25 * CHAR_SCALE, groundProbe: true });
+    }
     // B4: put the forge-skinned gun in the survivor's RIGHT HAND (the bone lives in unscaled object space,
     // so the kit is scaled up to read at the 0.32 body scale; pose tuned to sit in the palm pointing fwd).
     isoGun = createWeaponKit({ material: ctx.weaponSkins ? ctx.weaponSkins.gunmetal : null });
