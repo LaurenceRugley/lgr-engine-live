@@ -206,6 +206,26 @@ export function createFx(ctx) {
   };
   registry.register('fx', facade);
   ctx.probe.counts = () => core.counts();   // DONE #5: the harness reads counts() for corpse persistence
+  /* ARC A-CENSUS (2026-08-20) — THE THIRD SKINNED HORDE, DECLARED. The ground census resolved every
+     rendered character and checked the total against the sim's live lists, and it could not see this pool
+     at all: corpses are skinned rigs on screen that no sim list counts, so ONE death made the census wrong.
+     Before the mid-flight `SURVIVORS=1` pin it reported AGREE at 36 bodies (the corpse formed a singleton
+     group and got labelled `survivor`); after the pin it reports a false DISAGREE in ordinary play, because
+     the expected total still had no corpse term. Declaring the class here gives it one, from the pool's OWN
+     bookkeeping (`counts().corpses`) rather than from the scene the census is trying to check.
+     THE SHED CASE IS PART OF THE TRUTH, not an exception: the M1 governor can hide the whole corpse pool
+     (setCorpsesActive(false)), and then zero corpses are RENDERED while the bookkeeping still holds them.
+     Reporting `counts().corpses` there would manufacture exactly the false-DISAGREE this fix removes, so
+     the expectation follows what the governor did — and the census prints the shed state beside it. */
+  (ctx.probe.characterClasses = ctx.probe.characterClasses || []).push(
+    () => ({
+      name: 'corpses',
+      rootId: horde ? horde.group.id : -1,
+      expected: (_corpsesShed || !horde || !horde.group.visible) ? 0 : core.counts().corpses,
+      shed: _corpsesShed,
+      source: _corpsesShed ? 'fx.counts().corpses, forced to 0 — the governor shed the corpse pool' : 'fx.counts().corpses',
+    }),
+  );
   // B5 AUDIO probe handle — the measured-sanity harness unlocks + taps the bus, fires each voice, reads
   // levels (headless audio can't be HEARD, so the owner's ears are the exit gate — this proves it's WIRED).
   ctx.probe.audio = { get bus() { return bus; }, get sfx() { return sfx; }, get ambient() { return ambient; } };

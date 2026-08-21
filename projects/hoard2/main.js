@@ -181,6 +181,14 @@ const ctx = {
   //   build → placeBarrier(), breachNearest(), repairNearest(), harvestWood(), harvestScrap()
   //   world → setNight(nf), colliders() (AABBs/trees for the penetration-bounds probe)
   //   fx    → counts() { particles, decals, corpses }
+  // A-CENSUS (2026-08-20) — the SHARED contract, because three owners each render a class of character and
+  // no single one of them knows the whole cast (the ground census read 35 bodies off the scene and could
+  // not see the corpse pool at all):
+  //   probe.characterClasses — an ARRAY OF PROVIDERS, one pushed by each owner of a rendered character
+  //     class: sim (zombie horde, civilians), fx (corpses), player (survivor). Each returns
+  //     { name, rootId, expected, source } where `rootId` is the scene node its bodies hang under and
+  //     `expected` comes from that owner's OWN list — never from the scene, so the census's two halves
+  //     stay independent. A class nobody declares is a class no instrument can see.
   // A probe the harness calls that no owner attached is a LOUD miss (the harness logs the skip — no
   // silent caps). See each owner brief for the exact methods it must attach.
   probe: {},

@@ -66,6 +66,30 @@ export function createCharacterHorde(rig, opts = {}) {
   const _e = new THREE.Euler(0, 0, 0, 'YXZ');
   const _nfSeen = new Set();   // A2: dedup scratch for setNightFill (cleared each call, never re-alloc)
 
+  /* ── A-CENSUS (2026-08-20): THE POOL'S GROUND RECEIPT — the aggregate of every slot's own
+     `groundReport` (createCharacterRig.js). A-GROUND shipped `surfaceProbedCount` so a probe could verify
+     the fan-out LANDED, and it did land — 96/96 — while zero of those 96 rigs ever took the measured
+     branch, because the Quaternius zombie is a flat rig and the branch is gated on an articulated chain
+     length. POSSESSION IS NOT CONSUMPTION: `surfaceProbedCount` answers "who holds a probe", this answers
+     "who can and does use one". `measuredFrames 0` beside `probed 96` is the exact reading that was
+     missing. Computed on demand over `size` slots (a config-time / probe-time call, never per frame). */
+  function _groundReport() {
+    let requested = 0, reachable = 0, probed = 0, okN = 0, frames = 0, measuredFrames = 0, measuredNow = 0;
+    let reason = size ? 'ok — requested, probed, and this skeleton can take the measured branch' : 'empty pool';
+    for (let i = 0; i < size; i++) {
+      const r = slots[i].handle.groundReport;
+      if (!r) continue;
+      if (r.requested) requested++;
+      if (r.reachable) reachable++;
+      if (r.probed) probed++;
+      if (r.ok) okN++; else if (r.reason) reason = r.reason;   // the first slot NOT ok explains the pool
+      frames += r.frames; measuredFrames += r.measuredFrames;
+      if (r.measured) measuredNow++;
+    }
+    return { slots: size, requested, reachable, probed, ok: size > 0 && okN === size, okSlots: okN,
+      frames, measuredFrames, measuredNow, reason };
+  }
+
   return {
     group,
     get size() { return size; },
@@ -116,7 +140,10 @@ export function createCharacterHorde(rig, opts = {}) {
     // A7-2 FOOT IK: enable plant-and-hold on the WHOLE pool (cfg) or disable (false). Applied to every pooled
     // handle so recycled slots inherit it; the per-frame distance gate (update) skips far rigs. no-op on a rig
     // whose skeleton isn't a resolvable biped.
-    setFootIK(cfg) { for (let i = 0; i < size; i++) slots[i].handle.setFootIK(cfg); },
+    /* A-CENSUS (2026-08-20): RETURNS the pool's aggregated ground receipt (see `groundReport` below).
+       Additive — every existing call site ignores the value and is byte-identical — but a horde can no
+       longer accept `groundProbe:true` and stay silent about a pool that structurally cannot honour it. */
+    setFootIK(cfg) { for (let i = 0; i < size; i++) slots[i].handle.setFootIK(cfg); return _groundReport(); },
     /* A-GROUND (2026-08-20): THE MISSING HALF OF THE FAN-OUT, and its absence is why A-CONTACT's ground
        ability could not run in any shipped build. `setFootIK` was forwarded to the pool; `setSurfaceProbe`
        was not — and the rig needs BOTH to take the measured path (createCharacterRig.js:834 tests
@@ -129,6 +156,7 @@ export function createCharacterHorde(rig, opts = {}) {
        that actually hold a probe. A number, not a boolean, because "some slots wired" is a real failure
        mode (a fan-out that ran before the pool finished spawning) and a boolean would hide it. */
     get surfaceProbedCount() { let n = 0; for (let i = 0; i < size; i++) if (slots[i].handle.surfaceProbed) n++; return n; },
+    get groundReport() { return _groundReport(); },   // A-CENSUS: possession (`surfaceProbedCount`) vs consumption — read this one for "is the measured floor actually running?"
     playAction(i, name, timeScale) { slots[i].handle.playAction(name, timeScale); },   // A1: one-shot (hit/attack) over the blend · A8-4: per-type rate
     lunge(i) { slots[i].handle.lunge(); },                                    // A5: forward attack lunge (procedural layer; no-op if motionLayers off)
     // A2 NIGHT FILL: lift the swarm off black at night. The project OVERRIDES slot materials (setType tints),

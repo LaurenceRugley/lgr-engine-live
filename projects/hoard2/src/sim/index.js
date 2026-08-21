@@ -11,7 +11,10 @@
    EMITS:   wave:start/clear · zombie:spawn/death · infection:bite/turn · player:damage · player:death · item:pickup
    CONSUMES: weapon:hit / melee:hit (apply damage to the hit zombie) · barrier:place / barrier:breach
              (rebuild the flow field's obstacle set) · world.nightFactor() · player.player · build.aabbs()/hitBarrier()
-   PROBE HOOKS: ctx.probe.spawnWave(n) · ctx.probe.starve() · ctx.probe.hurt(amount)
+   PROBE HOOKS: ctx.probe.spawnWave(n) · ctx.probe.starve() · ctx.probe.hurt(amount) · ctx.probe.infect(n)
+     · ctx.probe.kill(n) (A-CENSUS: n real zombie deaths → n corpses) · ctx.probe.groundProbeCount()
+     (possession) · ctx.probe.groundContact() (CONSUMPTION — the engine's measured-floor receipt)
+     · ctx.probe.characterClasses (the shared class registry — see main.js's contract block)
 
    Engine is FROZEN — we only CALL factories (createCharacterRig/Horde, createFlowField). Determinism
    (DONE #10): every roll is off rng.fork('sim'); the sim clock is time.simDt(dt). No Math.random, no
@@ -262,11 +265,28 @@ export function createSim(ctx) {
      is resolved LAZILY, inside the rig's async ready callback, because this runs after a GLB fetch and
      the registry is not guaranteed populated at module-construction time. Presentation-only: the probe
      is read by the foot-lock, which moves BONES — never a sim position, never the determinism trace. */
-  function armGroundProbe(h) {
+  /* ARC A-CENSUS (2026-08-20) — ONE CALL, ONE RECEIPT, AND NO BOOLEAN LEFT TO DROP. `armGroundProbe`
+     returned a boolean saying whether the probe was built, and BOTH call sites discarded it: a live
+     silent-failure path that merely happened not to fire (if the world registry were empty, or `groundAt`
+     absent, the horde would keep the INFERRED floor and nothing would say so). Two calls that had to be
+     kept in step — arm the probe, then ask for `groundProbe:true` — were also two chances to drift apart.
+     They are now ONE call that returns the engine's own receipt (createCharacterRig/Horde `groundReport`),
+     records it where a probe can read it, and WARNS when the measured floor is not actually armed. There is
+     no longer a return value whose loss is silent: ignoring this one still leaves the warning and the
+     recorded report. C++ anchor: replacing a `bool` return nobody checked with a status struct plus a
+     logged assert — the caller can be lazy, the failure cannot be quiet. */
+  const _groundArm = {};   // class name → the receipt from the last arm attempt (read by probe.groundContact)
+  function armMeasuredFloor(h, who, cfg) {
     const w = registry.has('world') ? registry.get('world') : null;
     const p = w && heightFieldProbe(w.groundAt);
     if (p) h.setSurfaceProbe(p);
-    return !!p;
+    const rep = h.setFootIK({ ...cfg, groundProbe: true }) || null;
+    const armed = !!p && !!rep && !!rep.ok;
+    _groundArm[who] = { who, probeBuilt: !!p, ...(rep || {}), armed };
+    if (!armed) {
+      console.warn(`[hoard2] ${who}: MEASURED ground floor requested but NOT armed — ${!p ? 'no world.groundAt to build a probe from' : (rep ? rep.reason : 'the rig returned no receipt')}. The foot-lock is running on the INFERRED floor, which cannot notice a body placed below the real ground.`);
+    }
+    return _groundArm[who];
   }
   zRig = createCharacterRig({ url: 'models/zombie.glb' });
   zRig.ready.then(() => {
@@ -278,7 +298,10 @@ export function createSim(ctx) {
     // A7-2: enable plant-and-hold foot IK on the whole zombie pool (near rigs only — the horde's ikDistance
     // gates it to lodDistance). Presentation-only → the determinism trace is untouched. Opt-in (?footik=1)
     // until the owner's by-feel review; default OFF ships the pre-A7-2 clip-only locomotion.
-    if (!ctx.mobile && _footIkOn) { armGroundProbe(horde); horde.setFootIK({ plantBand: 0.14, groundProbe: true }); }
+    // A-CENSUS: the arm + the config are one call now, and its receipt is kept (see armMeasuredFloor). On
+    // the shipped Quaternius zombie this WARNS — correctly: the rig is flat, so the measured branch cannot
+    // run and the horde is on the inferred floor. That is a report of the state, not a change to it.
+    if (!ctx.mobile && _footIkOn) armMeasuredFloor(horde, 'zombie horde', { plantBand: 0.14 });
     buildTypeMaterials();
   }).catch(() => { /* asset missing → sim still runs headless-correct; render is graceful (HitReact) */ });
 
@@ -372,7 +395,7 @@ export function createSim(ctx) {
          had the foot-lock wired and they never did. This is CLAUDE.md's named wiring-drift failure:
          the ability lived in core, one sibling path wired it, another never did.
          Same flag as the horde and the survivor, so one switch still A/B-s all three (see _footIkOn). */
-      if (!ctx.mobile && _footIkOn) { armGroundProbe(cHorde); cHorde.setFootIK({ plantBand: 0.22 * CIV_SCALE, maxStride: 1.25 * CIV_SCALE, groundProbe: true }); }
+      if (!ctx.mobile && _footIkOn) armMeasuredFloor(cHorde, 'civilians', { plantBand: 0.22 * CIV_SCALE, maxStride: 1.25 * CIV_SCALE });
       buildCivMaterials();
     }).catch(() => { /* asset missing → sim still runs headless-correct (the zombie-rig precedent) */ });
   }
@@ -502,6 +525,21 @@ export function createSim(ctx) {
     // OUTBREAK: force-bite n susceptible civilians THROUGH the real bite path (flag consumed by the
     // next civs.step — the incubation roll + infection:bite fire exactly as a street bite would).
     probe.infect = (n = 1) => civs.forceExpose(n, _player.x, _player.z); // nearest-to-survivor first (on-camera)
+    /* A-CENSUS: kill n live zombies THROUGH THE REAL PATH — the same `weapon:hit` the gun emits, so the
+       damage, the score, the drops and (the point here) the `zombie:death` that books a CORPSE all fire
+       exactly as they would in play. The ground census needs a corpse to exist in order to prove it can
+       see one; fabricating a corpse by poking the fx pool directly would prove only that the tool can
+       poke the fx pool. Returns how many actually died, so a caller cannot assume a kill it did not get. */
+    probe.kill = (n = 1) => {
+      let k = 0;
+      for (let i = 0; i < pool.max && k < n; i++) {
+        const z = pool.get(i);
+        if (!z.alive) continue;
+        events.emit('weapon:hit', { target: z.id, damage: 9999 });
+        k++;
+      }
+      return k;
+    };
     /* A-GROUND: report how many pooled rigs ACTUALLY hold a surface probe, per horde. The measured
        ground path needs `groundProbe` AND a wired probe (createCharacterRig.js:834), and the failure
        mode this exposes is silent by construction: the config is accepted, the flag reads true, and the
@@ -515,6 +553,30 @@ export function createSim(ctx) {
       zombieSlots: horde ? horde.size : -1,
       civilianSlots: cHorde ? cHorde.size : -1,
     });
+    /* A-CENSUS: the hook `groundProbeCount` should have been — CONSUMPTION, not possession. It reports the
+       engine's own per-class receipt (`horde.groundReport`) plus what the arming call actually concluded,
+       so a probe can print "probed 96, measuredFrames 0" instead of "96/96 ✓". This is the API half of the
+       fail-loud: the console warning tells a developer at boot, this tells a TOOL at any time. */
+    probe.groundContact = () => ({
+      arm: { ...(_groundArm['zombie horde'] ? { 'zombie horde': _groundArm['zombie horde'] } : {}), ...(_groundArm.civilians ? { civilians: _groundArm.civilians } : {}) },
+      live: {
+        'zombie horde': horde ? horde.groundReport : null,
+        civilians: cHorde ? cHorde.groundReport : null,
+      },
+    });
+    /* A-CENSUS: the CLASS REGISTRY the ground census reads. Each module that owns a class of rendered
+       characters pushes a provider here; the tool asks every provider at census time. Three properties
+       matter and each fixes a measured defect in the old instrument:
+         rootId   — the scene node the class's bodies hang under, so the census can name a group by
+                    IDENTITY. The old tool labelled groups BY SIZE ("the largest is the horde, a singleton
+                    is the survivor") and a single corpse therefore got labelled `survivor`.
+         expected — read from the owner's own LIST (`contactSample()`, `civSample()`, `counts().corpses`),
+                    never from the scene, so the two halves of the census stay independent.
+         source   — printed beside the number, so nobody has to trust that it came from where it claims. */
+    (probe.characterClasses = probe.characterClasses || []).push(
+      () => ({ name: 'zombie horde', rootId: horde ? horde.group.id : -1, expected: facade.contactSample().length, source: 'sim.contactSample().length' }),
+      () => ({ name: 'civilians', rootId: cHorde ? cHorde.group.id : -1, expected: facade.civSample().length, source: 'sim.civSample().length' }),
+    );
   }
 
   registry.register('sim', facade);

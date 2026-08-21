@@ -192,6 +192,11 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
   let source = gltf || null;
   const recs = [];   // { mixer, rate, acc } per live character
   let _warnedRig = false;   // A9: warn once (not per-spawn) if the detected profile names a bone this rig lacks
+  /* A-CENSUS (2026-08-20): warn ONCE PER RIG SOURCE if a consumer asks for the MEASURED ground floor on a
+     skeleton that structurally cannot deliver one. Factory-scope like `_warnedRig` and for the same reason:
+     a pooled horde spawns 96 handles off ONE createCharacterRig, and 96 identical warnings is noise nobody
+     reads. One line per GLB is a finding. (See `_groundRep` in spawn() for what "cannot deliver" means.) */
+  let _warnedGround = false;
 
   // A17 CUSTOM-CLIP SEAM (the asset-pipeline payoff). `extraClips` is a list of ADDITIONAL glTF sources
   // whose animation clips get merged into this rig's clip pool, so a Blender-authored clip (a clip we made
@@ -279,6 +284,30 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
     // overridden to HOLD that world pos while the hips move over → the planted foot stops skating. Feet resolve
     // by the Quaternius (Foot.L → sanitised FootL) AND mixamo (LeftFoot) name families. `_footIK` null = off.
     let _footIK = null, _footIKActive = true, _ikFloorY = null;
+    /* ── A-CENSUS (2026-08-20) THE MEASURED FLOOR'S RECEIPT — because "wired" is not "running". -----
+       An independent refutation of arc A-GROUND established that hoard2 could report `surfaceProbedCount
+       96/96` — every pooled zombie holding a probe, the config accepted, `groundProbe:true` honoured — while
+       ZERO of them ever took the measured path. The Quaternius zombie is a FLAT rig (`articulated=false`,
+       see `_legChain` below); `_chainLenOf` hard-returns 0 for a non-articulated chain; and the measured
+       branch in _applyLayers is gated `L > 0`. So the ability was STRUCTURALLY UNREACHABLE for that rig
+       and said nothing about it — the failure was invisible to every instrument pointed at it, and only a
+       refutation reading the source found it. That is the exact shape CLAUDE.md rule 12 forbids.
+       THIS OBJECT IS THE CURE, and it separates three things a single boolean was conflating:
+         requested — the consumer asked for a measured floor (`setFootIK({groundProbe:true})`)
+         probed    — a surface probe actually arrived (`setSurfaceProbe`)
+         reachable — this SKELETON can take the measured branch at all. TOPOLOGY, decided once from the
+                     leg chains: the branch needs a chain length, `_chainLenOf` gives one only for an
+                     ARTICULATED chain, so a flat rig is `false` here forever and no amount of correct
+                     wiring will change it. This is the term the refutation had to reverse-engineer.
+         frames / measuredFrames — the RUNTIME truth, and the one that cannot be argued with: how many
+                     frames the foot-IK block ran, and how many of those produced a measured floor.
+                     `reachable:true, measuredFrames:0` is a real state (a degenerate-length chain, or a
+                     probe that reports clear everywhere) and it should look as alarming as it is.
+       It is a plain data receipt with no side effects, so a rig that nobody asks about is byte-identical:
+       one small object per handle (like `_contactRep`), two integer increments inside an already-gated
+       block, no allocation per frame. C++ anchor: an out-param status struct on an API that used to
+       return void — the caller can now tell "did nothing" from "could never have done anything". */
+    const _groundRep = { requested: false, probed: false, reachable: false, ok: false, measured: false, frames: 0, measuredFrames: 0, reason: 'not-requested' };
     const _ikHips = B.hips;   // body-travel reference for the over-reach release (canonical hips)
     // A8-2 KNEE-FOLLOW — resolve each leg's CHAIN (foot ← knee ← upper-leg). If the foot has a real knee +
     // thigh above it (an ARTICULATED biped like the survivor's LeftFoot→LeftLeg→LeftUpLeg), the plant re-solves
@@ -296,6 +325,28 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
     const _ikLegR = _legChain(B.footR);   // canonical footR
     // both feet must resolve (+ have a parent to convert against) or the rig isn't one we can plant → no-op.
     const _ikLegs = (_ikLegL.foot && _ikLegL.foot.parent && _ikLegR.foot && _ikLegR.foot.parent) ? [_ikLegL, _ikLegR] : null;
+    /* A-CENSUS: decide `reachable` HERE, from topology, and never call `_chainLenOf` to do it. That
+       function CACHES its answer on the chain (`ch.clen`) and the cache is read by the air/crawl layers,
+       which measure in chain-lengths — calling it before the consumer has settled the object's SCALE
+       (the horde sets baseScale at spawn, createHeroBody scales to the level's height) would freeze a
+       wrong length into a layer this arc never touched. `articulated` is the same predicate `_chainLenOf`
+       tests first and it is scale-independent, so the topology question is answered without the
+       measurement. The runtime counters below are what catch the residue (a chain that IS articulated but
+       measures degenerate still reports measuredFrames 0). */
+    const _groundReachable = !_ikLegs ? false : !!(_ikLegL.articulated || _ikLegR.articulated);
+    _groundRep.reachable = _groundReachable;
+    if (!_ikLegs) _groundRep.reason = 'no-leg-chains — this skeleton has no resolvable foot+parent pair, so foot IK itself is a no-op';
+    else if (!_groundReachable) _groundRep.reason = 'flat-rig — neither leg is an ARTICULATED foot←knee←thigh chain, so _chainLenOf returns 0 and the measured branch (gated L > 0) can never run';
+    /* `ok` = the one question a caller actually asked ("will I get a measured floor?"), recomputed on every
+       state change so the receipt is never stale between the two setters that populate it. Both halves are
+       required by _applyLayers (`_footIK.groundProbe && _surfaceProbe`) and the skeleton has a veto. */
+    function _groundOk() {
+      _groundRep.ok = _groundRep.requested && _groundRep.probed && _groundRep.reachable;
+      if (_groundRep.ok) _groundRep.reason = 'ok — requested, probed, and this skeleton can take the measured branch';
+      else if (_groundRep.requested && !_groundRep.probed && _groundRep.reachable) _groundRep.reason = 'no-probe — groundProbe:true was accepted but setSurfaceProbe never arrived, so the floor stays INFERRED';
+      else if (!_groundRep.requested && _groundRep.reachable) _groundRep.reason = 'not-requested';
+      return _groundRep;
+    }
     /* ── A-AIR (2026-08-15) AIRBORNE MOTION LAYER state. See hero-air.js for the curves and for the
        measurement that chose a procedural layer over an authored clip on this rig.
        THE LEGS COME FROM THE FOOT-IK CHAIN, deliberately, rather than from two new canonical roles:
@@ -508,8 +559,12 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
          WHY IT LIVES ON THE RIG rather than in each project: engine-first (CLAUDE.md) — the ability is
          the reusable thing, the world bag is the project's content. hoard/hoard2 inherit it by passing
          their own `groundAt`-backed probe; nothing about this signature is wall-specific. */
-      setSurfaceProbe(probe) { _surfaceProbe = typeof probe === 'function' ? probe : null; },
+      setSurfaceProbe(probe) { _surfaceProbe = typeof probe === 'function' ? probe : null; _groundRep.probed = !!_surfaceProbe; _groundOk(); },
       get surfaceProbed() { return !!_surfaceProbe; },
+      /* A-CENSUS: the measured floor's live receipt (see `_groundRep`). Read it instead of inferring the
+         ability's health from moved feet — `setFootIK` alone moves feet, so the observable cannot separate
+         "the measured floor is running" from "the inferred one is, and the probe is decoration". */
+      get groundReport() { return _groundRep; },
       /* ── A-WHIP MOUNT-IK: pin hands/feet to a vehicle's socket NODES (see the state block).
          cfg = { handL, handR, footL, footR } — each a THREE.Object3D whose world position is the
          JOINT target (read live every frame, so steering forks carry the grips and the hands
@@ -537,9 +592,13 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // Opt-in: a rig whose consumer never calls this keeps the pure clip pose (byte-safe for city/etc).
       //   kneeFollow — on an ARTICULATED chain, re-solve the two upper bones (two-bone IK) so the shin never
       //     stretches (A8-2). Default true; false → the raw foot-position override even on a proper chain (A/B).
+      //   RETURNS the ground receipt (`groundReport`) — A-CENSUS, 2026-08-20. It used to return void, which
+      //     is why a caller could ask for a MEASURED floor on a rig that cannot produce one and be told
+      //     nothing at all. The return value is additive: every existing call site ignores it and is
+      //     byte-identical, but a call site that cares can no longer be kept in the dark by accident.
       setFootIK(cfg) {
-        if (!cfg) { _footIK = null; if (_ikLegs) for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } return; }
-        if (!_ikLegs) return;   // not a biped we can plant — stays a no-op
+        if (!cfg) { _footIK = null; if (_ikLegs) for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _groundRep.requested = false; _groundRep.measured = false; return _groundOk(); }
+        if (!_ikLegs) return _groundOk();   // not a biped we can plant — stays a no-op
         _footIK = { plantBand: cfg.plantBand != null ? cfg.plantBand : 0.14, lockRate: cfg.lockRate != null ? cfg.lockRate : 18, unlockRate: cfg.unlockRate != null ? cfg.unlockRate : 12, maxStride: cfg.maxStride != null ? cfg.maxStride : 0.55, kneeFollow: cfg.kneeFollow !== false,
           /* A-CONTACT (2026-08-20): THE GROUND HALF OF THE CONTACT ABILITY — opt-in, and deliberately
              so. Without it the contact floor is INFERRED: a leaky-min over the rig's own feet, which
@@ -552,6 +611,18 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
              accident (CLAUDE.md engine-first: the ability lives here, the decision stays the
              project's). */
           groundProbe: cfg.groundProbe === true };
+        /* A-CENSUS: THE FAIL-LOUD MOMENT. Asking for a measured floor on a skeleton that cannot deliver one
+           is now a WARNING at the moment of the ask, not a discovery three arcs later — once per rig source
+           (see `_warnedGround`), naming the rig so the reader knows which GLB to look at. The call still
+           succeeds and the rig still runs on the INFERRED floor: this is a report, not a behaviour change,
+           because changing when a flat rig plants would move a gait the owner has ruled on. */
+        _groundRep.requested = _footIK.groundProbe;
+        _groundOk();
+        if (_footIK.groundProbe && !_groundRep.reachable && !_warnedGround) {
+          _warnedGround = true;
+          console.warn(`[character-rig] ${url || 'gltf'}: setFootIK({groundProbe:true}) asked for a MEASURED ground floor, but this rig CANNOT DELIVER ONE: ${_groundRep.reason}. The foot-lock will silently use the INFERRED floor (a leaky-min over its own feet), which cannot notice a body placed below the real ground. Read handle.groundReport / horde.groundReport rather than surfaceProbedCount — holding a probe is not consuming one.`);
+        }
+        return _groundRep;
       },
       // A7-2: the horde's distance LOD toggles this — foot IK only runs on near characters (skip the solver
       // + its updateWorldMatrix cost beyond the IK distance; far feet aren't legible anyway).
@@ -562,7 +633,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
       // A-AIR: the air layer is reset here too. A pooled slot that recycled mid-fall would otherwise
       // re-arm carrying the previous occupant's spread-eagle in `_airCur` and ease OUT of it on frame one.
-      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; _airPhase = 0; _airClimbEase = 0; _contactW = 0; _airWallOn = false; _contactRep.active = false; _contactRep.w = 0; _mountIK = null; _mountW = 0; _mountRep.active = false; _mountRep.w = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } },
+      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; _airPhase = 0; _airClimbEase = 0; _contactW = 0; _airWallOn = false; _contactRep.active = false; _contactRep.w = 0; _mountIK = null; _mountW = 0; _mountRep.active = false; _mountRep.w = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } _groundRep.measured = false; },   // A-CENSUS: `measured` is a per-frame fact — a recycled slot must not inherit the last occupant's. The cumulative counters DO carry (they describe the slot's whole life, which is the honest number for a pool).
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame
@@ -838,6 +909,13 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
               _ikFloorY = _cTgt.y; floorMeasured = true;
             }
           }
+          /* A-CENSUS: the RUNTIME half of the receipt — two integer increments, inside a block that was
+             already gated, so the cost is nil and the claim "the measured floor is running" stops being an
+             inference from moved feet. `frames` counts every frame this solver ran; `measuredFrames` only
+             the ones that produced a probed floor. 600 and 0 is the flat-rig signature. */
+          _groundRep.frames++;
+          _groundRep.measured = floorMeasured;
+          if (floorMeasured) _groundRep.measuredFrames++;
           if (!floorMeasured) {
             if (_ikFloorY == null) _ikFloorY = minFootY;
             else _ikFloorY = Math.min(minFootY, _ikFloorY + 0.5 * dt);

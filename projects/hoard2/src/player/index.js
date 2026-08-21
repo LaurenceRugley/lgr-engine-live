@@ -73,6 +73,7 @@ export function createPlayer(ctx) {
 
   /* ---- the rigged survivor (async; a stand-in nothing until the GLB lands) ---- */
   let survivor = null, isoGun = null;
+  let _groundArm = null;   // A-CENSUS: the survivor's measured-floor receipt (see setFootIK below; read by probe.groundContact)
   let _workCd = 0;   // A2: harvest/build gesture cooldown (s) — throttles the Working clip re-trigger
   // A2 ACTION COVERAGE: the survivor.glb ships a WORKING clip — wire it as the harvest/build gesture so the
   // survivor visibly chops/works instead of standing idle at a node. (Clip inventory: Idle/Walk/Run/Punch/
@@ -120,7 +121,13 @@ export function createPlayer(ctx) {
       const _w = registry.has('world') ? registry.get('world') : null;
       const _gp = _w && heightFieldProbe(_w.groundAt);
       if (_gp) survivor.setSurfaceProbe(_gp);
-      survivor.setFootIK({ plantBand: 0.22 * CHAR_SCALE, maxStride: 1.25 * CHAR_SCALE, groundProbe: true });
+      /* A-CENSUS (2026-08-20): CONSUME THE RECEIPT. `setFootIK` now returns the engine's ground report
+         (createCharacterRig `groundReport`), so "I asked for a measured floor" and "I am getting one" stop
+         being the same sentence. The survivor is a mixamo rig — articulated, so it CAN take the measured
+         branch — but that was true by luck of the asset, not by anything this call site checked; on a rig
+         that could not, this used to be silent in exactly the way the zombie horde's was. */
+      _groundArm = survivor.setFootIK({ plantBand: 0.22 * CHAR_SCALE, maxStride: 1.25 * CHAR_SCALE, groundProbe: true });
+      if (!_groundArm || !_groundArm.ok) console.warn(`[hoard2] survivor: MEASURED ground floor requested but NOT armed — ${!_gp ? 'no world.groundAt to build a probe from' : (_groundArm ? _groundArm.reason : 'the rig returned no receipt')}. The foot-lock is running on the INFERRED floor.`);
     }
     // B4: put the forge-skinned gun in the survivor's RIGHT HAND (the bone lives in unscaled object space,
     // so the kit is scaled up to read at the 0.32 body scale; pose tuned to sit in the palm pointing fwd).
@@ -638,6 +645,16 @@ export function createPlayer(ctx) {
   // ARC A-NEXT: the gun-hand's WORLD position, so a capture script can measure how far the reload beat
   // actually moves the arm — the same "did the clip/layer really drive the rig" proof capture-custom-clip.mjs
   // uses, applied here to A/B the authored clip against the procedural reloadBeat() layer.
+  /* A-CENSUS: the survivor is the third class of rendered character and the census could not see it as one
+     — it was inferred as "whichever group has exactly one member", which is how a lone CORPSE came to be
+     labelled `survivor`. Its root is its own direct scene child (scene.add(survivor.object)), so the census
+     can name it by identity; the expectation is 1 by construction (this game has one player), which is an
+     INDEPENDENT number — a survivor.glb that failed to load must read as a DISAGREE, not vanish from both
+     sides of the comparison at once. `groundContact` reports the measured floor the survivor actually got. */
+  (ctx.probe.characterClasses = ctx.probe.characterClasses || []).push(
+    () => ({ name: 'survivor', rootId: survivor ? survivor.object.id : -1, expected: 1, source: 'one player by construction' }),
+  );
+  ctx.probe.survivorGroundContact = () => ({ arm: _groundArm, live: survivor ? survivor.groundReport : null });
   ctx.probe.gunHandPos = () => {
     if (!survivor) return null;
     const b = survivor.object.getObjectByName('RightHand'); if (!b) return null;
