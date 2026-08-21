@@ -90,6 +90,29 @@ export function createCharacterHorde(rig, opts = {}) {
       frames, measuredFrames, measuredNow, reason };
   }
 
+  /* ── A-CLAMP (2026-08-21): THE POOL'S CLAMP RECEIPT, built to A-CENSUS's rule — a capability that was
+     asked for and cannot run must report that itself rather than wait for a refutation to read the
+     source. The state that rule exists for is `boxes 0` (a rig with no sole geometry to measure) and
+     `clampedFrames 0` beside a nonzero `frames` (the clamp ran and never had to lift anything — true and
+     fine on flat-footed clips, alarming on the ones this arc exists for). `liftMax` is the worst lift any
+     slot has ever needed, which is the number that says how deep the underlying clip defect really is. */
+  function _clampReport() {
+    let requested = 0, okN = 0, boxes = 0, frames = 0, clampedFrames = 0, lifted = 0, liftMax = 0;
+    let reason = size ? 'ok — a floor authority and measured sole geometry' : 'empty pool';
+    for (let i = 0; i < size; i++) {
+      const r = slots[i].handle.groundClampReport;
+      if (!r) continue;
+      if (r.requested) requested++;
+      if (r.ok) okN++; else if (r.reason) reason = r.reason;   // the first slot NOT ok explains the pool
+      if (r.boxes > boxes) boxes = r.boxes;
+      frames += r.frames; clampedFrames += r.clampedFrames;
+      if (r.lift > 0) lifted++;
+      if (r.liftMax > liftMax) liftMax = r.liftMax;
+    }
+    return { slots: size, requested, okSlots: okN, ok: size > 0 && okN === size, boxes,
+      frames, clampedFrames, liftedNow: lifted, liftMax: +liftMax.toFixed(5), reason };
+  }
+
   return {
     group,
     get size() { return size; },
@@ -121,6 +144,11 @@ export function createCharacterHorde(rig, opts = {}) {
         const p = s.handle.object.position;
         const d2 = (p.x - camX) * (p.x - camX) + (p.y - camY) * (p.y - camY) + (p.z - camZ) * (p.z - camZ);
         if (motionLayers) s.handle.setFootIKActive(d2 <= ikDist2);   // A7-2: solve foot IK only on near rigs
+        /* A-CLAMP: remember the LOD verdict for `clampSamples()`. A far slot's mixer steps in ~lodHz
+           LUMPS, so its POSE jumps every ~20 frames — which the ground clamp faithfully follows, turning
+           an existing pose-granularity artifact into a root-Y step. That is a different phenomenon from
+           the clamp's own smoothness and a probe that cannot tell them apart will blame the wrong thing. */
+        s.far = d2 > lod2;
         if (d2 > lod2) {
           s.acc += dt; const iv = 1 / lodHz;
           if (s.acc >= iv) { s.handle.mixer.update(s.acc); if (motionLayers) s.handle._applyLayers(s.acc); s.acc = 0; }
@@ -129,6 +157,22 @@ export function createCharacterHorde(rig, opts = {}) {
           s.handle.mixer.update(dt);
           if (motionLayers) s.handle._applyLayers(dt);
         }
+        /* ── A-CLAMP (2026-08-21): THE GROUND CLAMP, DELIBERATELY OUTSIDE BOTH GATES ABOVE. ------------
+           It runs at the FULL frame rate for every active slot, and it runs when `motionLayers` is false.
+           Both are corrections to how this loop already gates work, and both are forced by what the clamp
+           IS rather than by taste:
+             · the LOD gate throttles far mixers to lodHz. The consumer re-places the body EVERY frame
+               (hoard2: `setTransform(i, x, GROUND_Y, z, yaw)`), so a lift applied only on the ~1-in-20
+               frames a far mixer steps would be wiped and re-applied at lodHz — the clamp would BE a
+               3 Hz bob. Re-measuring a stale pose is the cheap half of this pass anyway (the bone
+               matrices have not moved; only the root has).
+             · `motionLayers:false` is the mobile tier, and mobile is where the owner playtests. The
+               procedural layer pass is dropped there because per-bone IK across ~48 mixers is a real
+               phone cost; this pass is 8 corner transforms per sole box (~4 boxes), which is a different
+               order of work — and a phone showing zombies standing in the ground is the actual bug.
+           Runs AFTER the pose so it measures THIS frame's geometry. Exactly zero cost when no clamp is
+           configured: `groundClampStep` returns on its first `if`. */
+        s.handle.groundClampStep(dt);
       }
     },
     // ---- B3 procedural-layer forwarding (the game drives these; a rig without the bones no-ops) ----
@@ -157,6 +201,27 @@ export function createCharacterHorde(rig, opts = {}) {
        mode (a fan-out that ran before the pool finished spawning) and a boolean would hide it. */
     get surfaceProbedCount() { let n = 0; for (let i = 0; i < size; i++) if (slots[i].handle.surfaceProbed) n++; return n; },
     get groundReport() { return _groundReport(); },   // A-CENSUS: possession (`surfaceProbedCount`) vs consumption — read this one for "is the measured floor actually running?"
+    /* ── A-CLAMP (2026-08-21): arm the GROUND CLAMP on the whole pool, or `false` to release it. A
+       SEPARATE LEVER FROM setFootIK ON PURPOSE — they are different mechanisms with different evidence
+       (the foot lock moves WHEN a foot plants; this moves the body so no sole geometry is under the
+       floor), and the owner's 2026-07-29 ruling on foot-IK feel must stay independently switchable.
+       Applied to every slot, not just the active ones, so a recycled slot inherits it exactly as it
+       inherits setFootIK/setSurfaceProbe — the fan-out bug A-GROUND found in this very file. */
+    setGroundClamp(cfg) { for (let i = 0; i < size; i++) slots[i].handle.setGroundClamp(cfg); return _clampReport(); },
+    get groundClampReport() { return _clampReport(); },
+    /* PER-ACTIVE-SLOT {want, lift} — the aggregate above cannot answer the two questions the clamp has to
+       be judged on. BOB is a property of ONE body's lift over TIME (a max across bodies is smoother than
+       any body actually is) and FLOAT is `lift - want` per body. Allocates, deliberately: this is a
+       probe-time call like `contactSample()`, never a frame call. */
+    clampSamples() {
+      const out = [];
+      for (let i = 0; i < size; i++) {
+        if (!slots[i].active) continue;
+        const r = slots[i].handle.groundClampReport;
+        if (r && r.frames > 0) out.push({ i, want: r.want, lift: r.lift, far: !!slots[i].far, gen: r.gen });
+      }
+      return out;
+    },
     playAction(i, name, timeScale) { slots[i].handle.playAction(name, timeScale); },   // A1: one-shot (hit/attack) over the blend · A8-4: per-type rate
     lunge(i) { slots[i].handle.lunge(); },                                    // A5: forward attack lunge (procedural layer; no-op if motionLayers off)
     // A2 NIGHT FILL: lift the swarm off black at night. The project OVERRIDES slot materials (setType tints),

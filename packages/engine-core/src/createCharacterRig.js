@@ -41,6 +41,7 @@ import { createAnimStateMachine, ZOMBIE_STATES, ZOMBIE_LOOP_ONCE, strideTimeScal
 import { flinchEnvelope, headYawDelta, wrapPi, swingEnvelope, dipEnvelope } from './character-layers.js';
 import { makeAirPose, airPose, riseFall, AIR_POSE_KEYS, CRAWL, CRAWL_PHASE, crawlPhaseRate, crawlLimb } from './hero-air.js';
 import { CONTACT, planeContactTarget, groundContactTarget } from './contact.js';
+import { GROUND_CLAMP, SOLE_BONE, measureSoleBoxes, bindSoleBoxes, soleLift, clampEnvelope } from './ground-clamp.js';
 import { resolveRig } from './character-rig-profiles.js';
 import { applyNightFill, collectMaterials } from './character-night-fill.js';
 import { damp } from './math.js';
@@ -90,6 +91,10 @@ const _cR = new THREE.Vector3(), _cE = new THREE.Vector3();
 // A-CONTACT (2026-08-20) — the surface-resolved target, written by contact.js's out-param convention.
 // Module scratch like every other layer's: one limb is solved at a time, synchronously, so it is safe.
 const _cTgt = { x: 0, y: 0, z: 0 };
+// A-CLAMP (2026-08-21) — the ground clamp's scratch. Module-level like every other pass's: one character
+// is clamped at a time, synchronously, inside its own `groundClampStep`, so a shared vector is safe and
+// the clamp allocates nothing per frame (docs/engine-invariants.md: no-hot-alloc).
+const _gcV = new THREE.Vector3();
 /* A-CRAWL — a limb chain's total world length (root→mid + mid→end), measured ONCE off the live bones
    and cached on the chain (`clen`). Measured rather than configured because it is the one number every
    crawl amplitude is expressed in (hero-air.js CRAWL is all in chain-lengths), and the same rig lands
@@ -197,6 +202,17 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
      a pooled horde spawns 96 handles off ONE createCharacterRig, and 96 identical warnings is noise nobody
      reads. One line per GLB is a finding. (See `_groundRep` in spawn() for what "cannot deliver" means.) */
   let _warnedGround = false;
+  /* ── A-CLAMP (2026-08-21) THE SOLE MEASUREMENT, ONCE PER RIG SOURCE. `measureSoleBoxes` walks every
+     vertex of the source's skinned meshes, so it is emphatically not a per-spawn cost: the AABBs are a
+     property of the shared GEOMETRY and BIND POSE, which every SkeletonUtils clone inherits unchanged.
+     Built LAZILY on the first `setGroundClamp` so a rig nobody clamps never pays for it at all (the city
+     crowd, the pedestrians, every tier-guard path). Factory-scope warn-once for the same reason as
+     `_warnedGround`: 96 pooled handles off one GLB must produce one line, not 96. */
+  let _soleTable = null, _warnedClamp = false;
+  const _soleTableOf = () => {
+    if (!_soleTable) _soleTable = source ? measureSoleBoxes(source.scene, SOLE_BONE) : new Map();
+    return _soleTable;
+  };
 
   // A17 CUSTOM-CLIP SEAM (the asset-pipeline payoff). `extraClips` is a list of ADDITIONAL glTF sources
   // whose animation clips get merged into this rig's clip pool, so a Blender-authored clip (a clip we made
@@ -308,6 +324,35 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
        block, no allocation per frame. C++ anchor: an out-param status struct on an API that used to
        return void — the caller can now tell "did nothing" from "could never have done anything". */
     const _groundRep = { requested: false, probed: false, reachable: false, ok: false, measured: false, frames: 0, measuredFrames: 0, reason: 'not-requested' };
+    /* ── A-CLAMP (2026-08-21) GROUND-CLAMP state. See ground-clamp.js for the mechanism and for the two
+       prior measurements that ruled out the cheaper answers. Everything here is presentation: `_clampHeld`
+       is a Y OFFSET applied to `object.position` after the consumer has placed the body, and it is
+       re-derived from scratch every frame — the sim's own position is never read back or written.
+       `_clampBaseY`/`_clampWroteY` are how the offset stays idempotent WITHOUT assuming the consumer
+       places the body before or after this runs: if `position.y` is still exactly what we last wrote,
+       nobody has moved the body and the remembered base is authoritative; if it differs, the consumer
+       has re-placed it and that new value IS the base. Both call orders are therefore correct, and the
+       broken order (a consumer that overwrites us every frame) shows up as a clamp with no visible
+       effect — loud in the census, never a silent drift. */
+    /* `want` vs `lift` is the receipt's whole point and the pair a bob/float probe reads: `want` is what
+       THIS frame's pose requires (measured against a body carrying no offset), `lift` is what the envelope
+       is actually holding. `lift - want` is the FLOAT — how far the body is above the minimum right now,
+       which is the measured cost of not bobbing. Neither can be inferred from the other. */
+    const _clampRep = { requested: false, boxes: 0, ok: false, frames: 0, clampedFrames: 0, want: 0, lift: 0, liftMax: 0, gen: 0, reason: 'not-requested' };
+    let _clamp = null, _clampBoxes = null, _clampHeld = 0, _clampBaseY = 0, _clampWroteY = NaN;
+    /* Put the body back where the consumer put it. Only if OUR value is still standing — if the consumer
+       has re-placed the body since, that placement wins and there is nothing to undo. Called on disable
+       and on pool recycle, so a slot never inherits the previous occupant's lift. */
+    function _clampRelease() {
+      if (object.position.y === _clampWroteY) object.position.y = _clampBaseY;
+      _clampHeld = 0; _clampWroteY = NaN; _clampRep.lift = 0;
+      /* `gen` bumps on every release, so a probe reading this slot over time can tell a RECYCLE (a new
+         occupant starting from zero) from a real downward move. Without it the only signature is "lift
+         hit 0", which is ALSO what a fast-release tuning does legitimately — and a probe that guessed
+         from that split its series at the wrong places and under-reported the very pump it exists to
+         catch. Measured: 53 phantom recycles in one 240-frame red-arm run. */
+      _clampRep.gen++;
+    }
     const _ikHips = B.hips;   // body-travel reference for the over-reach release (canonical hips)
     // A8-2 KNEE-FOLLOW — resolve each leg's CHAIN (foot ← knee ← upper-leg). If the foot has a real knee +
     // thigh above it (an ARTICULATED biped like the survivor's LeftFoot→LeftLeg→LeftUpLeg), the plant re-solves
@@ -565,6 +610,72 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
          ability's health from moved feet — `setFootIK` alone moves feet, so the observable cannot separate
          "the measured floor is running" from "the inferred one is, and the probe is decoration". */
       get groundReport() { return _groundRep; },
+      /* ── A-CLAMP (2026-08-21) THE GROUND CLAMP — "this character may not have geometry below the floor".
+         A DIFFERENT MECHANISM FROM setFootIK, deliberately and separately switched. The foot lock's only
+         ground term is a plant THRESHOLD, so it decides WHEN a foot plants and never WHERE (measured:
+         turning it on took the hoard2 census from 21/35 sunk to 22/35). This lifts the BODY instead, by the
+         minimum that clears the floor, off the SOLE GEOMETRY rather than the foot bone — the Quaternius
+         zombie has no toe bone, so a bone-driven clamp would report success on the very class the bug is
+         about. See ground-clamp.js for the full argument.
+           cfg.groundAt — (x,z) -> floor Y. REQUIRED: without a floor authority there is nothing to clamp to.
+           cfg.release / maxLift / standoff — override GROUND_CLAMP (see there; `release` is the bob budget).
+           cfg.soleBone — override the sole-bone predicate (default /foot|toe/i).
+           false / null — off. The body is left exactly where the consumer put it (pre-arc behaviour).
+         Returns the receipt, for the same reason setFootIK does: A-CENSUS's lesson is that a capability
+         which is accepted, wired, and structurally unable to run must SAY SO rather than sit under a green
+         verdict. Here that state is `boxes: 0` — a rig whose skinned geometry has no sole bone to measure. */
+      setGroundClamp(cfg) {
+        if (!cfg) { _clamp = null; _clampBoxes = null; _clampRep.requested = false; _clampRep.ok = false; _clampRep.reason = 'not-requested'; _clampRelease(); return _clampRep; }
+        const table = _soleTableOf();
+        _clampBoxes = bindSoleBoxes(object, table);
+        _clamp = { groundAt: typeof cfg.groundAt === 'function' ? cfg.groundAt : null,
+          release: cfg.release != null ? cfg.release : GROUND_CLAMP.release,
+          maxLift: cfg.maxLift != null ? cfg.maxLift : GROUND_CLAMP.maxLift,
+          standoff: cfg.standoff != null ? cfg.standoff : GROUND_CLAMP.standoff };
+        _clampRep.requested = true;
+        _clampRep.boxes = _clampBoxes.length;
+        _clampRep.ok = !!_clamp.groundAt && _clampBoxes.length > 0;
+        _clampRep.reason = _clampRep.ok ? 'ok — a floor authority and measured sole geometry'
+          : !_clamp.groundAt ? 'no-ground — setGroundClamp was called without a groundAt(x,z), so there is no floor to clamp to'
+            : 'no-sole-geometry — no skinned vertex on this rig is dominated by a bone matching the sole predicate, so the clamp has nothing to measure';
+        /* THE FAIL-LOUD MOMENT, and it is the one A-CENSUS had to retrofit onto the measured floor. Once
+           per rig SOURCE (96 pooled handles share one GLB), never per spawn. */
+        if (!_clampRep.ok && !_warnedClamp) {
+          _warnedClamp = true;
+          console.warn(`[character-rig] ${url || 'gltf'}: setGroundClamp() was accepted but the clamp CANNOT RUN: ${_clampRep.reason}. Bodies will keep whatever Y the consumer places them at, including below the floor. Read handle.groundClampReport / horde.groundClampReport — a wired clamp is not a running one.`);
+        }
+        return _clampRep;
+      },
+      /* THE PER-FRAME STEP, and it is deliberately NOT inside _applyLayers. The layer pass is gated twice —
+         by the horde's `motionLayers` (OFF on mobile, where the owner actually playtests) and by its LOD
+         accumulator (far rigs step at lodHz, ~3 Hz) — while the consumer re-places the body EVERY frame. A
+         clamp riding that gate would be wiped and re-applied at 3 Hz, i.e. it would itself become a 3 Hz
+         bob, and would not exist at all on a phone. So the horde/consumer calls this every frame for every
+         active character, and the clamp is independent of the motion-layer budget by construction.
+         Cost: 8 corner transforms per sole box (~4 boxes on the shipped rigs) + one groundAt per corner. */
+      groundClampStep(dt) {
+        if (!_clamp || !_clamp.groundAt || !_clampBoxes || !_clampBoxes.length) return 0;
+        // Recover the consumer's own Y (see the `_clampBaseY` note in the state block) — order-agnostic.
+        const cur = object.position.y;
+        _clampBaseY = (cur === _clampWroteY) ? _clampBaseY : cur;
+        // …then measure against a body that carries NO clamp offset, so the requirement is absolute rather
+        // than a correction to a correction. (Restored below either way; nothing renders in between.)
+        object.position.y = _clampBaseY;
+        const want = soleLift(_clampBoxes, _clamp.groundAt, _gcV, _clamp.standoff);
+        _clampHeld = clampEnvelope(_clampHeld, want, dt > 0 ? dt : 0, _clamp);
+        /* The write. No explicit updateMatrixWorld: `updateMatrix()` (run during the measurement above, as
+           a parent walk) already left `matrixWorldNeedsUpdate` true, so the renderer's own
+           `scene.updateMatrixWorld()` recomposes this node from the NEW position and force-propagates to
+           every bone before the skeleton is uploaded. Forcing a subtree walk here would re-do ~50 bone
+           matrices per character per frame for nothing. */
+        object.position.y = _clampWroteY = _clampBaseY + _clampHeld;
+        _clampRep.frames++;
+        _clampRep.want = want; _clampRep.lift = _clampHeld;
+        if (_clampHeld > 0) _clampRep.clampedFrames++;
+        if (_clampHeld > _clampRep.liftMax) _clampRep.liftMax = _clampHeld;
+        return _clampHeld;
+      },
+      get groundClampReport() { return _clampRep; },
       /* ── A-WHIP MOUNT-IK: pin hands/feet to a vehicle's socket NODES (see the state block).
          cfg = { handL, handR, footL, footR } — each a THREE.Object3D whose world position is the
          JOINT target (read live every frame, so steering forks carry the grips and the hands
@@ -633,7 +744,7 @@ export function createCharacterRig({ url, gltf, states, loopOnce, fade, extraCli
       // bind pose. Resetting _locoOn makes the next setLocomotion rebuild+replay the blend from scratch.
       // A-AIR: the air layer is reset here too. A pooled slot that recycled mid-fall would otherwise
       // re-arm carrying the previous occupant's spread-eagle in `_airCur` and ease OUT of it on frame one.
-      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; _airPhase = 0; _airClimbEase = 0; _contactW = 0; _airWallOn = false; _contactRep.active = false; _contactRep.w = 0; _mountIK = null; _mountW = 0; _mountRep.active = false; _mountRep.w = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } _groundRep.measured = false; },   // A-CENSUS: `measured` is a per-frame fact — a recycled slot must not inherit the last occupant's. The cumulative counters DO carry (they describe the slot's whole life, which is the honest number for a pool).
+      resetAnim() { _locoOn = false; _locoSpeed = 0; _locoShown = 0; _actActive = false; _actAction = null; _actClip = null; _actW = 0; if (_poseAction) _poseAction.stop(); _poseAction = null; _poseClip = null; _poseWant = 0; _poseW = 0; aimW = 0; _aimActive = false; _headingTarget = null; _airMode = null; _airW = 0; _airWant01 = 0; _airT = 0; _airClimb = 0; _airPhase = 0; _airClimbEase = 0; _contactW = 0; _airWallOn = false; _contactRep.active = false; _contactRep.w = 0; _mountIK = null; _mountW = 0; _mountRep.active = false; _mountRep.w = 0; airPose(_airCur, null, 0, 0, 0); airPose(_airWant, null, 0, 0, 0); if (_ikLegs) { for (const lg of _ikLegs) { lg.lockOn = false; lg.w = 0; } _ikFloorY = null; } _groundRep.measured = false; _clampRelease(); },   // A-CLAMP: the held lift is a per-occupant fact — a recycled slot must not inherit the last body's (its own gait decides its own lift). · A-CENSUS: `measured` is a per-frame fact — a recycled slot must not inherit the last occupant's. The cumulative counters DO carry (they describe the slot's whole life, which is the honest number for a pool).
       // B4: attach an object (a weapon kit) to a named bone, NORMALISING for the skeleton's baked scale
       // (Quaternius GLBs often carry a ~100x armature scale, so a naive add makes the gun enormous). The
       // object then renders at `worldScale` world-units regardless; pos/rot are in the bone's local frame

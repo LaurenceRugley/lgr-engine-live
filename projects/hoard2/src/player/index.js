@@ -74,6 +74,10 @@ export function createPlayer(ctx) {
   /* ---- the rigged survivor (async; a stand-in nothing until the GLB lands) ---- */
   let survivor = null, isoGun = null;
   let _groundArm = null;   // A-CENSUS: the survivor's measured-floor receipt (see setFootIK below; read by probe.groundContact)
+  // A-CLAMP: the survivor's ground-clamp receipt + its own kill switch (`?clamp=0`). Deliberately NOT the
+  // `?footik` flag — a separate mechanism needs a separate lever or the two can never be A/B-ed apart.
+  let _clampArm = null;
+  const _clampOn = !(ctx.flags && ctx.flags.q && ctx.flags.q.get('clamp') === '0');
   let _workCd = 0;   // A2: harvest/build gesture cooldown (s) — throttles the Working clip re-trigger
   // A2 ACTION COVERAGE: the survivor.glb ships a WORKING clip — wire it as the harvest/build gesture so the
   // survivor visibly chops/works instead of standing idle at a node. (Clip inventory: Idle/Walk/Run/Punch/
@@ -128,6 +132,17 @@ export function createPlayer(ctx) {
          that could not, this used to be silent in exactly the way the zombie horde's was. */
       _groundArm = survivor.setFootIK({ plantBand: 0.22 * CHAR_SCALE, maxStride: 1.25 * CHAR_SCALE, groundProbe: true });
       if (!_groundArm || !_groundArm.ok) console.warn(`[hoard2] survivor: MEASURED ground floor requested but NOT armed — ${!_gp ? 'no world.groundAt to build a probe from' : (_groundArm ? _groundArm.reason : 'the rig returned no receipt')}. The foot-lock is running on the INFERRED floor.`);
+    }
+    /* ── A-CLAMP (2026-08-21): THE GROUND CLAMP on the survivor, on its own lever (`?clamp=0` off) and
+       NOT behind `!ctx.mobile`. Different mechanism from the foot-lock above and therefore a different
+       switch — see sim/index.js's `_clampOn` block for the full argument. The survivor is the least sunk
+       of the three classes (census: −0.0014, 0 of 1 sunk) so this changes almost nothing for it today;
+       it is wired because leaving one of three classes out is precisely the wiring drift CLAUDE.md names,
+       and because the class that is fine on flat hoard2 ground is the one that will not be on a slope. */
+    if (_clampOn) {
+      const _cw = registry.has('world') ? registry.get('world') : null;
+      _clampArm = _cw && typeof _cw.groundAt === 'function' ? survivor.setGroundClamp({ groundAt: _cw.groundAt }) : null;
+      if (!_clampArm || !_clampArm.ok) console.warn(`[hoard2] survivor: GROUND CLAMP requested but NOT armed — ${!_cw ? 'no world.groundAt to clamp against' : (_clampArm ? _clampArm.reason : 'the rig returned no receipt')}. The body keeps whatever Y it is placed at, including below the floor.`);
     }
     // B4: put the forge-skinned gun in the survivor's RIGHT HAND (the bone lives in unscaled object space,
     // so the kit is scaled up to read at the 0.32 body scale; pose tuned to sit in the palm pointing fwd).
@@ -623,6 +638,10 @@ export function createPlayer(ctx) {
       const _sp = Math.hypot(player.vx || 0, player.vz || 0);
       if (_workCd > 0) _workCd -= rdt;                 // A2: tick the harvest/build gesture cooldown
       charRig.update(rdt);
+      /* A-CLAMP: run the clamp AFTER the mixer + layer pass (so it measures THIS frame's pose) and after
+         the body was re-placed above (line ~597 sets y = GROUND_Y every frame — the clamp's offset is
+         re-derived from scratch each frame and never accumulates). A no-op when `?clamp=0`. */
+      if (survivor) survivor.groundClampStep(rdt);
       driveAnim(Math.min(1, _sp / MOVE.sprintSpeed), dead);   // A1: blend weights from ACTUAL velocity
       // A2 ALIVE-AT-NIGHT: the survivor gets the same cool night lift as the horde (consistency + it reads
       // in FP/deep night); re-applied only when the night factor moves. The lantern stays the warm anchor.
@@ -655,6 +674,15 @@ export function createPlayer(ctx) {
     () => ({ name: 'survivor', rootId: survivor ? survivor.object.id : -1, expected: 1, source: 'one player by construction' }),
   );
   ctx.probe.survivorGroundContact = () => ({ arm: _groundArm, live: survivor ? survivor.groundReport : null });
+  // A-CLAMP: the survivor's clamp receipt, same shape as the hordes' (sim/index.js probe.groundClamp).
+  ctx.probe.survivorGroundClamp = () => ({ on: _clampOn, arm: _clampArm, live: survivor ? survivor.groundClampReport : null });
+  // A-CLAMP: the survivor's half of the live re-arm (sim/index.js probe.rearmClamp does the two hordes).
+  ctx.probe.rearmSurvivorClamp = (cfg) => {
+    const w = registry.has('world') ? registry.get('world') : null;
+    if (!survivor || !w || typeof w.groundAt !== 'function') return 0;
+    _clampArm = survivor.setGroundClamp({ groundAt: w.groundAt, ...(cfg || {}) });
+    return 1;
+  };
   ctx.probe.gunHandPos = () => {
     if (!survivor) return null;
     const b = survivor.object.getObjectByName('RightHand'); if (!b) return null;

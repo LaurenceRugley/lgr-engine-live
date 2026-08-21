@@ -275,6 +275,27 @@ export function createSim(ctx) {
      no longer a return value whose loss is silent: ignoring this one still leaves the warning and the
      recorded report. C++ anchor: replacing a `bool` return nobody checked with a status struct plus a
      logged assert — the caller can be lazy, the failure cannot be quiet. */
+  /* ── ARC A-CLAMP (2026-08-21) — THE GROUND CLAMP, ON BY DEFAULT, ON ITS OWN SWITCH. -----------------
+     A-GROUND's negative result stands: the plant-and-hold foot lock cannot fix clip-driven ground
+     penetration, and `?footik=1` measurably made it worse. The clamp is a DIFFERENT mechanism (lift the
+     body by the minimum that puts its lowest sole geometry on the floor — engine-core/ground-clamp.js),
+     so it gets a DIFFERENT lever: `?clamp=0` turns it off. `?footik`'s OFF default is the owner's
+     2026-07-29 by-feel ruling on a different question and is not touched here — sharing one flag would
+     make the two impossible to A/B apart, which is exactly how A-GROUND's determinism proof nearly went
+     vacuous. NOT gated on `!ctx.mobile`, unlike the foot-lock: the clamp runs outside the motion-layer
+     budget (see createCharacterHorde's update loop) and mobile is where the owner playtests, so a phone
+     showing bodies in the ground is the bug, not the saving. */
+  const _clampOn = !(_zq && _zq.get('clamp') === '0');
+  const _clampArm = {};   // class name → the engine's clamp receipt (read by probe.groundClamp)
+  function armGroundClamp(h, who) {
+    const w = registry.has('world') ? registry.get('world') : null;
+    const rep = w && typeof w.groundAt === 'function' ? h.setGroundClamp({ groundAt: w.groundAt }) : null;
+    _clampArm[who] = { who, worldFound: !!w, ...(rep || {}), armed: !!rep && !!rep.ok };
+    if (!_clampArm[who].armed) {
+      console.warn(`[hoard2] ${who}: GROUND CLAMP requested but NOT armed — ${!w ? 'no world.groundAt to clamp against' : (rep ? rep.reason : 'the rig returned no receipt')}. Bodies keep whatever Y they are placed at, including below the floor.`);
+    }
+    return _clampArm[who];
+  }
   const _groundArm = {};   // class name → the receipt from the last arm attempt (read by probe.groundContact)
   function armMeasuredFloor(h, who, cfg) {
     const w = registry.has('world') ? registry.get('world') : null;
@@ -302,6 +323,10 @@ export function createSim(ctx) {
     // the shipped Quaternius zombie this WARNS — correctly: the rig is flat, so the measured branch cannot
     // run and the horde is on the inferred floor. That is a report of the state, not a change to it.
     if (!ctx.mobile && _footIkOn) armMeasuredFloor(horde, 'zombie horde', { plantBand: 0.14 });
+    // A-CLAMP: the zombies are the class no prior arc could touch — flat rig, no toe bone, so every
+    // bone-based ruler read them CLEAR (+0.0178) while their foot MESH was at −0.0567. The clamp measures
+    // the geometry, so it is the first mechanism that can see them at all.
+    if (_clampOn) armGroundClamp(horde, 'zombie horde');
     buildTypeMaterials();
   }).catch(() => { /* asset missing → sim still runs headless-correct; render is graceful (HitReact) */ });
 
@@ -396,6 +421,7 @@ export function createSim(ctx) {
          the ability lived in core, one sibling path wired it, another never did.
          Same flag as the horde and the survivor, so one switch still A/B-s all three (see _footIkOn). */
       if (!ctx.mobile && _footIkOn) armMeasuredFloor(cHorde, 'civilians', { plantBand: 0.22 * CIV_SCALE, maxStride: 1.25 * CIV_SCALE });
+      if (_clampOn) armGroundClamp(cHorde, 'civilians');   // A-CLAMP: 13 of 24 sunk on the mesh ruler — the biggest class of the defect
       buildCivMaterials();
     }).catch(() => { /* asset missing → sim still runs headless-correct (the zombie-rig precedent) */ });
   }
@@ -564,6 +590,36 @@ export function createSim(ctx) {
         civilians: cHorde ? cHorde.groundReport : null,
       },
     });
+    /* A-CLAMP: the clamp's own receipt, one class per row — the same shape and the same reason as
+       `groundContact` above. `boxes 0` is the inert state (a rig whose skinned geometry has no sole bone
+       to measure); `frames > 0, clampedFrames 0` means the clamp ran and never needed to lift, which is a
+       real and different answer from "the clamp is not running". `liftMax` is how deep the underlying
+       clip defect goes, which is the number that stops a green census being mistaken for a clean clip. */
+    probe.groundClamp = () => ({
+      on: _clampOn,
+      arm: { ...(_clampArm['zombie horde'] ? { 'zombie horde': _clampArm['zombie horde'] } : {}), ...(_clampArm.civilians ? { civilians: _clampArm.civilians } : {}) },
+      live: {
+        'zombie horde': horde ? horde.groundClampReport : null,
+        civilians: cHorde ? cHorde.groundClampReport : null,
+      },
+      // per-active-body {want, lift} — the only shape a BOB (one body over time) or FLOAT (lift − want)
+      // number can honestly be computed from. Probe-time only, like contactSample().
+      samples: {
+        'zombie horde': horde ? horde.clampSamples() : [],
+        civilians: cHorde ? cHorde.clampSamples() : [],
+      },
+    });
+    /* A-CLAMP: re-arm the LIVE clamp with a different config, so a probe can A/B one CONSTANT (the
+       release rate) instead of one build against another — the contamination A-GROUND's refuter had to
+       throw a whole run away over. Goes through the same public engine seam the arming path uses, so what
+       the probe measures is the shipped mechanism, not a test-only copy. Returns how many pools re-armed. */
+    probe.rearmClamp = (cfg) => {
+      const w = registry.has('world') ? registry.get('world') : null;
+      if (!w || typeof w.groundAt !== 'function') return 0;
+      let n = 0;
+      for (const h of [horde, cHorde]) { if (h) { h.setGroundClamp({ groundAt: w.groundAt, ...(cfg || {}) }); n++; } }
+      return n;
+    };
     /* A-CENSUS: the CLASS REGISTRY the ground census reads. Each module that owns a class of rendered
        characters pushes a provider here; the tool asks every provider at census time. Three properties
        matter and each fixes a measured defect in the old instrument:
