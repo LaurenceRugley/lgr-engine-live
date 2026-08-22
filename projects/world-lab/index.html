@@ -156,6 +156,9 @@
       <div class="btns"><button id="b-walk">on foot (B)</button></div>
       <div class="grp">VERBS</div>
       <div class="btns">
+        <!-- the dock lists every OTHER verb as a button; the sidearm was reachable only by knowing
+             a key nothing printed. Same discoverability fix as the hint bar below. -->
+        <button id="b-gun">sidearm (G)</button>
         <button id="b-spawn">respawn (R)</button>
         <button id="b-reset">reset physics</button>
         <button id="b-copy">copy url</button>
@@ -170,7 +173,11 @@
     </div>
   </div>
 
+  <!-- A-GUN shipped the sidearm STOWED behind G and never told anyone: this bar listed every other
+       verb in the room and not that one, so the owner went looking for a weapon that was already
+       wired and concluded it was missing. A capability nobody can find is not shipped. -->
   <div id="hint"><b>WASD</b> walk · <b>LMB</b> lock a tower · <b>RMB</b> web it · <b>SPACE</b> jump / release ·
+    <b>G</b> draw / holster the sidearm (then <b>LMB</b> fires) ·
     <b>B</b> get in / out · <b>1-6</b> car · van · truck · helicopter · plane · spaceship ·
     <b>V</b> camera · <b>R</b> respawn</div>
 

@@ -1302,6 +1302,14 @@ function wireDock() {
   $('b-valley').addEventListener('click', () => { WP.preset = 'valley'; buildWorld(); spawn(); flash('preset: valley'); });
   $('b-mountains').addEventListener('click', () => { WP.preset = 'mountains'; buildWorld(); spawn(); flash('preset: mountains'); });
   $('b-spawn').addEventListener('click', spawn);
+  /* the sidearm button routes through the SAME branch the G key does rather than calling setArmed
+     directly — one path, so the walk-mode guard and every message stay in agreement. (A dock button
+     that bypasses the key handler is how two controls for one verb start disagreeing.) */
+  $('b-gun').addEventListener('click', () => {
+    if (MODE !== 'walk') flash('you need both hands to ride — press B to get out first');
+    else if (!sidearm.loaded) flash('sidearm did not load — see the console');
+    else flash(setArmed(!armed) ? 'sidearm OUT — LMB fires' : 'sidearm stowed — LMB locks again');
+  });
   /* ---- THE ROSTER IS THE DOCK'S, TOO (A-DRIVE). The chips are BUILT FROM THE TABLE rather than
      written into index.html, so the two can never drift: an eighth craft appears in the dock the
      moment its row exists, and a removed row cannot leave a dead button behind. Each carries its
