@@ -638,8 +638,27 @@ const ROSTER = [
     /* mediumScale is the spacecraft's OWN per-world dial (pilot.js). HELI_PROFILE carries
        metropolis's 0.30, fitted to a 15-unit island; 1.15 puts air cruise at 9.2 u/s here, just
        over the bike, so the world crosses in ~14 s instead of ~53. This override IS the reason
-       the profile is parameterized — see the lift note in pilot.js. */
-    profile: { ...HELI_PROFILE, mediumScale: 1.15, chaseDist: 5.0, chaseElev: 0.34 },
+       the profile is parameterized — see the lift note in pilot.js.
+       ── ARC A-LIFT (2026-08-21): `lift` IS STATED HERE BECAUSE THE INHERITED 9.0 CANNOT TAKE OFF.
+       Not a tuning preference — arithmetic. createSpacecraftModel's vertical axis is
+           vy += lift·dt ;  vy -= sign(vy)·min(|vy|, vDrag·dt)
+       i.e. the vertical drag is a CONSTANT-MAGNITUDE decelerator (Coulomb friction, not viscous),
+       applied in the SAME frame as the lift impulse. So climbing is a THRESHOLD, not a rate: it
+       needs lift > vDrag, and below that vy is pinned at exactly 0 no matter how long you hold the
+       key. MEDIUM_PARAMS.ground.vDrag is 9.0 and CRAFT_PROFILE.lift is 9.0 — dead equal — so a
+       grounded craft's net vertical acceleration was 0.000 and it never left the terrain. Measured
+       on the shipped page: y 1.521 → 1.815 over 6.5 s with vy reading 0.000 every sample, and that
+       0.29 u was not a climb at all — it was the `y < terrainY` clamp ratcheting the craft up over
+       a bump and never letting it back down. The one reason this was ever flyable is a 0.6 s
+       accident: on mounting, the air→ground crossing EASE lerps vDrag up from air's 2.2, so lift
+       briefly wins. Press ↑ within that window and it flies; wait three seconds and it is welded
+       to the ground. 15.0 = 9.0 + 6.0 u/s² of real margin — off the ground in 0.50 s from a fully
+       settled start, measured, and with no dependence on when the key is pressed.
+       (C++ anchor: the drag term is `v -= copysign(min(fabs(v), k*dt), v)` — a dead-band that eats
+       the whole impulse when k equals the input, not a `v *= (1 - k*dt)` that only ever shrinks it.)
+       The DEFAULT profile still sits on the threshold; that is an engine-level latent defect,
+       reported rather than changed here, because CRAFT_PROFILE is shared with metropolis. */
+    profile: { ...HELI_PROFILE, mediumScale: 1.15, lift: 15.0, chaseDist: 5.0, chaseElev: 0.34 },
     make: (p) => createSpacecraftModel(p),
     body: () => createVehicleGlbMesh({
       url: heliUrl, scale: AIR_MESH_SCALE, fallback: { w: 0.6, h: 0.6, l: 1.0 },
@@ -680,7 +699,10 @@ const ROSTER = [
        spacecraft model's water medium was unreachable because the surface was a hard floor (see
        pilot.js). This row is the reason the flag exists — and metropolis's helicopter, which runs
        the SAME model, deliberately does not set it. */
-    profile: { ...CRAFT_PROFILE, mediumScale: 1.6, chaseDist: 6.0, chaseElev: 0.36, submersible: true },
+    /* `lift` is stated for the same arithmetic reason as the helicopter's — see that row for the
+       full working. 18.0 = 9.0 + 9.0 u/s²: this row is already the fastest thing in the roster and
+       it leaves the ground in 0.42 s, against NEVER on the inherited 9.0. */
+    profile: { ...CRAFT_PROFILE, mediumScale: 1.6, lift: 18.0, chaseDist: 6.0, chaseElev: 0.36, submersible: true },
     make: (p) => createSpacecraftModel(p),
     body: () => createVehicleGlbMesh({
       url: shuttleUrl, scale: 2.2, fallback: { w: 1.0, h: 0.4, l: 1.25 },
