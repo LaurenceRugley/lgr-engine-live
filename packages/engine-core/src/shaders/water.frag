@@ -42,6 +42,22 @@ uniform float uGlintGain;    // A14 glint intensity multiplier
 uniform vec3  uFogColor;
 uniform float uFogDensity;
 
+/* ---- ARC A-NIGHTFALL: uLight — HOW MUCH LIGHT IS ON THIS WATER. -------------------------------
+   This shader writes base (the shallow/deep depth ramp) STRAIGHT to the framebuffer: there is no
+   N.L term and no light multiply anywhere in it, which is a deliberate and mostly good choice for a
+   stylised surface. Its one real consequence is that the sea CANNOT GET DARK. At midnight it was
+   still emitting 0x24576f at full value under a sky the atmosphere had let fall to near-zero, so
+   the water measured BRIGHTER THAN THE SKY ABOVE IT (world-lab, measured: sky luma 3.9 vs water
+   18.0). Water is not a light source; that ordering is simply wrong.
+
+   One scalar, because that is all the fix needs — a body of water at night is dark BECAUSE the sky
+   lighting it is dark, and the fresnel term already carries the sky's own colour on top. Kept off
+   the glint on purpose: moonlight glitter on a swell is a real and wanted night effect, and it is
+   already dim because it rides uSunColor.
+
+   DEFAULT 1.0 = the exact pre-arc frame, so hoard2 and every recipe-built water are untouched. */
+uniform float uLight;
+
 varying vec3  vMacroNormal; // A13: the analytic Gerstner swell normal (up-vector for pond/lake)
 varying float vCrest;       // A13: summed wave-crest factor for the analytic foam
 
@@ -97,7 +113,7 @@ void main() {
   vec3 v = normalize(vView);
 
   // DEPTH RAMP — shallow near the shore, deepening toward the centre.
-  vec3 base = mix(uShallow, uDeep, smoothstep(0.02, 0.55, vDepth));
+  vec3 base = mix(uShallow, uDeep, smoothstep(0.02, 0.55, vDepth)) * uLight;
 
   // FRESNEL sky-tint — grazing angles pick up the sky (cheap reflection, no RT). A firmer mix so the water
   // reads as a distinct REFLECTIVE surface (not just darker mud) even in the cool-dark grade.

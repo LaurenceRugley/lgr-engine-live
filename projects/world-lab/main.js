@@ -83,6 +83,12 @@ import {
      engine-core and this room had simply never asked for them (the wiring-drift failure CLAUDE.md
      names by name). Nothing below is new capability; §1b/§2c are wiring and configuration. */
   createHillaireSky, createVolumetricClouds, CLOUD_TIERS, createWaterSurface, lowSunWashK,
+  /* ARC A-NIGHTFALL — the night half §1c said was unfinished. Same story as the block above: all
+     three already existed in engine-core and this room had never asked. `createNightSky` is the
+     star/constellation/nebula layer (it was only reachable INSIDE createCelestials until this arc
+     barrel-exported it); `createStreetKit` is the lamp-post + additive-glow dressing swing-lab's
+     city already wears. */
+  createNightSky, createStreetKit,
   /* A-SANDBOX: L18's weather rig — in engine-core since Lesson 18, asked for by this room never. */
   createWeatherRig,
   /* ARC A-GUN — the walker CARRIES something. The ability is engine-core's (carried-weapon.js:
@@ -119,6 +125,18 @@ const qNum = (k, d) => { const v = Number(Q.get(k)); return Number.isFinite(v) &
    1. THE ENGINE CORE. No post chain (the testbed rule): the subject is the GROUND — every pass
    between scene and screen is one more suspect when a pad step or a ramp grade looks wrong.
    --------------------------------------------------------------------------------------------- */
+/* A-NIGHTFALL TRIED A RAISED AMBIENT FLOOR HERE AND CUT IT, and the negative result is worth more
+   than the code would have been. A `withLegibleNight()` keyframe transform (night hemisphere colours
+   lifted 2.8x ground / 1.22x sky) was built, wired, and MEASURED against an otherwise identical
+   build: street 90.6% vs 90.7% near-black, air 59.8% vs 60.3% — inside the noise. Sweeping the
+   hemisphere fill INTENSITY instead, from 0.85 up to 7.0, moved the night street only 90.6% -> 88.4%
+   with the median pixel still at luma 4. The ambient simply cannot carry this room's night: the
+   canyon is 4.6 u wide under towers up to 14 u, and long before an ambient lift clears the
+   legibility threshold it has washed the night's colour out — the exact failure this arc is supposed
+   to avoid. What DOES work here is practicals (see buildStreetKit), which is also what the eye reads.
+   NOTE the ambient is not innocent, it is just not a NIGHT problem: the same sweep at NOON goes
+   91.1% -> 0.6% near-black between fill 0.85 and 6.0, i.e. this room's DAYLIGHT street is crushed
+   too, and that is a separate defect this arc measured and deliberately did not widen its scope into. */
 const core = createEngineCore({ container: document.body });
 const { renderer, scene, rig, frameStart, frameEnd } = core;
 rig.setMode(CAM.PERSPECTIVE);
@@ -198,6 +216,47 @@ sky.setExposure(qNum('skyexp', 6));
    this is written into every frame and must never be a fresh Vector3. */
 const _skyEye = new THREE.Vector3(0, 6.360 + 0.0002, 0);
 
+/* ---- A-NIGHTFALL §1c. THE NIGHT SKY. `createNightSky` is the engine's existing star field, and it
+   is added as a plain scene object beside the Hillaire mesh rather than through `createCelestials` —
+   this room draws its own sun disc (§1b, `sunDisc: true`) and adopting celestials wholesale would put
+   a SECOND sun in a frame whose comment three lines up promises exactly one.
+   It is driven by `nightK` and rides the camera (`place`), so the stars have zero translation
+   parallax — the same trick the sun/moon use, and the reason a star field does not smear when the
+   plane moves. Its own `update()` handles the twinkle freeze under prefers-reduced-motion. */
+const nightSky = createNightSky({});
+scene.add(nightSky.group);
+/* WCAG 2.3.1 — the star twinkle is the only thing in this room that flashes, and a user who has
+   asked the OS for less motion gets it frozen. Queried ONCE and read per frame (matchMedia's
+   `.matches` is live), the same shape celestials.js uses for the same layer. */
+const _RM = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+/* THE NIGHT FLOOR'S TWO COLOURS come from the SunRig's own NIGHT keyframe (`sky` #36486e zenith,
+   `horizon` #1e2942), read ONCE here rather than per frame. They are the palette the whole day/night
+   cycle is already authored in, so the sky the atmosphere stops being able to compute hands over to
+   the same author — one night, not two. Read once because the rig's live `sky`/`horizon` objects are
+   LERP TARGETS that drift with t; sampling them at 14:00 would floor the night sky in afternoon mauve. */
+const NIGHT_SKY_ZENITH = '#36486e';
+const NIGHT_SKY_HORIZON = '#1e2942';
+/* THE GAIN IS MEASURED, NOT CHOSEN — the same discipline as this room's `skyexp` two blocks up.
+   Flooring the sky with those two hexes at gain 1 closed the inversion at deep night but LEFT IT
+   STANDING through twilight: at t=0.78 the sky came out at luma 24.2 against a sea at 27.0. Solving
+   the sea's response from both measured arms (water = A*uLight + B) shows why, and it is not a
+   tuning failure — B, the part dimming the water CANNOT remove, is 22.9 there. That floor is the
+   fresnel of a still-luminous twilight sky plus the moon's glint path, and it is CORRECT: a sea at
+   civil twilight really does mirror a bright sky. So the fix belongs on the sky side — the sky has
+   to out-shine the sea it is lighting — and 2.2 is the smallest gain that clears all four sampled
+   elevations with margin (35.0 vs 27.0 at the worst of them).
+   HYPOTHESIS for WHY the authored hex lands dim, offered as a hypothesis because it was not
+   isolated: a THREE.Color built from an sRGB hex stores LINEAR components, while this shader adds
+   the floor straight into a value it then writes to gl_FragColor itself, so the authored colour is
+   being mixed in a different space from the one it was picked in. The gain is the compensation that
+   was measured; the mechanism is not proven. */
+const NIGHT_SKY_GAIN = 2.2;
+/* Hoisted and scaled ONCE — engine-invariants §7 forbids allocating a Color per frame, and these
+   two never change after boot. */
+const _nightZen = new THREE.Color(NIGHT_SKY_ZENITH).multiplyScalar(NIGHT_SKY_GAIN);
+const _nightHor = new THREE.Color(NIGHT_SKY_HORIZON).multiplyScalar(NIGHT_SKY_GAIN);
+
 /* THE DAY, AND WHY IT DOES NOT MOVE UNLESS YOU ASK. `t` ∈ [0,1) is SunRig's one scalar: 0 night,
    0.25 dawn, 0.5 noon, 0.75 dusk. The default 0.62 is LATE AFTERNOON — chosen to preserve exactly
    what §1's original comment said this room wanted ("the key is warm and low-ish… so the city has
@@ -207,16 +266,18 @@ const _skyEye = new THREE.Vector3(0, 6.360 + 0.0002, 0);
    through the day is a room whose captures, whose probe phases and whose two-boot receipts all read
    a different frame every run. `?daycycle=1` opts in; `?t=` scrubs to a fixed time.
 
-   THE NIGHT HALF IS NOT FINISHED, AND IT IS SAID HERE RATHER THAN DISCOVERED. The sun is above the
-   horizon for t ∈ (0.25, 0.75) and this room is correct across all of it — verified by capture at
-   dawn, noon, the shipped 0.62 and a genuinely good sunset at 0.71. BELOW the horizon the Hillaire
-   atmosphere has almost nothing left to scatter and returns near-black, so at t = 0.78 the sky goes
-   flat black while the water — which has its own ambient floor — stays PALE, i.e. brighter than the
-   sky above it. That is an inversion, not a dark scene, and it is a real defect.
-   It is a defect with a known cure that is NOT this arc: engine-core already owns `night-sky.js`,
-   `createCelestial` and `createTrueStars`, and wiring them is the same "the ability exists, this
-   room never asked" move the rest of this section is made of. Recorded as an OPEN rather than
-   half-attempted. Until then the daylight arc is the supported range and the default sits inside it. */
+   THE NIGHT HALF — CLOSED BY ARC A-NIGHTFALL (2026-08-22). What this comment used to record as an
+   OPEN was measured before it was fixed, so the defect is on the record as numbers rather than as a
+   description: at every sampled elevation below the horizon the SEA WAS BRIGHTER THAN THE SKY —
+   Rec.709 luma sky 15.2 vs water 36.0 at t=0.78, and 3.9 vs 18.0 at midnight (tools/night-legibility.mjs).
+   TWO independent causes, and fixing either one alone would have left the inversion standing:
+     · the sky had no night term at all — Hillaire has nothing left to in-scatter below the horizon,
+       so `lum * uExposure` fell to ~0. Cured by `sky.setNight()` (§8b), a FLOOR added after exposure.
+     · the water had no light term at all — `water.frag` wrote its shallow/deep ramp straight to the
+       framebuffer with no N·L anywhere, so the sea physically could not get dark. Cured by
+       `setLight()` on the same clock.
+   Stars are part of the sky fix and not decoration: a floor alone is a flat blue wall, and what makes
+   a night sky read as depth rather than as paint is that it has things IN it. */
 const sun = core.sunRig;
 sun.goTo(qNum('t', 0.62), true);              // snap — no easing on boot, so frame 1 is already right
 /* ARC A-SANDBOX: the cycle gets DIALS, and the auto-off default is kept exactly as argued above.
@@ -530,6 +591,12 @@ const ARENA_SKY = {
 
 let T = null, terrainGroup = null, CARVE = null, HEIGHT = () => 0;
 let arena = null;
+/* A-NIGHTFALL: the street dressing. ON by default in this room — unlike swing-lab, where the whole
+   A-DRESS layer is opt-in behind `?street=1` to keep its 27-check probe on a bare grid, THIS room's
+   arc is "light the city", so an unlit city is the ablation arm and not the default. `?street=0`
+   is that arm, and it is what the perf delta below is measured against. */
+let streetKit = null;
+const STREET_ON = Q.get('street') !== '0';
 let LEVEL_BUILD_MS = 0;
 let REG = null, SHAPED = null;                   // the region field + its shaping report
 /* `seaMesh` used to live here and was dropped when A-SKYWORLD replaced the flat transparent plane
@@ -714,7 +781,51 @@ function buildWorld() {
   };
   if (!arena) { arena = createBoxArena(cfg); scene.add(arena.group); }
   else arena.rebuild(cfg);
+  buildStreetKit();
   LEVEL_BUILD_MS = performance.now() - t0;
+}
+
+/* ---- A-NIGHTFALL: THE PRACTICALS. This is the half of the arc that actually makes a night city
+   read, and it is worth saying why rather than treating it as decoration: raising the ambient is
+   what turns night into grey daylight, whereas a lamp gives the eye an ANCHOR and, more importantly,
+   a CONTRAST EDGE — a bright pool with a dark building beside it reads as a lit street, while the
+   same street uniformly lifted reads as an overcast afternoon.
+
+   `createStreetKit` is the ability (engine-core, already worn by swing-lab's city); this is wiring
+   and the numbers that belong to THIS room. THE ONE ARGUMENT THAT DIFFERS FROM SWING-LAB is
+   `groundYAt`: this room's ground is CARVED, so a single `groundY` plane would bury the lamp posts
+   on the high pads and float them over the low ones. It is handed the very sampler the arena was
+   built with — not a second copy of the same idea.
+   `blocked` is swing-lab's own predicate, verbatim in shape: a zero-radius vertical stab through the
+   collider at 0.20 u, because where a jittered tower actually stands is a question only the collider
+   can answer. Rebuilt with the arena so a live cols/spacing slider moves the lamps with the streets. */
+function buildStreetKit() {
+  if (streetKit) { scene.remove(streetKit.group); streetKit.dispose(); streetKit = null; }
+  if (!STREET_ON) return;
+  streetKit = createStreetKit({
+    extent: arena.stats.extent,
+    spacing: arena.params.spacing,
+    groundY: 0,
+    /* HEIGHT, not `groundYAt`: this room's `groundYAt` is `CARVE.padYOf(i, j)` and takes CELL
+       INDICES — it answers "how high is the pad under tower (i,j)", which is the wrong question for
+       something standing in the STREET between them. `HEIGHT` is the carved terrain sampler and is
+       the surface a lamp post's foot actually rests on (it is the same function `openSpot` reports
+       its own `y` from, which is how this was checked rather than assumed). */
+    groundYAt: (x, z) => HEIGHT(x, z),
+    seed: WP.seed,
+    roadHalf: arena.params.spacing * 0.235,
+    step: 1.15,
+    lampsPerBlock: 1,
+    /* LAMPS ONLY. `createStreetKit` also places trees, benches, hydrants and shelters, and taking its
+       defaults cost this room 30 draw calls and 147k triangles (47/271k -> 77/418k) for a vocabulary
+       nobody asked for — the request was LIGHT. Zeroed rather than left at their defaults, so the
+       cost this arc adds is the cost of the thing it was for. The rest of the kit is one edit away
+       for a room that wants dressed streets. */
+    tree: 0, bench: 0, hydrant: 0, shelter: 0,
+    blocked: (x, z) => arena.world.segmentHit(x, HEIGHT(x, z) + 0.20, z, x, HEIGHT(x, z) + 0.21, z, 0) === 0,
+    castShadow: Q.get('propshadow') !== '0',
+  });
+  scene.add(streetKit.group);
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -1908,6 +2019,20 @@ function frame() {
   if (Math.abs(sun.t - _lastSunT) > 1e-6) { sky.updateSkyView(sun.sunArc, _skyEye); _lastSunT = sun.t; }
   sky.updateRender(sun.sunArc, _skyEye);
 
+  /* ---- 8b-quater. NIGHT (ARC A-NIGHTFALL). ONE scalar drives all four consumers, for the same
+     reason the whole day runs off one `t`: a sky, a sea, a star field and a street full of lamps
+     that each decided independently when night had begun would cross over at four different times,
+     and the eye reads that as four bugs.
+     `nightK` is `celestials.js`'s OWN formula (`smoothstep(-arc.y, -0.05, 0.18)`), copied
+     deliberately rather than invented — it is the curve the engine's existing night layers already
+     fade on, and `nightSky` below is one of those layers. 0 while the sun is up, 1 once it is
+     properly down, and it uses `sunArc` (the raw sun) rather than `sunDir` (which SunRig has already
+     flipped to the moon) — the moon's direction cannot tell you whether it is night. */
+  const nightK = THREE.MathUtils.smoothstep(-sun.sunArc.y, -0.05, 0.18);
+  sky.setNight(nightK, _nightZen, _nightHor);
+  nightSky.update(nightK, 'realistic', stats.t, !!(_RM && _RM.matches));
+  nightSky.place(rig.camera);
+
   /* THE WATERLINE ANSWERS THE SAME SUN. Without these four lines the sea is a blue disc; with them
      it carries the sun's own glint, the sky's Fresnel tint and the room's fog, so the shoreline
      reads as one scene with the sky above it. FOG DENSITY, and why it is a converted number: the
@@ -1918,16 +2043,30 @@ function frame() {
   /* GUARDED, because `?regions=off` builds NO water at all (buildWorld only calls buildWater when
      the districts are on) — and that is the exact config the flat-in A-MARRIAGE checksum boots. An
      unguarded tick here would throw on frame 1 of the one URL this arc must not break. */
+  /* A-NIGHTFALL: `setLight` is the OTHER half of the inversion fix and it belongs here, beside the
+     three lines that already hand the water this room's sun/sky/fog — the water was answering every
+     part of the day except how much light there was. 0.26 at full night rather than 0 because a sea
+     under a moon is dark, not black, and because the fresnel term still needs a base to tint. */
+  const waterLight = 1 - 0.74 * nightK;
   if (seaWater) {
     seaWater.update(stats.t);
     seaWater.setSun(sun.sunDir, sun.sunColor);
     seaWater.setSky(sun.hemiSky);
     seaWater.setFog(_fogC, 0.0058);
+    seaWater.setLight(waterLight);
   }
   for (let i = 0; i < lakeWaters.length; i++) {
     const w = lakeWaters[i];
     w.update(stats.t); w.setSun(sun.sunDir, sun.sunColor); w.setSky(sun.hemiSky); w.setFog(_fogC, 0.0058);
+    w.setLight(waterLight);
   }
+
+  /* THE LAMPS COME ON WITH THE WINDOWS. `sunRig.windowGlow` is the engine's existing night signal
+     (1.00 night · 0.72 dusk · 0.30 dawn · 0.00 noon) and `createStreetKit.update` was written to
+     take exactly it — so this is one call, not a schedule this room invents. At noon it is 0 and the
+     glow group is not drawn at all (street-lights.js gates on `visible`), which is what keeps the
+     lamps free in every daylight frame the probe and the captures measure. */
+  if (streetKit) streetKit.update(sun.windowGlow);
 
   if (MODE === 'walk') {
     aimHit = resolveAimPoint(rig.camera, arena.world, _aimPt, { maxDist: aimReach(), radius: 0.05 });
@@ -2218,6 +2357,24 @@ const phaseName = (t) => (t < 0.22 || t >= 0.80 ? 'night' : t < 0.32 ? 'dawn' : 
    actually renders from — not the dock's idea of what was requested. `weather.probe` reports the
    eased scalars AND the live particle counts, because "did the rig construct" and "is anything
    falling" are different questions and only the second one is the ability working. ---- */
+/* ---- A-NIGHTFALL: THE DRESSING, AS READABLE FACTS. Deliberately the SAME SHAPE swing-lab's
+   `__dress.street` publishes (Rule 6: one receipt shape in this repo, not two), because the question
+   is identical in both rooms and it is one a screenshot cannot answer — "no lamps visible" reads the
+   same whether the generator placed zero or the glow layer is simply dark. `visible`/`opacity` are
+   read off the RENDERED objects rather than off the config that asked for them; those two disagreeing
+   IS the bug this receipt exists to catch. */
+window.__dress = {
+  get street() {
+    if (!streetKit) return null;
+    const g = streetKit.group;
+    return {
+      ...streetKit.stats,
+      windowGlow: +sun.windowGlow.toFixed(4),
+      visible: g.visible,
+      layers: g.children.map((c) => ({ type: c.type, visible: c.visible, count: c.count ?? null, opacity: c.material?.opacity ?? null })),
+    };
+  },
+};
 window.__sky = {
   get t() { return sun.t; },
   get phase() { return phaseName(sun.t); },

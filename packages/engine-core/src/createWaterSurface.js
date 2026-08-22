@@ -84,6 +84,8 @@ export function createWaterSurface(opts = {}) {
     uGlintGain: { value: glintGain },
     // A16 rain-ripple gain (0 = off → the frag skips it → byte-identical existing water).
     uRain: { value: rain },
+    // A-NIGHTFALL light level (1 = off/full daylight → byte-identical existing water). See water.frag.
+    uLight: { value: 1 },
   };
   const mat = new THREE.ShaderMaterial({
     vertexShader: waterVert, fragmentShader: waterFrag, uniforms,
@@ -108,6 +110,11 @@ export function createWaterSurface(opts = {}) {
     setFog(color, density) { if (color) uniforms.uFogColor.value.copy(color); if (density != null) uniforms.uFogDensity.value = density; },
     // A16 LIFT#2: drive the rain-ripple intensity per-frame (e.g. off a weather schedule). 0 = calm sea.
     setRain(v) { uniforms.uRain.value = v; },
+    /* A-NIGHTFALL: how much light is on the water, 1 = full daylight (the default and the pre-arc
+       look), lower = the body goes dark as the sky lighting it goes dark. Drive it from the same
+       clock the sky uses; see water.frag for why the sea could not otherwise get dark at all. */
+    setLight(v) { uniforms.uLight.value = v; },
+    get light() { return uniforms.uLight.value; },
     dispose() { geo.dispose(); mat.dispose(); if (group.parent) group.parent.remove(group); },
   };
 }

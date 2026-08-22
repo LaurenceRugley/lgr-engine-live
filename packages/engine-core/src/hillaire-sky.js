@@ -80,6 +80,11 @@ export function createHillaireSky({ renderer, sunDisc = true } = {}) {
       uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uViewPos: { value: new THREE.Vector3(0, GROUND_MM, 0) },
       uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uExposure: { value: 18.0 },
       uSunSize: { value: sunDisc ? 0.015 : 0.0 },   // 0 = no analytic disc (the city's ONE-SUN rule — celestials owns the visible sun)
+      /* A-NIGHTFALL night floor — see skyrender.frag's block comment. All three default to the
+         no-op (uNightK 0), so a consumer that never calls setNight() renders the pre-arc frame. */
+      uNightZenith: { value: new THREE.Color(0, 0, 0) },
+      uNightHorizon: { value: new THREE.Color(0, 0, 0) },
+      uNightK: { value: 0 },
     },
     depthTest: false, depthWrite: false,
   });
@@ -110,6 +115,22 @@ export function createHillaireSky({ renderer, sunDisc = true } = {}) {
     // them here (cheap); the per-frame sky-view LUT picks up the new value automatically.
     setHaze: (mie) => { mieU.value = mie; computeStaticLUTs(); },
     get haze() { return mieU.value; },
+    /* A-NIGHTFALL — the night floor, driven by the consumer's own night palette.
+         setNight(k, zenith, horizon)
+       `k` is how NIGHT it is (0 = the sun is up and this whole term is off, 1 = full night); the
+       two colours are the SunRig's night `sky` and `horizon` keyframes in the shipped wiring, so
+       the sky the atmosphere stops being able to compute hands over to the palette the rest of the
+       day/night cycle is already authored in — one source of truth for what night looks like.
+       Colours are COPIED, not held by reference: they are keyframe LERP TARGETS on the rig side and
+       a consumer that handed over its live `sunRig.sky` object would find this uniform drifting
+       with the time of day rather than staying the night colour it asked for. */
+    setNight: (k, zenith, horizon) => {
+      const u = bgMat.uniforms;
+      u.uNightK.value = k;
+      if (zenith) u.uNightZenith.value.set(zenith);
+      if (horizon) u.uNightHorizon.value.set(horizon);
+    },
+    get night() { return bgMat.uniforms.uNightK.value; },
     dispose() { tLUT.dispose(); msLUT.dispose(); skyLUT.dispose(); tQuad.dispose(); msQuad.dispose(); skyQuad.dispose(); bgMat.dispose(); skyMesh.geometry.dispose(); },
   };
 }

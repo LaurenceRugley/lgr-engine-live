@@ -30,6 +30,8 @@ export { createLandmarkFactory } from './src/landmarks.js';
 export { createWeatherRig } from './src/weather-rig.js';
 export { createCloudField } from './src/clouds.js';
 export { createCelestials } from './src/celestials.js';
+export { createNightSky } from './src/night-sky.js';   // A-NIGHTFALL: the star/constellation/nebula layer, reachable on its own. It was only ever composed INSIDE createCelestials, so a room that draws its own sky (world-lab's Hillaire atmosphere) could not put stars in it without also adopting a second sun disc — the exact wiring-drift this repo keeps recording.
+
 export { createCapture } from './src/capture.js';
 export { createViewerUI } from './src/viewer-ui.js';
 export { createHints } from './src/hints.js';

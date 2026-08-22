@@ -41,6 +41,8 @@ export { createLandmarkFactory } from './src/landmarks.js';
 export { createWeatherRig } from './src/weather-rig.js';
 export { createCloudField } from './src/clouds.js';
 export { createCelestials } from './src/celestials.js';
+export { createNightSky } from './src/night-sky.js';   // A-NIGHTFALL: the star/constellation/nebula layer, reachable on its own. It was only ever composed INSIDE createCelestials, so a room that draws its own sky (world-lab's Hillaire atmosphere) could not put stars in it without also adopting a second sun disc — the exact wiring-drift this repo keeps recording.
+
 export { createCapture } from './src/capture.js';
 // Arc A10 — the generic recorder was reachable only THROUGH createCapture (city's inline wiring); export it
 // directly so any demo project can arm the reel recorder (?rec=1 → R toggles an MP4/WebM) without re-wiring.

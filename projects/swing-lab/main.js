@@ -94,11 +94,15 @@ rig.camera.near = 0.02; rig.camera.far = 400; rig.camera.updateProjectionMatrix(
    so a silhouette has something to be a silhouette AGAINST. Gated on LEVEL: the lab keeps its numbers
    exactly, because 27 probe checks and every A-LAB/A-CLIMB capture were taken under them. */
 /* A-DRESS: `?night=1` is a LIGHT RIG, not a new scene. A streetlight is a night feature — a lamp that
-   has only ever been judged at noon has not been judged — and this lab has no SunRig (createEngineCore
-   ships the renderer, not a sky), so the honest minimum is one alternative set of the same four numbers
-   the day rig already states. Deliberately NOT a day/night CYCLE: that ability exists in the engine
-   (`createSunRig`, the day-night standard) and wiring it here would be a second arc riding on this one.
-   Recorded as the follow-up rather than half-built. */
+   has only ever been judged at noon has not been judged — so the honest minimum is one alternative
+   set of the same four numbers the day rig already states.
+   A-NIGHTFALL CORRECTION: this block used to justify itself with "this lab has no SunRig
+   (createEngineCore ships the renderer, not a sky)", and that was STALE rather than wrong-at-the-time
+   — `createEngineCore` has constructed one in its §2b since the engine extraction and returns it on
+   its public surface, so `core.sunRig` has existed here all along, unread and never ticked. The
+   streetlights now run off it (see the A-NIGHTFALL block by `streetKit`). These four LIGHT numbers
+   are still boot-time constants keyed on `DRESS.night`, deliberately: moving the key/fill onto the
+   rig as well would change how this room looks at both endpoints, and that is a different arc. */
 const SKY = DRESS.night ? '#0a0e18' : LEVEL === 'city' ? '#1d2634' : '#141821';
 renderer.setClearColor(new THREE.Color(SKY), 1);
 scene.fog = LEVEL === 'city' ? new THREE.Fog(SKY, DRESS.night ? 30 : 45, DRESS.night ? 150 : 230) : new THREE.Fog(SKY, 26, 120);
@@ -438,13 +442,24 @@ const streetKit = (LEVEL === 'city' && DRESS.street) ? createStreetKit({
   blocked: (x, z) => arena.world.segmentHit(x, 0.20, z, x, 0.21, z, 0) === 0,
   castShadow: Q.get('propshadow') !== '0',     // the ablation arm for the shadow-pass half of the cost
 }) : null;
-if (streetKit) {
-  scene.add(streetKit.group);
-  /* The night amount is a CONSTANT here because this lab has no sun to interpolate against — see the
-     `?night=1` note on the light rig. When a SunRig is wired, this becomes `sunRig.windowGlow` and
-     nothing else changes: that is the signal `createStreetLights` was already written to take. */
-  streetKit.update(DRESS.night ? 1 : 0);
-}
+/* ---- A-NIGHTFALL: THE CONSTANT BECOMES THE SUN, exactly as the line it replaces predicted.
+   The note that used to sit here said: "when a SunRig is wired, this becomes `sunRig.windowGlow` and
+   nothing else changes: that is the signal createStreetLights was already written to take." It was
+   right, and the only thing that had to change first was the claim one screen up that "this lab has
+   no SunRig" — which was STALE, not true: `createEngineCore` has built one since the extraction
+   (createEngineCore.js §2b) and returns it, so this room has always owned `core.sunRig` and had
+   simply never called `update(dt)` on it or read a value off it.
+
+   THE ENDPOINTS ARE PRESERVED ON PURPOSE. `windowGlow` is 1.00 at t=0 and 0.00 at t=0.5, so
+   `?night=1` (t=0) and the default day page (t=0.5) hand `update()` the very 1 and 0 the constant
+   did — the two arms every existing capture and the 27-check probe were taken under. What is NEW is
+   everything BETWEEN them: `?t=0.78` is now a real dusk with the lamps at 0.72 rather than a page
+   that only knows midnight and noon.
+   The light RIG is deliberately still the boot-time DRESS.night pair — re-plumbing key/fill onto the
+   rig would change how this room looks at both endpoints, which is a different arc. */
+const sun = core.sunRig;
+sun.goTo(qNum('t', DRESS.night ? 0 : 0.5), true);   // snap: frame 1 is already the right time
+if (streetKit) scene.add(streetKit.group);
 
 /* ---------------------------------------------------------------------------------------------
    2.6 — A-CITIZENS (2026-08-12, mass-agents Phase 2): THE CITY IS INHABITED, and the outbreak runs
@@ -1159,6 +1174,12 @@ function frame() {
   if (fpsAcc > 0.5) { stats.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
 
   frameStart();
+
+  /* A-NIGHTFALL: the day advances (auto is off by default, so this is a no-op unless something
+     scrubbed `t`), and the lamps read it. One call, in the frame loop rather than at boot, because a
+     streetlight that only samples the time once can never come on. */
+  sun.update(dt);
+  if (streetKit) streetKit.update(sun.windowGlow);
 
   /* THE CROSSHAIR IS RESOLVED BEFORE THE STEP, so a web attaches to what the player is looking at
      THIS frame rather than last frame's view. It is cast from `rig.camera`, whose matrix was set by

@@ -18,6 +18,26 @@ uniform mat4  uCamWorld;
 uniform float uExposure;
 uniform float uSunSize;     // angular radius of the sun disc, radians (driven by the Sun-size dial)
 
+/* ---- ARC A-NIGHTFALL: THE NIGHT FLOOR. --------------------------------------------------------
+   Below the horizon this atmosphere has almost nothing left to in-scatter, so getValFromSkyLUT
+   returns ~0 and the sky goes flat black — while an unlit water surface keeps emitting its base
+   colour, i.e. THE SEA ENDS UP BRIGHTER THAN THE SKY ABOVE IT. That inversion is the defect this
+   term exists to close, and it is a floor rather than a brightness lift because "make night
+   brighter" is how a night scene turns into flat grey daylight.
+
+   ADDED AFTER uExposure, NOT INTO lum. Two reasons and both are load-bearing: (1) it makes the
+   two colours authorable directly in OUTPUT units, so they can be set from the SunRig's own night
+   sky/horizon keyframes and compared against a measured water luminance without mentally
+   dividing by an exposure that a consumer is free to change; (2) uExposure is a per-room dial
+   (world-lab ships 6) — folding the floor through it would make the night sky a different colour
+   in every room that tuned its daylight.
+
+   uNightK = 0 -> the term is EXACTLY zero and every existing consumer is byte-identical. That is
+   the same discipline as box-arena's "every new rate defaults to 0". */
+uniform vec3  uNightZenith;
+uniform vec3  uNightHorizon;
+uniform float uNightK;
+
 vec3 getValFromSkyLUT(vec3 rayDir, vec3 sunDir) {
   float height = length(uViewPos);
   vec3 up = uViewPos / height;
@@ -51,5 +71,19 @@ void main() {
   if (disc > 0.0 && rayIntersectSphere(uViewPos, rayDir, groundRadiusMM) < 0.0) {
     lum += getValFromTLUT(uTransmittance, uViewPos, uSunDir) * 40.0 * disc;   // HDR sun core → blooms
   }
-  gl_FragColor = vec4(lum * uExposure, 1.0);
+  vec3 outColor = lum * uExposure;
+
+  /* THE NIGHT FLOOR — a vertical gradient, because a single flat colour reads as a painted wall
+     rather than as sky. up is the planet normal under the eye (the same one getValFromSkyLUT
+     derives), so el is the ray's sine-elevation: 1 at the zenith, 0 at the horizon, negative
+     below it. The ramp is sqrt-shaped so most of the visible change happens in the low band a
+     standing camera actually frames, and it is clamped at 0 so ground-ward rays keep the horizon
+     colour instead of extrapolating to nonsense. */
+  if (uNightK > 0.0) {
+    vec3 up = normalize(uViewPos);
+    float el = clamp(dot(rayDir, up), 0.0, 1.0);
+    outColor += mix(uNightHorizon, uNightZenith, sqrt(el)) * uNightK;
+  }
+
+  gl_FragColor = vec4(outColor, 1.0);
 }

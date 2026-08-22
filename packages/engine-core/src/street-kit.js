@@ -88,6 +88,13 @@ function hash3(i, j, seed) {
 export function createStreetKit(opts = {}) {
   const P = {
     extent: 40, spacing: 4.6, groundY: 0, seed: 11,
+    /* A-NIGHTFALL — MARRIED GROUND. `groundY` is a single plane, which is true of swing-lab's lab and
+       false of any room whose terrain was carved (world-lab). A flat plane there buries half the lamp
+       posts and floats the other half. `groundYAt(x, z) => y` is the SAME seam name and shape
+       box-arena already takes for exactly this reason (its `groundYAt`/`heightAt` opt-ins), so a room
+       that already has a ground sampler hands over the one it is using rather than a second copy.
+       null (the default) = use the flat `groundY`, i.e. byte-identical for every existing caller. */
+    groundYAt: null,
     roadHalf: null,          // defaults to 0.30 * spacing — see below
     step: 1.15,
     blocked: null,
@@ -127,6 +134,12 @@ export function createStreetKit(opts = {}) {
   };
   const box = (x, y, z, w, h, d, c, rot = 0) => boxes.push({ x, y, z, w, h, d, c, rot });
 
+  /* THE FLOOR UNDER ONE PROP, sampled ONCE per prop and then shared by all of its boxes. Per-BOX
+     sampling would be the obvious thing and it would be wrong: a bench's four corners are at
+     different (x, z), so on a graded street each leg would find its own height and the bench would
+     lean. A prop stands on one spot; this is that spot. */
+  const groundAt = P.groundYAt ? (x, z) => P.groundYAt(x, z) : () => P.groundY;
+
   /* A STREETLIGHT IS THREE BOXES AND ONE OF THEM IS NOT LIT BY THE SUN. The pole and the arm are
      ordinary geometry; the HEAD goes into the unlit mesh, because the entire point of a streetlight is
      the frames in which there is no sun — a diffuse-shaded lamp head at night is a dark smudge on a
@@ -134,12 +147,13 @@ export function createStreetKit(opts = {}) {
      engine's existing night ability) is registered at the same point, so the halo and the thing that
      is supposed to be making it are never in two places. */
   function streetlight(x, z, faceX, side, r) {
+    const gy = groundAt(x, z);
     const h = P.lampHeight * (0.92 + 0.16 * r);
-    box(x, P.groundY, z, 0.07, h, 0.07, COL.pole);
+    box(x, gy, z, 0.07, h, 0.07, COL.pole);
     const reach = P.lampReach * (faceX ? -side : 0), reachZ = P.lampReach * (faceX ? 0 : -side);
-    box(x + reach * 0.5, P.groundY + h - 0.05, z + reachZ * 0.5,
+    box(x + reach * 0.5, gy + h - 0.05, z + reachZ * 0.5,
       faceX ? Math.abs(reach) + 0.06 : 0.06, 0.06, faceX ? 0.06 : Math.abs(reachZ) + 0.06, COL.pole);
-    const hx = x + reach, hz = z + reachZ, hy = P.groundY + h - 0.09;
+    const hx = x + reach, hz = z + reachZ, hy = gy + h - 0.09;
     heads.push({ x: hx, y: hy, z: hz, w: 0.20, h: 0.07, d: 0.13 });
     lampPts.push(hx, hy - 0.02, hz);
     /* THE POOL ON THE ROAD, and it is the half that makes a streetlight a LIGHT rather than a bright
@@ -148,7 +162,7 @@ export function createStreetKit(opts = {}) {
        deliberately an additive SPRITE for exactly this reason. So the pool is a second, much larger,
        much dimmer sprite sitting just above the asphalt: it is not a light, it is the thing a light
        leaves behind, which is all the eye is actually reading at this camera distance. */
-    poolPts.push(hx, P.groundY + 0.04, hz);
+    poolPts.push(hx, gy + 0.04, hz);
   }
   /* A TREE IS A TRUNK BOX AND ONE BLOB, and the blob is the ONE thing in this module that is not a box.
      That is a considered exception: a boxy canopy in a city made entirely of boxes reads as another
@@ -156,32 +170,36 @@ export function createStreetKit(opts = {}) {
      job of a tree at street level. A 20-triangle icosahedron instanced once is the cheapest shape that
      is unmistakably not architecture, and it costs exactly one more draw call for the whole city. */
   function tree(x, z, r, r2) {
+    const gy = groundAt(x, z);
     const th = 0.34 + 0.20 * r;
-    box(x, P.groundY, z, 0.11, th, 0.11, COL.trunk);
-    blobs.push({ x, y: P.groundY + th + 0.20 + 0.10 * r2, z, r: 0.26 + 0.16 * r2, c: COL.canopy[Math.floor(r2 * 3) % 3] });
+    box(x, gy, z, 0.11, th, 0.11, COL.trunk);
+    blobs.push({ x, y: gy + th + 0.20 + 0.10 * r2, z, r: 0.26 + 0.16 * r2, c: COL.canopy[Math.floor(r2 * 3) % 3] });
   }
   function bench(x, z, faceX, r) {
-    const L = 0.62 + 0.16 * r, seatY = P.groundY + 0.14;
+    const gy = groundAt(x, z);
+    const L = 0.62 + 0.16 * r, seatY = gy + 0.14;
     const w = faceX ? L : 0.30, d = faceX ? 0.30 : L;
     box(x, seatY, z, w, 0.06, d, COL.bench);
     box(x + (faceX ? 0 : 0.11), seatY + 0.06, z + (faceX ? 0.11 : 0), faceX ? L : 0.05, 0.20, faceX ? 0.05 : L, COL.bench);
     for (const s of [-1, 1]) {
-      box(x + (faceX ? s * L * 0.36 : 0), P.groundY, z + (faceX ? 0 : s * L * 0.36), 0.06, 0.14, 0.06, COL.pole);
+      box(x + (faceX ? s * L * 0.36 : 0), gy, z + (faceX ? 0 : s * L * 0.36), 0.06, 0.14, 0.06, COL.pole);
     }
   }
   function hydrant(x, z) {
-    box(x, P.groundY, z, 0.10, 0.19, 0.10, COL.hydrant);
-    box(x, P.groundY + 0.19, z, 0.15, 0.05, 0.15, COL.hydrant);
+    const gy = groundAt(x, z);
+    box(x, gy, z, 0.10, 0.19, 0.10, COL.hydrant);
+    box(x, gy + 0.19, z, 0.15, 0.05, 0.15, COL.hydrant);
   }
   function shelter(x, z, faceX, side) {
+    const gy = groundAt(x, z);
     const L = 1.15, H = 0.46;
-    box(x, P.groundY + H, z, faceX ? L : 0.52, 0.06, faceX ? 0.52 : L, COL.shelter);
+    box(x, gy + H, z, faceX ? L : 0.52, 0.06, faceX ? 0.52 : L, COL.shelter);
     for (const s of [-1, 1]) {
-      box(x + (faceX ? s * L * 0.44 : 0), P.groundY, z + (faceX ? 0 : s * L * 0.44), 0.06, H, 0.06, COL.pole);
+      box(x + (faceX ? s * L * 0.44 : 0), gy, z + (faceX ? 0 : s * L * 0.44), 0.06, H, 0.06, COL.pole);
     }
     /* the back panel faces AWAY from the road, which is the one detail that makes a shelter read as a
        shelter rather than as a bus stop's ghost: you can see the shape is open toward the traffic. */
-    box(x + (faceX ? 0 : side * 0.24), P.groundY + 0.06, z + (faceX ? side * 0.24 : 0),
+    box(x + (faceX ? 0 : side * 0.24), gy + 0.06, z + (faceX ? side * 0.24 : 0),
       faceX ? L : 0.05, H - 0.06, faceX ? 0.05 : L, COL.glass);
   }
 
