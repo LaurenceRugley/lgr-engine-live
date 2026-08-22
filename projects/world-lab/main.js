@@ -11,9 +11,10 @@
                             priority flood: contiguous by construction, coverage exact by counting.
      · the shaping        → `shapeRegionTerrain` — dunes in the desert, bowls in the lake district,
                             every offset faded to ZERO at its own seam (so the seams are provable).
-     · the water          → `detectLakes` + `buildLakeGroup` (L68, first consumers outside
-                            createCityWorld) filtered to the lake district, plus the sea plane this
-                            room lacked (A-MARRIAGE honest gap #2, closed).
+     · the water          → `detectLakes` (L68, first consumer outside createCityWorld) filtered to
+                            the lake district, plus the sea this room lacked (A-MARRIAGE honest gap
+                            #2, closed). A-SKYWORLD swapped what DRAWS both — `createWaterSurface`,
+                            the engine's own water — while leaving the detection data untouched.
      · the woods          → `generateScatter` with the new region DENSITY MASK, planted with
                             `createTreeKit` (A-TREEKIT's conifer kit) — the placer is unchanged.
    NOTHING here is a capability: this file wires, configures, and shows numbers.
@@ -57,7 +58,7 @@ import {
   carveCityPads, dirtyMeshesFor,
   generateRegions, shapeRegionTerrain, regionAt,
   generateScatter, buildScatterGroup, createTreeKit,
-  detectLakes, buildLakeGroup,
+  detectLakes,
   createBoxArena, percentileOf,
   createCharacterController, createGrappleModel, GRAPPLE_PROFILE,
   resolveAimPoint, createAimReticle, createPointerLockAim,
@@ -67,6 +68,10 @@ import {
   createRoadModel, ROAD_PROFILE, createSpacecraftModel, HELI_PROFILE,
   createBirdModel, PLANE_PROFILE, CRAFT_PROFILE, scaleProfileSpeeds,
   createVehicleGlbMesh, NO_WATER,
+  /* ARC A-SKYWORLD — the overhead and the waterline. Every one of these already EXISTED in
+     engine-core and this room had simply never asked for them (the wiring-drift failure CLAUDE.md
+     names by name). Nothing below is new capability; §1b/§2c are wiring and configuration. */
+  createHillaireSky, createVolumetricClouds, CLOUD_TIERS, createWaterSurface, lowSunWashK,
 } from '@lgr/engine-core';
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
 import treeKitUrl from '@lgr/engine-core/assets/models/tree_kit.glb?url';   // A-TREEKIT's conifer kit — the woods
@@ -110,9 +115,182 @@ key.shadow.camera.top = 30; key.shadow.camera.bottom = -30;
 key.shadow.camera.near = 1; key.shadow.camera.far = 80;
 key.shadow.bias = -0.0006;
 scene.add(key); scene.add(key.target);
-scene.add(new THREE.HemisphereLight('#a9bedd', '#4a4438', 1.25));
+const fill = new THREE.HemisphereLight('#a9bedd', '#4a4438', 1.25);
+scene.add(fill);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+/* A-SKYWORLD — NO TONEMAP, AND THAT IS A DECISION I REVERSED ONCE, so it is written down rather
+   than left as an absence. `skyrender.frag` emits `lum * uExposure` RAW and its own comment says the
+   exposure exists "to lift the physical radiance into the shared ACES tonemap's range" — i.e. the
+   sky EXPECTS a downstream tonemap, which in the city is the filmic post pass. I therefore reached
+   for `renderer.toneMapping = ACESFilmic` first, and MEASURED that it does not work here: three.js
+   injects the tonemapping chunk into its own materials, and the Hillaire sky is a raw ShaderMaterial
+   that never includes it — so ACES tonemapped the terrain and the towers while leaving the sky
+   untouched, i.e. it produced TWO tone spaces in one frame and did not fix the blown horizon at all.
+   The horizon band is cured by the sky's OWN exposure instead (below), which is the dial that
+   actually governs it. Keeping NoToneMapping also keeps this arc scope-precise: the room's terrain
+   is its subject and it is lit exactly as it was before. */
+
+/* ---------------------------------------------------------------------------------------------
+   1b. THE SKY, THE SUN AND THE OVERHEAD (ARC A-SKYWORLD, 2026-08-21).
+   ---------------------------------------------------------------------------------------------
+   The owner's ask was for the Live Sky app's overhead — a real sun, a real sky, real clouds — in
+   this room. The honest answer, found by reading rather than assuming, is that ENGINE-CORE ALREADY
+   OWNED EVERY PIECE and world-lab had never wired ONE of them:
+     · the sky      → `createHillaireSky` — Hillaire's 2020 production-ready atmospheric scattering,
+                      the same model the Live Sky app runs. Not a gradient: it MARCHES the real
+                      Rayleigh (air molecules, ∝1/λ⁴ — why the sky is blue and sunsets are red) and
+                      Mie (aerosols, wavelength-flat — why the horizon whitens) terms through a
+                      spherical atmosphere, precomputing transmittance + multiple-scattering into
+                      LUTs once and re-marching only the cheap sky-view LUT per frame.
+     · the sun      → `core.sunRig`, which `createEngineCore` HAS ALREADY BUILT for us (see its
+                      §2b — "MOVED to core"). This room simply never read it. Constructing a second
+                      SunRig here would be the canonical day/night mistake CLAUDE.md forbids: one
+                      scalar `t`, one keyframe set, one source of truth for what time it is.
+     · the clouds   → `createVolumetricClouds` (§8b) — a real raymarched Perlin-Worley slab.
+   C++ anchor: `sunRig` hands out Colors and Vector3s BY REFERENCE and mutates them in place —
+   think `const vec3&` returned from a getter, bound once and re-read, never reassigned. That is
+   also why nothing below ever writes `key.color = …`; it copies INTO the existing colour.
+
+   THE HILLAIRE MESH IS A SCENE OBJECT, NOT A POST PASS: a fullscreen quad at renderOrder -100 with
+   depth-test off, so it paints behind everything and costs one draw. That is what lets this room
+   keep its "no post chain" testbed rule (§1) for the SKY — only the clouds need a composite.
+   `sunDisc: true` because, unlike the city, this room has no `createCelestials` sprite — so the
+   atmosphere shader itself draws the disc and there is still exactly ONE sun in the frame. */
+const sky = createHillaireSky({ renderer, sunDisc: true });
+sky.computeStaticLUTs();                      // ONCE — the transmittance + multi-scatter LUTs are static
+scene.add(sky.skyMesh);
+/* EXPOSURE IS A CALIBRATION, AND IT IS MEASURED, NOT COPIED. The module's default is 18 and the
+   CITY sets 220 — and NEITHER is transferable, because this number means "how many times brighter
+   than 1.0 a lit sky pixel comes out BEFORE whatever chain follows it", and the chain that follows
+   it here is nothing at all. Swept on the real page at this room's own late-afternoon t: 16 clipped
+   the horizon to a flat white stripe, 6 holds the full gradient from a deep zenith to a pale
+   horizon with nothing pinned at 1.0. `?skyexp=` keeps the number arguable rather than settled. */
+sky.setExposure(qNum('skyexp', 6));
+/* THE EYE, IN MEGAMETRES. The atmosphere model works in Mm from the planet centre (GROUND_MM =
+   6.360), so the sky needs to know how high the viewer stands — 0.0002 Mm = 200 m, the same figure
+   the city uses. HOISTED, because §7 of docs/engine-invariants.md forbids per-frame allocation:
+   this is written into every frame and must never be a fresh Vector3. */
+const _skyEye = new THREE.Vector3(0, 6.360 + 0.0002, 0);
+
+/* THE DAY, AND WHY IT DOES NOT MOVE UNLESS YOU ASK. `t` ∈ [0,1) is SunRig's one scalar: 0 night,
+   0.25 dawn, 0.5 noon, 0.75 dusk. The default 0.62 is LATE AFTERNOON — chosen to preserve exactly
+   what §1's original comment said this room wanted ("the key is warm and low-ish… so the city has
+   something to be a silhouette against"), so the arc changes how the light is COMPUTED without
+   changing what the room is lit LIKE.
+   AUTO IS OFF BY DEFAULT AND THAT IS A CORRECTNESS DECISION, not a taste one: a room that drifts
+   through the day is a room whose captures, whose probe phases and whose two-boot receipts all read
+   a different frame every run. `?daycycle=1` opts in; `?t=` scrubs to a fixed time.
+
+   THE NIGHT HALF IS NOT FINISHED, AND IT IS SAID HERE RATHER THAN DISCOVERED. The sun is above the
+   horizon for t ∈ (0.25, 0.75) and this room is correct across all of it — verified by capture at
+   dawn, noon, the shipped 0.62 and a genuinely good sunset at 0.71. BELOW the horizon the Hillaire
+   atmosphere has almost nothing left to scatter and returns near-black, so at t = 0.78 the sky goes
+   flat black while the water — which has its own ambient floor — stays PALE, i.e. brighter than the
+   sky above it. That is an inversion, not a dark scene, and it is a real defect.
+   It is a defect with a known cure that is NOT this arc: engine-core already owns `night-sky.js`,
+   `createCelestial` and `createTrueStars`, and wiring them is the same "the ability exists, this
+   room never asked" move the rest of this section is made of. Recorded as an OPEN rather than
+   half-attempted. Until then the daylight arc is the supported range and the default sits inside it. */
+const sun = core.sunRig;
+sun.goTo(qNum('t', 0.62), true);              // snap — no easing on boot, so frame 1 is already right
+if (Q.get('daycycle') === '1') { sun.setAuto(true); sun.setPace(qNum('pace', 90)); }
+/* the KEY LIGHT'S OFFSET, derived from the sun instead of hard-coded. The magnitude is held at ~20 u
+   because the shadow camera above is a ±30 u box with far 80 — a light placed further out than that
+   drops the world out of its own shadow frustum. The y floor keeps the key above the ground even at
+   dusk (SunRig already flips `sunDir` to the MOON below the horizon, so y is never negative — the
+   floor is belt-and-braces against a grazing sun, not a second opinion about night). */
+const SUN_OFF = { x: 9, y: 16, z: 7 };
+const _fogC = new THREE.Color();
+let _lastSunT = -1;                           // forces the first sky-view march (see §8b's dirty check)
+
+/* ---------------------------------------------------------------------------------------------
+   1c. THE VOLUMETRIC CLOUDS — a real raymarched deck, not sprites.
+   ---------------------------------------------------------------------------------------------
+   `createVolumetricClouds` marches a Perlin-Worley volume through a slab and shades it with a dual
+   Henyey-Greenstein phase (forward silver lining + soft back glow). It is a POST PASS: it reads the
+   rendered frame as a texture and composites cloud over it, so unlike the sky it cannot simply be a
+   mesh in the scene.
+   AND THAT WOULD HAVE BEEN THIS ROOM'S ONE ARCHITECTURAL PROBLEM — §1's "no post chain (the testbed
+   rule)" — except that it isn't one, because `createEngineCore` HAS ALREADY ALLOCATED the buffers:
+   `core.sceneRT` (with `core.sceneDepth` attached as its depth texture) is built for every non-lean
+   consumer and this room has simply never rendered into it. So the composite below costs ZERO new
+   render targets, and `core.resize()` already resizes both. It is also the SAME hand-rolled
+   render-into-an-RT-then-composite shape `createCityWorld` uses — the dominant pattern in this
+   repo — rather than an EffectComposer, which no project here uses.
+   C++ anchor: `pass.render(renderer, dst, src)` is a kernel over a framebuffer — src texture in,
+   dst framebuffer out; `renderToScreen` just means dst = the default framebuffer.
+
+   THE DEPTH GATE IS WHY CLOUDS DO NOT PAINT OVER THE CITY. `setSceneDepth` binds the depth buffer
+   and the shader skips cloud on any fragment whose depth is in front of the far plane.
+
+   ---- THE ONE REAL DEFECT THIS ARC SHIPS, MEASURED RATHER THAN GLOSSED ----
+   That gate is, in clouds.frag's own words, "a one-liner rather than a distance comparison": it
+   tests `depth < 0.9999`. Whether that means "there is geometry here" depends ENTIRELY on the
+   camera's depth range, and this room's is extreme — near 0.02, far 420, a ratio of 21,000:1,
+   because the hero is only 0.30 u tall. Window depth for a surface at distance d is
+   (f/(f−n))·(1 − n/d), so `0.9999` is reached at d ≈ 135 u. BEYOND ABOUT 135 UNITS, GEOMETRY READS
+   AS SKY TO THIS GATE AND CLOUD IS PAINTED OVER IT.
+   CONFIRMED, not deduced: a camera at 25 u looking straight DOWN at the city (rays ~25 u) shows no
+   cloud wash at all, while the same camera looking out at the far sea shows a crisp line across the
+   water with clean sea in front of it and speckled cloud wash beyond
+   (docs/captures/world-lab/a-skyworld/ discussion; scratch A/B this arc).
+   WHO SEES IT: long views — flying, or looking across the world at the far rim. On foot, everything
+   inside 135 u is correct, which is most of what a walker's frame contains.
+   THE TWO FIXES ARE BOTH OUT OF THIS ARC ON PURPOSE, and that is a STOP rather than a shrug:
+     · raise `rig.camera.near` (0.05 would push the threshold past 300 u) — but `camEyeClear` above
+       is derived from `cameraNearRadius({ near: 0.02, … })`, so near and the walker's camera
+       clearance move TOGETHER or first-person starts clipping. That is verb/camera wiring, owned
+       elsewhere right now.
+     · give clouds.frag the real ray-distance compare its own comment asks for — but that shader is
+       shared with the CITY, which is the tier-guard subject, so changing it is a STOP-and-report.
+   Recorded as an OPEN. `?clouds=0` turns the whole pass off if a long view matters more. */
+const CLOUDS_ON = Q.get('clouds') !== '0';
+/* THE STEP TIER IS A DIAL BECAUSE IT IS THE DEFECT KNOB, not because more is nicer. The march
+   jitters its start by a full `fineStep` to hide banding (clouds.frag), and `fineStep` is itself
+   interpolated from the step budget — 4.55 u at HIGH's 32 steps, 2.2 u at CAPTURE's 64. That jitter
+   IS the speckle you see on thin cloud edges, so halving the step halves the noise. Swept on the
+   real page in this room and reported as a measured trade rather than chosen by taste. */
+const CLOUD_TIER = String(Q.get('cloudtier') || 'CAPTURE').toUpperCase();
+if (!CLOUD_TIERS[CLOUD_TIER]) console.warn(`[world-lab] unknown ?cloudtier=${CLOUD_TIER} — the pass will fall back to HIGH`);
+/* THE BUNDLE COST IS REAL, IS ABOUT +41 KB GZIP, AND IS BOOKED RATHER THAN ENGINEERED AWAY — with
+   the attempt written down so nobody repeats it. Adding this pass to the module graph grows the
+   page's eager `three` chunk from 155.95 KB to 197.45 KB (vite's own reported gzip), which failed
+   `tools/size-budget.test.mjs` ("world-lab money-path entry JS"). ISOLATED, not assumed: replacing
+   only this one import with a rejected promise and rebuilding puts the chunk back to 155.95 KB.
+   TWO INSTRUMENTS, AND THEY DISAGREE — worth knowing before anyone chases a discrepancy that is not
+   one. Vite reports 197.45 KB for that chunk; the budget test measures `gzipSync(..., level 9)` and
+   gets 194,421 bytes for the same file. Different compression settings and different KB conventions,
+   not a moving target. The budget row is written in the TEST's units; this note is in vite's,
+   because those are the numbers you see when you run the build.
+   I TRIED THE OBVIOUS FIX FIRST AND IT DID NOT WORK. `createCityWorld` dynamically imports this same
+   module "so a non-opted consumer downloads nothing", so I did the same (adding a deep entry to
+   engine-core's `exports` map) and ALSO narrowed this project's rolldown `three` group to let the
+   postprocessing files fall into the lazy chunk. Measured: the cloud module split out cleanly at
+   5.7 KB gz, but the eager total did not move (278.2 KB dynamic vs 277.3 KB static) — excluding the
+   addons merely moved GLTFLoader from the `three` chunk into the entry chunk, byte for byte.
+   AND MY DIAGNOSIS WAS WRONG, which is worth recording: I assumed the weight was ShaderPass, but its
+   source imports only { ShaderMaterial, UniformsUtils } and Pass.js only { BufferGeometry,
+   Float32BufferAttribute, OrthographicCamera, Mesh } — all already in this page. So the 41 KB is
+   NOT the addon's own code. UNATTRIBUTED, and said plainly rather than guessed at: the likeliest
+   remaining explanation is that the addons' bare `three` specifier resolves to a second entry point
+   and defeats some of rolldown's tree-shaking, but I did not prove that and am not claiming it.
+   So the arc reverts to the SIMPLE static import — the dynamic one bought nothing here, and
+   createCityWorld's stated reason for it ("a non-opted consumer") does not apply to a room where
+   clouds are ON by default — and the budget is re-baselined with this measurement attached. */
+const clouds = CLOUDS_ON
+  /* COVERAGE 0.30, and the number is a fix rather than a preference. At the module default 0.5 (and
+     at my first 0.42) the horizon showed a hard WHITE STRIPE: a ray at grazing elevation marches
+     clouds.frag's full 240-unit window through the deck, so transmittance goes to ~0 and the
+     scattering integral saturates — a dense deck seen edge-on IS white. The city never sees it
+     because it looks DOWN from an aerial framing; a room you stand up in looks straight at it.
+     Thinning the deck lets the far bank stay a bank instead of a wall. A/B'd on the real page. */
+  ? createVolumetricClouds({ noiseN: 32, seed: 1337, coverage: qNum('coverage', 0.30) })
+  : null;
+if (clouds) {
+  clouds.setSceneDepth(core.sceneDepth);
+  clouds.pass.renderToScreen = true;          // the composite IS the final present in this room
+}
 
 /* ---------------------------------------------------------------------------------------------
    2. THE WORLD — terrain, carve, city. Every dial is a URL param first, a slider second, so a bug
@@ -288,15 +466,42 @@ let T = null, terrainGroup = null, CARVE = null, HEIGHT = () => 0;
 let arena = null;
 let LEVEL_BUILD_MS = 0;
 let REG = null, SHAPED = null;                   // the region field + its shaping report
-let scatterGroup = null, treeGroup = null, lakeGroup = null, seaMesh = null;
+/* `seaMesh` used to live here and was dropped when A-SKYWORLD replaced the flat transparent plane
+   with `createWaterSurface`; the declaration outlived its six uses. Removed 2026-08-21 after that
+   arc's refutation found it — worth noting that `.oxlintrc.json` disables `no-unused-vars`, so the
+   lint gate structurally cannot catch this class and a human read is the only thing that will. */
+let scatterGroup = null, treeGroup = null, lakeGroup = null;
 let LAKES = [], TREE_N = 0;
 
-/* ONE WATER MATERIAL for the sea and every lake (world-water.js's own reuse anchor): the sea is not
-   a different substance from a lake, it is the same surface at a different plane, and one material
-   means one place to change how water reads in this room. */
-const waterMat = new THREE.MeshStandardMaterial({
-  color: '#33627f', roughness: 0.18, metalness: 0.30, transparent: true, opacity: 0.86,
-});
+/* ONE WATER FACTORY for the sea and every lake (A-SKYWORLD keeps this room's own reuse anchor and
+   only changes WHAT is being reused): the sea is not a different substance from a lake, it is the
+   same surface at a different extent — so both are now `createWaterSurface`, the engine's own water,
+   rather than one flat `MeshStandardMaterial` plane standing in for both. That factory's docstring
+   names this exact pair as its purpose ("same geometry, different extent") and it costs no new
+   capability: `kind:'ocean'` adds a Gerstner swell and a tessellated ring-disc, `kind:'lake'` is the
+   flat analytic disc. Every surface is driven from the SAME sunRig every frame (§8b), which is the
+   whole reason water now reads as water: a Fresnel sky-tint and a sun glint that both know where
+   the sun actually is. `detectLakes` — the DATA that says where the pools are — is untouched. */
+/* THE SHORE RAMP DOES NOT APPLY TO AN OPEN SEA, and pretending otherwise is what made the first
+   attempt read as a black plum plane. `createWaterSurface` ramps `deep`→`shallow` by DISTANCE FROM
+   THE DISC'S OWN CENTRE (aShoreDepth = (1 − r/radius)^depthPower) — which is exactly right for a
+   pond whose rim IS its shoreline, and meaningless for a 300 u sea disc whose rim is out in the fog
+   and whose real shoreline is wherever the TERRAIN happens to rise through y = 0. Everything the
+   player can see sits near the centre, so the whole visible sea takes the `deep` colour.
+   So `deep` is set to the colour the sea should actually BE, and `shallow` only a little lighter to
+   keep a touch of gradient toward the horizon. Naming a near-black as `deep` and expecting the ramp
+   to rescue it is the mistake; the ramp never gets there. */
+const WATER_LOOK = { shallow: 0x4d8ba6, deep: 0x24576f, sky: 0x9dbdd6 };
+/* ONE swell scale, stated once. This world is 128 u across but VERTICALLY tiny — the hero is 0.30 u
+   tall, so 1 u ≈ 5.7 m and the module's metre-ish defaults (wavelength 14, lodNear 22) would be
+   kilometre swells here. Scaled to the room: ~3 u crests ≈ 17 m, amplitude 0.03 u ≈ 17 cm of heave.
+   THE AMPLITUDE IS DELIBERATELY SMALL AND THIS IS THE REASON: `waterHeightAt` answers a FLAT y = 0
+   for the sea (§4) and the probe's P8b proves the bag against that plane, so the visual surface may
+   only ever breathe around y = 0 by an amount too small to make the query a lie. 0.03 u is ~1/10 of
+   a person's height — visible as motion, invisible as a discrepancy. A big swell would need
+   `waterHeightAt` to sample the same Gerstner sum, which is a real feature and NOT this arc. */
+const SWELL = { waveAmp: 0.03, wavelength: 3.0, steepness: 0.55, waveSpeed: 0.8, lodNear: 30, lodFar: 160 };
+let seaWater = null, lakeWaters = [];
 /* the KIT is created ONCE (moto-lab's own rule): the GLB loads a single time and every rebuild
    re-instances the cached geometry. `?trees=proc` keeps the procedural cones as the control arm, and
    a load FAILURE rebuilds the room with them, loudly — degrade whole, the house convention. */
@@ -345,23 +550,32 @@ function buildWorld() {
 }
 
 /* ---------------------------------------------------------------------------------------------
-   2c. THE WATER — the sea plane this room never had (A-MARRIAGE honest gap #2: "the rim jump lands
-   on the sub-sea ocean biome — there is no water in the room; dirt all the way down"), and the lake
-   district's pools through `detectLakes` / `buildLakeGroup` (L68's FIRST consumers outside
-   createCityWorld — the ability existed and only one room had ever asked it anything).
+   2c. THE WATER — the sea this room never had (A-MARRIAGE honest gap #2: "the rim jump lands on the
+   sub-sea ocean biome — there is no water in the room; dirt all the way down"), and the lake
+   district's pools through `detectLakes` (L68's FIRST consumer outside createCityWorld — the
+   ability existed and only one room had ever asked it anything).
+   A-SKYWORLD: both are now drawn by `createWaterSurface`, so they answer the sun.
    THE FILTER is the region field doing its job: detectLakes scans the whole heightfield and will
    happily call a wild hollow a lake, so we keep only the pools whose centre stands in the lake
    DISTRICT. That is consuming the orphan, not forking it — its basin maths is untouched.
    --------------------------------------------------------------------------------------------- */
 function buildWater(WORLD_MAP) {
-  if (!seaMesh) {
-    /* sea level is y = baseY = 0 by terrain.js's own mapping (wy(sea) = baseY). One plane, a hair
-       larger than the world so the horizon has no visible edge inside the fog. */
-    seaMesh = new THREE.Mesh(new THREE.PlaneGeometry(WP.worldSize * 1.6, WP.worldSize * 1.6), waterMat);
-    seaMesh.rotation.x = -Math.PI / 2;
-    seaMesh.position.y = 0;
-    seaMesh.receiveShadow = false; seaMesh.castShadow = false; seaMesh.raycast = () => {};
-    scene.add(seaMesh);
+  if (!seaWater) {
+    /* sea level is y = baseY = 0 by terrain.js's own mapping (wy(sea) = baseY) — UNCHANGED, and it
+       has to be: `waterHeightAt` (§4) and the probe's P8b both stand on that exact plane.
+       THE RADIUS IS THE FOG'S, NOT THE WORLD'S. The old plane was worldSize·1.6 (half-extent 102 u)
+       and stopped well inside `scene.fog`'s far plane at 300 — which was invisible only because a
+       flat matte plane and a flat clear-colour were the same nothing. With a real sky behind it that
+       edge WOULD read as a seam on the horizon, so the disc now runs to the fog's own far plane and
+       fades into it instead of ending in it. `raycast` stays a no-op: the aim ray must keep finding
+       terrain and towers, never the sea. */
+    seaWater = createWaterSurface({
+      kind: 'ocean', at: [0, 0], radius: 300, y: 0, segments: 128, rings: 48,
+      ...WATER_LOOK, ...SWELL, opacity: 0.92, glint: 1.0, glintDensity: 0.8, foam: 0.35,
+    });
+    seaWater.mesh.raycast = () => {};
+    seaWater.mesh.receiveShadow = false; seaWater.mesh.castShadow = false;
+    scene.add(seaWater.group);
   }
   const found = detectLakes(T, { ...WORLD_MAP, maxLakes: 8 });
   LAKES = found.filter((lk) => regionAt(REG, lk.cx, lk.cz) === 'lakes');
@@ -385,7 +599,23 @@ function buildWater(WORLD_MAP) {
     }
   }
   LAKES = LAKES.filter((lk) => lk.radius > 0.6);      // a disc smaller than that is a puddle, not a lake
-  lakeGroup = buildLakeGroup(LAKES, { material: waterMat });
+  /* THE LAKES ARE THE SAME SUBSTANCE AS THE SEA, so they are the same factory at a smaller extent —
+     `kind:'lake'` is the flat analytic disc (no Gerstner: a 2 u tarn does not carry ocean swell, and
+     a flat lake keeps `waterHeightAt`'s `lk.y` exactly true rather than nearly true). The DATA is
+     untouched: `detectLakes` + the room's own disc-shrink fit above still decide where and how big
+     every pool is; only what draws them changed. `userData.dispose` is kept because buildWorld's
+     teardown loop calls it by contract on every dial change. */
+  lakeGroup = new THREE.Group();
+  lakeWaters = LAKES.map((lk) => {
+    const w = createWaterSurface({
+      kind: 'lake', at: [lk.cx, lk.cz], radius: lk.radius, y: lk.y, segments: 64,
+      ...WATER_LOOK, opacity: 0.88, ripple: 0.5, glint: 0.85, renderOrder: 2,
+    });
+    w.mesh.raycast = () => {};
+    lakeGroup.add(w.group);
+    return w;
+  });
+  lakeGroup.userData.dispose = () => { for (const w of lakeWaters) w.dispose(); lakeWaters = []; };
   scene.add(lakeGroup);
 }
 
@@ -1070,6 +1300,68 @@ function frame() {
 
   frameStart();
 
+  /* ---- 8b. THE SKY TICK (A-SKYWORLD). Runs BEFORE the two body branches on purpose: both of them
+     place the key light from `SUN_OFF`, so the sun has to have moved first or the shadows lag the
+     sky by a frame. Everything here is a COPY INTO an existing object — SunRig hands out its Colors
+     and Vector3s by reference (§1b) and docs/engine-invariants.md §7 forbids per-frame allocation,
+     so there is not one `new` in this block. ---- */
+  sun.update(dt);
+  /* the key light's direction IS the sun's, at a fixed 20 u standoff (§1b's shadow-frustum budget).
+     `sunDir` is already the MOON's direction after dusk — SunRig flips it — so the night key is
+     moonlight from the right place rather than a sun buried under the world. */
+  SUN_OFF.x = sun.sunDir.x * 20;
+  SUN_OFF.y = Math.max(3, sun.sunDir.y * 20);
+  SUN_OFF.z = sun.sunDir.z * 20;
+  key.color.copy(sun.sunColor);
+  key.intensity = sun.sunIntensity;
+  fill.color.copy(sun.hemiSky);
+  fill.groundColor.copy(sun.hemiGround);
+  /* THE FOG IS THE SKY'S OWN AMBIENT COLOUR — `hemiSky`, NOT `horizon`, and the difference was
+     visible the first time I looked. `sunRig.horizon` is a keyframe authored for the city's
+     Preetham/stylized backdrop; at this room's 14:53 it is a mauve #8d6269, while the Hillaire
+     atmosphere actually paints a PALE BLUE horizon. Fogging the terrain to a colour the sky never
+     shows put a dark mauve band across the join — the ground fading out to one colour in front of
+     another. `hemiSky` is by definition "the colour of the sky as a surface sees it", which is the
+     same quantity atmospheric fog approximates, and it tracks correctly across the whole day
+     (#9cb8cc noon, #8a7686 dawn, #7a566a dusk, #26344f night). Honest limit: it is still an
+     APPROXIMATION of a horizon that really lives in a GPU LUT — the sky module exposes no CPU-side
+     horizon colour, so no exact answer is available to read.
+     `lowSunWashK` is the engine's OWN shared low-sun curve (sun-rig.js) — imported, never
+     re-derived — and it lifts the fill a little at dawn/dusk when the key has gone red and low. */
+  _fogC.copy(sun.hemiSky);
+  scene.fog.color.copy(_fogC);
+  renderer.setClearColor(_fogC, 1);
+  fill.intensity = 0.85 + 0.55 * lowSunWashK(sun.sunArc.y);
+
+  /* THE SKY-VIEW LUT IS RE-MARCHED ONLY WHEN THE SUN ACTUALLY MOVED. It is a 200x100 raymarch and
+     the city pays it every frame because the city's sun is always creeping; THIS room defaults to a
+     FROZEN sun (§1b — determinism for the probe and the captures), so re-marching an unchanged LUT
+     60x/s would be pure waste. `updateRender` is uniforms-only and stays unconditional because the
+     CAMERA moves every frame even when the sun does not. */
+  if (Math.abs(sun.t - _lastSunT) > 1e-6) { sky.updateSkyView(sun.sunArc, _skyEye); _lastSunT = sun.t; }
+  sky.updateRender(sun.sunArc, _skyEye);
+
+  /* THE WATERLINE ANSWERS THE SAME SUN. Without these four lines the sea is a blue disc; with them
+     it carries the sun's own glint, the sky's Fresnel tint and the room's fog, so the shoreline
+     reads as one scene with the sky above it. FOG DENSITY, and why it is a converted number: the
+     water shader fogs EXPONENTIALLY (1 − exp(−d²·dist²), water.frag) while this room's `scene.fog`
+     is LINEAR (near 50, far 300). Handing it `scene.fog.density` — which a THREE.Fog does not have
+     — would pass `undefined`. 0.0058 is the exp2 density that reaches ~95% opacity at the linear
+     fog's own far plane (√3/300), so the sea fades out where the terrain does. */
+  /* GUARDED, because `?regions=off` builds NO water at all (buildWorld only calls buildWater when
+     the districts are on) — and that is the exact config the flat-in A-MARRIAGE checksum boots. An
+     unguarded tick here would throw on frame 1 of the one URL this arc must not break. */
+  if (seaWater) {
+    seaWater.update(stats.t);
+    seaWater.setSun(sun.sunDir, sun.sunColor);
+    seaWater.setSky(sun.hemiSky);
+    seaWater.setFog(_fogC, 0.0058);
+  }
+  for (let i = 0; i < lakeWaters.length; i++) {
+    const w = lakeWaters[i];
+    w.update(stats.t); w.setSun(sun.sunDir, sun.sunColor); w.setSky(sun.hemiSky); w.setFog(_fogC, 0.0058);
+  }
+
   if (MODE === 'walk') {
     aimHit = resolveAimPoint(rig.camera, arena.world, _aimPt, { maxDist: aimReach(), radius: 0.05 });
     const fwd = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
@@ -1107,7 +1399,7 @@ function frame() {
       anchorDot.visible = true;
     } else { rope.visible = false; anchorDot.visible = false; }
 
-    key.position.set(character.x + 9, 16, character.z + 7);
+    key.position.set(character.x + SUN_OFF.x, SUN_OFF.y, character.z + SUN_OFF.z);
     key.target.position.set(character.x, 0, character.z);
     key.target.updateMatrixWorld();
     rig.setEye(character.cameraPose(_camPos, _camDir), _camDir);
@@ -1140,7 +1432,7 @@ function frame() {
       landings++; if (st.landing.clean) cleans++;
     }
     ACTIVE.body.update(st, dt);
-    key.position.set(st.x + 9, 16, st.z + 7);
+    key.position.set(st.x + SUN_OFF.x, SUN_OFF.y, st.z + SUN_OFF.z);
     key.target.position.set(st.x, 0, st.z);
     key.target.updateMatrixWorld();
     ACTIVE.cam.pose(st, view, dt, heightAt, _bCamPos, _bCamDir);
@@ -1156,8 +1448,28 @@ function frame() {
   }
   rig.update(dt);
 
-  renderer.setRenderTarget(null);
-  renderer.render(scene, rig.camera);
+  /* ---- 8c. THE CLOUD TICK + THE PRESENT (A-SKYWORLD). The update sits AFTER `rig.update` on
+     purpose: the pass rebuilds a world ray per pixel from the camera's inverse-projection and
+     world matrix, so it must read the pose this frame will actually be RENDERED with, not last
+     frame's. `skyTint` gets the same `hemiSky` the fog and the water use, so cloud, haze, sea and
+     sky are all tinted by one colour and cannot drift apart across the day.
+     THE TIER IS THE GOVERNOR'S, exactly as createCityWorld maps it — the engine already measures
+     frame cost and steps down; a second opinion about quality here would fight it. At level ≥ 2 the
+     pass is skipped ENTIRELY (city's own cutoff) and the frame presents straight to the screen. ---- */
+  const cloudsLive = clouds && core.governor.level < 2;
+  if (cloudsLive) {
+    clouds.update({
+      camera: rig.camera, sunDir: sun.sunDir, sunColor: sun.sunColor, skyTint: sun.hemiSky,
+      time: stats.t, tierName: core.governor.level === 0 ? CLOUD_TIER : 'MED',
+    });
+    /* scene -> sceneRT -> composite -> screen. Both buffers are core's, allocated at boot. */
+    renderer.setRenderTarget(core.sceneRT);
+    renderer.render(scene, rig.camera);
+    clouds.pass.render(renderer, null, core.sceneRT);
+  } else {
+    renderer.setRenderTarget(null);
+    renderer.render(scene, rig.camera);
+  }
   if (MODE === 'walk') lockMark.place(rig.camera, targetLock.point);
   frameEnd();
   updateHud(dt);
@@ -1273,6 +1585,11 @@ window.__world = {
   },
   buildMs: () => LEVEL_BUILD_MS,
 };
+/* A-SKYWORLD: whether the deck is actually LIVE, so a capture tool can assert it rather than accept
+   an empty sky as a valid frame. Reports 'on' | 'off' (?clouds=0) | 'shed' — that last one is the
+   governor having stepped past level 1 and dropped the pass, which is a legitimate runtime state but
+   NOT a frame you should file as a cloud capture. A boolean could not tell those apart. */
+window.__cloudsState = () => (!clouds ? 'off' : core.governor.level < 2 ? 'on' : 'shed');
 window.__spawn = spawn;
 /* A-DRIVE: clear the receipt counters WITHOUT moving the body. `spawn` already does this, but it
    also teleports the walker to the city edge — so a probe that wants each craft's NO-SINK figure
