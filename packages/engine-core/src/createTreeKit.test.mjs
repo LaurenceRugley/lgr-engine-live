@@ -19,7 +19,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import * as THREE from 'three';
-import { assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS } from './createTreeKit.js';
+import {
+  assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS,
+  BROADLEAF_KIT_VARIANTS, DEAD_KIT_VARIANTS,
+  GROUNDCOVER_BUSH_VARIANTS, GROUNDCOVER_FERN_VARIANTS,
+  GROUNDCOVER_TUFT_VARIANTS, GROUNDCOVER_ROCK_VARIANTS,
+} from './createTreeKit.js';
 
 test('variant assignment: deterministic per seed, all variants used, uniform-ish', () => {
   const a = assignTreeVariants(600, 4, 7), b = assignTreeVariants(600, 4, 7), c = assignTreeVariants(600, 4, 8);
@@ -29,6 +34,23 @@ test('variant assignment: deterministic per seed, all variants used, uniform-ish
   for (const v of a) counts[v]++;
   for (let i = 0; i < 4; i++) assert.ok(counts[i] > 600 / 4 * 0.6, `variant ${i} underused: ${counts[i]}/600`);
 });
+
+/* A-FLORA: the test above pins nVariants = 4, which was the only size that existed while the
+   conifer kit was the only kit. The new family lists are 2 and 4 long (DEAD_KIT_VARIANTS and every
+   GROUNDCOVER_* pair are PAIRS), and a caller may legitimately concatenate them into a 6- or
+   8-long list. nVariants = 2 is the interesting one: `Math.min(n-1, (rng()*n)|0)` is the kind of
+   expression that is obviously right at 4 and worth actually running at the edge, because a kit
+   that silently only ever placed variant 0 would look like "the art is samey", not like a bug. */
+for (const n of [2, 3, 6, 8]) {
+  test(`variant assignment stays uniform-ish at nVariants=${n} (the new kits' family sizes)`, () => {
+    const a = assignTreeVariants(900, n, 11);
+    const counts = new Array(n).fill(0);
+    for (const v of a) counts[v]++;
+    assert.equal(counts.reduce((s, c) => s + c, 0), 900, 'every placement got a variant');
+    assert.ok(Math.max(...a) === n - 1, `variant ${n - 1} never chosen — the top of the range is unreachable`);
+    for (let i = 0; i < n; i++) assert.ok(counts[i] > (900 / n) * 0.6, `variant ${i} underused at n=${n}: ${counts[i]}/900`);
+  });
+}
 
 test('tints: deterministic, distinct per instance, value band = the procedural arm\'s own', () => {
   const { colors: c1, report } = makeTreeTints(500, 7);
@@ -94,3 +116,59 @@ test('tree_kit.glb ships its contract: 4 variants, one primitive each, COLOR_0 a
   }
   assert.equal(gltf.materials.length, 4, `expected 4 collapsed materials, got ${gltf.materials.length}`);
 });
+
+/* ── A-FLORA (2026-08-21): the two NEW kits ship the SAME contract, checked off their own bytes.
+   Same three properties as the conifer test above (named variants present · ONE primitive each ·
+   COLOR_0 aboard) plus the per-variant TRIANGLE COUNT, read from the accessor the generator
+   actually wrote. That last one is why this is a test and not a duplicate: the Blender receipt
+   gates triangles at BUILD time, but nothing downstream re-checks that the bytes in the repo are
+   the bytes that build produced. A hand-edited or half-regenerated GLB passes every structural
+   check and blows the frame budget silently. Here the ceiling travels WITH the asset.
+   The budgets are the generators' own, per family — see each build script's header for the
+   derivation (trees inherit the conifer kit's 180; ground cover derives its own from the
+   scatter.js props it replaces). ---------------------------------------------------------------- */
+const FLORA_KITS = [
+  { file: 'broadleaf_kit.glb', materials: 6, families: [
+    { names: BROADLEAF_KIT_VARIANTS, budget: 180 },
+    { names: DEAD_KIT_VARIANTS, budget: 180 },
+  ] },
+  { file: 'groundcover_kit.glb', materials: 8, families: [
+    { names: GROUNDCOVER_BUSH_VARIANTS, budget: 96 },
+    { names: GROUNDCOVER_FERN_VARIANTS, budget: 44 },
+    { names: GROUNDCOVER_TUFT_VARIANTS, budget: 28 },
+    { names: GROUNDCOVER_ROCK_VARIANTS, budget: 64 },
+  ] },
+];
+
+for (const kit of FLORA_KITS) {
+  test(`${kit.file} ships its contract: named variants, one primitive each, COLOR_0, tris in budget`, () => {
+    const glb = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'models', kit.file));
+    assert.equal(glb.readUInt32LE(0), 0x46546c67, 'glTF magic');
+    const jlen = glb.readUInt32LE(12);
+    const gltf = JSON.parse(glb.subarray(20, 20 + jlen).toString('utf8'));
+    const byName = new Map(gltf.nodes.map((n) => [n.name, n]));
+    let checked = 0;
+    for (const { names, budget } of kit.families) {
+      for (const name of names) {
+        const node = byName.get(name);
+        assert.ok(node && node.mesh != null, `variant node '${name}' missing from ${kit.file}`);
+        const prims = gltf.meshes[node.mesh].primitives;
+        assert.equal(prims.length, 1, `'${name}' has ${prims.length} primitives — one draw per variant is the collapse contract`);
+        assert.ok('COLOR_0' in prims[0].attributes, `'${name}' lost its COLOR_0 (albedo×AO) — the kit has no other texture story`);
+        /* the collapse leaves every mesh INDEXED and triangulated, so tris = indices/3. Asserted
+           rather than assumed: an un-indexed primitive would make the division silently wrong, and
+           a wrong triangle count that passes is exactly the failure this test exists to prevent. */
+        assert.ok(prims[0].indices != null, `'${name}' is not indexed — the tri count below would be measuring nothing`);
+        const idx = gltf.accessors[prims[0].indices];
+        assert.equal(idx.count % 3, 0, `'${name}' index count ${idx.count} is not a whole number of triangles`);
+        const tris = idx.count / 3;
+        assert.ok(tris <= budget, `'${name}' ships ${tris} tris, over its ${budget} budget — the GLB and its generator have diverged`);
+        checked++;
+      }
+    }
+    /* an empty families list would pass every assertion above by vacuous truth — count what was
+       actually measured and assert it, so a mis-edited table reports UNMEASURED instead of green. */
+    assert.equal(checked, kit.materials, `measured ${checked} variants but ${kit.file} carries ${kit.materials} — the table above is out of sync with the asset`);
+    assert.equal(gltf.materials.length, kit.materials, `expected ${kit.materials} collapsed materials, got ${gltf.materials.length}`);
+  });
+}

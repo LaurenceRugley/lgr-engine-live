@@ -93,9 +93,23 @@ export { generateScatter, buildScatterGroup, createScatter } from './src/scatter
 // no-build lib barrel exposes them too (engine-first: every consumer, build or no-build, can inherit).
 export { createForest, placeForest } from './src/createForest.js';
 // A-TREEKIT — modeled conifer kit loader + per-instance tint seam (pure helpers included: receipts + tests)
-export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS } from './src/createTreeKit.js';
+/* A-FLORA's second tree family + the four ground-cover families, split per family so a room can
+   plant dead snags sparsely. COMMENTS STAY OUT OF THE BRACES — inside, the capability-index parser
+   reads them as capability names and one of them swallowed a real export (refutation, 2026-08-22). */
+export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS,
+  BROADLEAF_KIT_VARIANTS, DEAD_KIT_VARIANTS,
+  GROUNDCOVER_BUSH_VARIANTS, GROUNDCOVER_FERN_VARIANTS,
+  GROUNDCOVER_TUFT_VARIANTS, GROUNDCOVER_ROCK_VARIANTS } from './src/createTreeKit.js';
 export { createFlowField } from './src/createFlowField.js';
 export { createBallistics } from './src/createBallistics.js';
+/* A-GUN — a body CARRIES a thing: the carry transform, the mount-IK sockets that put real hands on
+   it, and a shot fired from the held thing's own muzzle. IN THE CURATED CORE, unlike its neighbour
+   `createWeaponKit` (which the `hoard` omission list holds), and the split is the mechanism/content
+   line this barrel is drawn on: createWeaponKit BUILDS one specific gun's geometry, while this
+   WIELDS whatever it is handed — the same machinery a torch, a scanner or the world editor's
+   placement tool would use. It also composes `createBallistics` directly above, which is already
+   core; omitting the wielder while shipping the projectile would be half an ability. */
+export { createCarriedWeapon, CARRY_GEOMETRY } from './src/carried-weapon.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
 // A-CHAR (2026-08-09): ONE character — walk/sprint/JUMP/fall/land + collision + a crosshair + the web as an ABILITY, with third-person and first-person cameras. Composes the walker (horizontal) + createGrappleModel (the rope); the vertical axis the walker never had lives here.
 export { createCharacterController } from './src/character.js';

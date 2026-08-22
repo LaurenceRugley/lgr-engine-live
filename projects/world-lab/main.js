@@ -72,7 +72,12 @@ import {
      engine-core and this room had simply never asked for them (the wiring-drift failure CLAUDE.md
      names by name). Nothing below is new capability; §1b/§2c are wiring and configuration. */
   createHillaireSky, createVolumetricClouds, CLOUD_TIERS, createWaterSurface, lowSunWashK,
+  /* ARC A-GUN — the walker CARRIES something. The ability is engine-core's (carried-weapon.js:
+     the carry transform, the mount-IK sockets, the shot); this room supplies the aim point, the
+     world query, the body and the key. */
+  createCarriedWeapon,
 } from '@lgr/engine-core';
+import sidearmUrl from '@lgr/engine-core/assets/models/sidearm.glb?url';   // A-GUN — build_sidearm.py
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
 import treeKitUrl from '@lgr/engine-core/assets/models/tree_kit.glb?url';   // A-TREEKIT's conifer kit — the woods
 /* A-DRIVE: the roster's bodies. Six GLBs from ONE generator (tools/blender/build_vehicles.py) —
@@ -716,6 +721,56 @@ const hero = createHeroBody({
   firstPerson: { mode: 'nohead', backOff: 0.05 },
 });
 scene.add(hero.group);
+
+/* ---------------------------------------------------------------------------------------------
+   ARC A-GUN (2026-08-22) — THE CARRIED SIDEARM. Wiring only: the ability is `createCarriedWeapon`.
+   The weapon is STOWED by default and that is a load-bearing default, not a shrug. The owner's
+   walk and run are his favourite animations and the mount-IK pass necessarily moves the ARM chains
+   while a weapon is held — so "carrying" is an opt-in layer (press G) and the room's resting state
+   stays the gait `tools/baselines/walkrun-world-lab.json` was measured on. The LEG chains are never
+   touched at all: `mountTargets` publishes hands only, and a limb with no target is skipped.
+   `world` is the arena's own bag — the same one the reticle, the chase arm and the wall contact
+   already query — so a shot hits the married terrain and the city, and the hit point is a measured
+   world point rather than a guess. The bag goes across WHOLE: the engine owns the translation from
+   `segmentHit`'s bare `t` to the projectile module's hit record, because that mismatch is a property
+   of the two engine seams and not of this room. ------------------------------------------------- */
+const sidearm = createCarriedWeapon({
+  url: sidearmUrl,
+  bodyHeight: HERO_H,
+  world: arena.world,
+});
+scene.add(sidearm.group);
+scene.add(sidearm.bullets);
+let armed = false;
+const _gunTgt = { x: 0, y: 0, z: 0 };
+/* THE AIM TARGET, and why it is never null. `resolveAimPoint` answers null on open sky — a
+   legitimate answer for a crosshair, and a useless one for a weapon, which must point SOMEWHERE
+   every frame. Falling back to a point far down the SAME camera ray the reticle tested makes both
+   cases one code path and keeps the two in agreement: aiming at the sky still points the gun along
+   the crosshair, it just has nothing to hit. Reads `rig.camera`'s matrix directly, exactly as
+   `resolveAimPoint` does, so the gun and the reticle can never disagree about which ray is "look". */
+function gunTarget() {
+  if (aimHit) return aimHit;
+  const e = rig.camera.matrixWorld.elements;
+  let fx = -e[8], fy = -e[9], fz = -e[10];
+  const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
+  const d = aimReach();
+  _gunTgt.x = rig.camera.position.x + fx * d;
+  _gunTgt.y = rig.camera.position.y + fy * d;
+  _gunTgt.z = rig.camera.position.z + fz * d;
+  return _gunTgt;
+}
+/* ARM / STOW. Stowing must also RELEASE the mount, or the rig keeps solving the arms to a weapon
+   that is no longer drawn — the latched-mode bug this repo has written down twice (ENTRY paths
+   don't guard what EXIT paths clear). Every exit from armed goes through here. */
+function setArmed(on) {
+  const want = !!on && sidearm.loaded;
+  armed = sidearm.setArmed(want);
+  const h = hero.handle;
+  if (h && h.setMountIK) h.setMountIK(armed ? sidearm.mountTargets : null);
+  return armed;
+}
+
 const ropeGeo = new THREE.BufferGeometry();
 ropeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
 const rope = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: '#f2f4f8' }));
@@ -741,6 +796,12 @@ const lockAim = createPointerLockAim({
   onButton: (btn, down) => {
     if (!down || MODE !== 'walk') return;
     if (btn === 0) {
+      /* A-GUN: LMB is MODAL. Armed, it fires; stowed, it keeps the lock scheme this room shipped
+         with, untouched. Splitting on the weapon rather than adding a third button is what keeps
+         the walker's existing verbs — and the probe assertions that pin them — exactly as they
+         were: with the sidearm stowed (the default) nothing below this line has changed. The
+         HOLD-to-keep-firing half lives in the frame loop, gated by the weapon's own cooldown. */
+      if (armed) return;
       if (targetLock.lock(aimHit)) flash('LOCKED — right-click to web it');
       else flash('nothing under the crosshair to lock');
     } else if (btn === 2) {
@@ -992,6 +1053,11 @@ function setMode(m) {
     inst.body.group.visible = true;
     hero.group.visible = false;
     rope.visible = false; anchorDot.visible = false;
+    /* A-GUN: getting into a craft STOWS the sidearm — and it goes through `setArmed(false)` rather
+       than just hiding the mesh, so the rig's mount-IK is released too. Hiding alone would leave
+       the arms solving to an invisible weapon for the whole ride: the exact latched-mode shape of
+       the walk→drive freeze this room already fixed once. */
+    setArmed(false);
     inst.cam.reset(st.yaw);
     flash(spec.hint);
   } else {
@@ -1049,6 +1115,13 @@ addEventListener('keydown', (e) => {
   if (k === ' ') spacePulse = true;
   if (k === 'v') { if (MODE === 'walk') character.toggleView(); else { view = view === 'third' ? 'first' : 'third'; flash(`view: ${view}`); } }
   if (k === 'r') { spawn(); flash('respawned'); }
+  /* A-GUN: G draws / holsters the sidearm. Walk mode only — a rider has both hands on the grips,
+     and arming mid-ride would have the mount-IK solving the same two hands to two places at once. */
+  if (k === 'g') {
+    if (MODE !== 'walk') flash('you need both hands to ride — press B to get out first');
+    else if (!sidearm.loaded) flash('sidearm did not load — see the console');
+    else flash(setArmed(!armed) ? 'sidearm OUT — LMB fires' : 'sidearm stowed — LMB locks again');
+  }
   /* B is the GET IN / GET OUT key it always was, but it now returns you to the craft you last
      drove rather than always to the bike — with seven bodies, "the toggle" has to remember. */
   if (k === 'b') pick(MODE === 'walk' ? lastVehicle : 'walk');
@@ -1386,7 +1459,40 @@ function frame() {
     if (clear < minClear.walk) minClear.walk = clear;
     noteRegion(character.x, character.z);
 
+    /* ---- A-GUN: AIM THE WEAPON, THEN LET THE RIG PUT THE HANDS ON IT ------------------------
+       ORDER IS THE WHOLE TRICK, and it is why these four lines sit HERE and not after
+       `hero.update`. The rig solves the mount-IK arms to the weapon's socket world positions
+       INSIDE `hero.update`; place the weapon after that call and the hands spend every frame
+       reaching for where the gun was last frame. Placed before it, aim → weapon → hands all
+       resolve inside one frame with no lag to smear the angle a probe is about to measure.
+       The body also turns to the LOOK while armed. `character.update` only writes
+       `state.yaw = lookYaw` WHILE MOVING, so a standing player who spins the view keeps the old
+       facing — and an aim 180° behind the body is then not reachable by any arm, which shows up
+       as a metre of mount-IK residual rather than as a pose. Re-asserting the yaw is a one-line
+       no-op on the look itself (`setYaw` writes lookYaw back to the value it already holds) and
+       turns only the torso, which is what a person aiming actually does. ---- */
+    if (armed) {
+      character.setYaw(character.lookYaw);
+      sidearm.aim(s, gunTarget(), character.lookYaw);
+      if (lockAim.down(0)) sidearm.fire();
+    }
     hero.update(dt, s, { view: character.view, lookYaw: character.lookYaw, anchor: s.anchor });
+    /* ---- A-GUN: PRE-POSE THE ARM WITH THE RIG'S OWN AIM LAYER, and why this line is AFTER the
+       update and not before it. `createHeroBody.update` ends by calling `handle.setAim(null)` for
+       every pose that is not a swing or a cling, so a target set before it is wiped in the same
+       call; set here, it is read by the aim layer on the NEXT frame. That one-frame stagger costs
+       nothing, because this layer is only a STARTING POSE — the mount pass, which runs later in the
+       very same rig update, is what actually puts the wrist on the grip, and it uses this frame's
+       socket position.
+       WHY IT IS NEEDED AT ALL, measured. `_solveTwoBone` picks its bend plane from the CLIP pose's
+       own elbow, `cross(upperArm, foreArm)` — and the mixer rewrites the clip pose every frame, so
+       an idle whose arms hang nearly straight hands the solver a degenerate cross product on EVERY
+       frame, not just the first. Standing armed, the right-hand residual drifted 0.0119 → 0.0141 u
+       across eight samples while the same body WALKING (arms swinging, elbow properly bent) sat at
+       0.0004–0.0026 u with the identical reach ratio. The aim layer's own `-0.4 rad` elbow bend
+       (createCharacterRig.js:911) is exactly the missing ingredient, and it turns the chest toward
+       the target as a bonus — so this is the engine's existing answer to the problem, not a new one. */
+    if (armed) { const h = hero.handle; if (h && h.setAim) h.setAim(gunTarget()); }
     if (s.anchor) {
       const p = ropeGeo.attributes.position;
       _hand.set(character.x, character.y + EYE * 0.6, character.z);
@@ -1448,6 +1554,12 @@ function frame() {
   }
   rig.update(dt);
 
+  /* A-GUN: the projectiles step EVERY frame, in the shared tail rather than inside the walk
+     branch — a bullet already in the air must keep flying (and keep being able to hit something)
+     if you holster mid-shot or jump into a car the moment after you fire. Cheap when nothing is
+     live: the pool loop is 32 slots of a flag test. */
+  sidearm.update(dt);
+
   /* ---- 8c. THE CLOUD TICK + THE PRESENT (A-SKYWORLD). The update sits AFTER `rig.update` on
      purpose: the pass rebuilds a world ray per pixel from the camera's inverse-projection and
      world matrix, so it must read the pose this frame will actually be RENDERED with, not last
@@ -1491,8 +1603,92 @@ window.__arena = arena;
 window.__character = character;
 window.__char = character.state;
 window.__swingProfile = SWING;
-window.__hero = { get rigged() { return hero.rigged; }, get pose() { return hero.pose; }, ready: hero.ready };
+/* A-GUN (2026-08-22): this room published a THREE-FIELD `__hero`, and that was enough to keep
+   `walkrun-guard` — the guard that exists precisely to protect the owner's favourite walk and run —
+   from being able to run here AT ALL. It reads `bonePos`, `gaitLabel` and `contact`; world-lab had
+   none of them, so the only committed baseline in the repo is swing-lab's and the guard in the
+   verify gate has never once looked at THIS room's gait. That is guard-scope blindness of the exact
+   kind the ledger keeps recording: the guard was green, and green covered a room this arc is not
+   shipping in. The handles below are the swing-lab set, verbatim in name and meaning, so one
+   instrument now measures both rooms. Read-only getters — they publish, they do not animate. */
+window.__hero = {
+  get rigged() { return hero.rigged; },
+  get pose() { return hero.pose; },
+  get gait() { return hero.gait; },
+  get gaitLabel() { return hero.gaitLabel; },
+  get scale() { return hero.scale; },
+  get height() { return hero.bodyHeight; },
+  get airMode() { return hero.airMode; },
+  get airWeight() { return +hero.airWeight.toFixed(4); },
+  get poseWeight() { return +hero.poseWeight.toFixed(4); },
+  get contact() { const c = hero.contact; return c ? { active: c.active, w: +c.w.toFixed(3), handL: +c.handL.toFixed(4), handR: +c.handR.toFixed(4), footL: +c.footL.toFixed(4), footR: +c.footR.toFixed(4) } : null; },
+  /* A-GUN: the MOUNT report — the mount-IK pass's own live receipt. `w` is the eased weight and it
+     is the CONFOUND in every hand-contact reading: the pass lerps its solve target from the limb's
+     current end by `w`, so a residual measured while it eases in is large on a perfectly correct
+     mount. A probe must wait for w ≈ 1 before believing a distance, and it can only do that if the
+     weight is published beside it. -1 on a limb means "no chain or no target", never "0 u away". */
+  get mount() { const h = hero.handle, m = h && h.mountReport; return m ? { active: m.active, w: +m.w.toFixed(3), handL: +m.handL.toFixed(4), handR: +m.handR.toFixed(4), footL: +m.footL.toFixed(4), footR: +m.footR.toFixed(4) } : null; },
+  /* A NAMED BONE IN THE RIG ROOT'S OWN FRAME — the only frame in which "did the limb move" asks
+     about the POSE and not about the body (swing-lab's own note explains why a yaw-only derotation
+     was wrong). Rescaled by the measured GLB scale so the numbers are WORLD units.
+     Probe-only: allocates a Vector3 per call, never a frame path. */
+  bonePos(name) {
+    const v = new THREE.Vector3(NaN, NaN, NaN);
+    hero.bonePoint(name, v);
+    const o = hero.object;
+    if (!Number.isFinite(v.x) || !o) return null;
+    o.updateMatrixWorld(true);
+    o.worldToLocal(v).multiplyScalar(hero.scale || 1);
+    return { x: v.x, y: v.y, z: v.z };
+  },
+  boneWorld(name) { const v = new THREE.Vector3(NaN, NaN, NaN); hero.bonePoint(name, v); return Number.isFinite(v.x) ? { x: v.x, y: v.y, z: v.z } : null; },
+  ready: hero.ready,
+};
 window.__aim = { pt: _aimPt, get hit() { return !!aimHit; }, get inRange() { return !!character.state.aimInRange; }, get locked() { return lockAim.locked; } };
+/* A-GUN probe handles. Everything here is READ OFF THE APPLIED SCENE TRANSFORM rather than
+   recomputed from the aim inputs — `forward` comes out of the weapon's own matrixWorld, the socket
+   points out of the socket nodes' world positions. That distinction is the difference between a
+   check and a tautology: recomputing the aim would agree with itself no matter how badly the
+   transform had been applied, and would have nothing to say about a wrong Euler order, a stale
+   matrix, a lost parent or an up-vector that degenerated looking straight up.
+   `target` publishes the point the weapon was ACTUALLY aimed at this frame — including the
+   far-ray fallback for open sky — so the probe measures against the same ray the player sees. */
+window.__gun = {
+  get loaded() { return sidearm.loaded; },
+  get mode() { return sidearm.mode; },
+  get armed() { return armed; },
+  arm: (on) => setArmed(on),
+  fire: () => sidearm.fire(),                 // the REAL fire path — the same call the frame loop makes
+  /* `lastShot` is COPIED, not aliased — it is the module's one reused scratch object, so handing the
+     live reference across the seam would give a probe a "receipt" that keeps changing under it (the
+     createTargetLock lesson, which exists in this engine precisely because that bug is invisible in
+     every still and wrong in every frame of motion). `aimDir` is published separately and labelled
+     as live: it is where the weapon points NOW, never where a past shot went. */
+  get report() { const r = sidearm.report; return { armed: r.armed, loaded: r.loaded, fired: r.fired, hits: r.hits, misses: r.misses, live: r.live, lastHit: r.lastHit ? { ...r.lastHit } : null, lastShot: r.lastShot ? { ...r.lastShot } : null, aimDirLive: r.aimDir ? { ...r.aimDir } : null }; },
+  /* THE RETICLE'S OWN POINT, republished here so a check can relate the WEAPON to what the PLAYER
+     sees. `__aim.pt` is filled by `resolveAimPoint` for the crosshair — a different call, on a
+     different frame path, from the `gunTarget()` the weapon is aimed with. Comparing the weapon's
+     forward against THIS closes the one gap a self-consistent aim check cannot see: that the weapon
+     and the crosshair might both be pointing, in perfect agreement, down the wrong ray. */
+  reticle() { return aimHit ? { x: _aimPt.x, y: _aimPt.y, z: _aimPt.z } : null; },
+  /* IS THE WEAPON ACTUALLY IN SHOT? Projects the grip and muzzle sockets through the LIVE camera and
+     reports normalised device coordinates, so a capture tool can assert its subject is in frame
+     instead of trusting that it framed correctly. This arc produced two captures of empty scenery
+     — one of empty sky, one of an empty meadow — and both times the fix was framing code with no
+     check behind it. Probe-only: allocates a Vector3 per call, never a frame path. */
+  onScreen() {
+    const g = sidearm.socketPoint('grip', { x: 0, y: 0, z: 0 });
+    const m = sidearm.socketPoint('muzzle', { x: 0, y: 0, z: 0 });
+    if (!g || !m) return null;
+    const pr = (p) => { const v = new THREE.Vector3(p.x, p.y, p.z).project(rig.camera); return { x: +v.x.toFixed(3), y: +v.y.toFixed(3), z: +v.z.toFixed(3) }; };
+    const a = pr(m), b = pr(g);
+    const ok = (v) => v.z > -1 && v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1;
+    return { muzzle: a, grip: b, ok: ok(a) && ok(b) };
+  },
+  forward() { const o = { x: 0, y: 0, z: 0 }; sidearm.forward(o); return o; },
+  socket(which) { const o = { x: 0, y: 0, z: 0 }; return sidearm.socketPoint(which, o) ? o : null; },
+  target() { const t = MODE === 'walk' ? gunTarget() : null; return t ? { x: t.x, y: t.y, z: t.z } : null; },
+};
 window.__lock = {
   get has() { return targetLock.has; },
   get point() { return targetLock.has ? { ...targetLock.point } : null; },

@@ -80,8 +80,10 @@ export { FORGE_MIN_TEXELS, createTextureForge, nyquistFeatureFloor, repeatFor } 
 export { createTorchLight, torchFlicker } from './src/createTorchLight.js';
 export { createWaterSurface } from './src/createWaterSurface.js';
 export { createWeaponKit } from './src/createWeaponKit.js';
+export { createCarriedWeapon, CARRY_GEOMETRY } from './src/carried-weapon.js';
 export { createDebugOverlay } from './src/debug-overlay.js';
-export { HOARD_SURFACES, WEAPON_SKINS, forgeHoardMaterials, CITY_SURFACES, forgeCityMaterials, CITY_LOOKS } from './src/forge-recipes.js';
+export { HOARD_SURFACES, WEAPON_SKINS, forgeHoardMaterials, CITY_SURFACES, forgeCityMaterials, CITY_LOOKS,
+  TERRAIN_SURFACES, forgeTerrainMaterials } from './src/forge-recipes.js';   // A-FLORA: sand/rock/grass, triplanar
 export { SIM_DEFAULTS } from './src/graph-sim.js';
 export { applyGroundMacro } from './src/ground-macro.js';
 export { createTriplanarForgeMaterial, tilesPerUnit } from './src/triplanar-forge.js';
@@ -125,7 +127,18 @@ export { createMessier } from './src/createMessier.js';
 export { ASTRONOMY_CREDITS, getAttribution } from './src/astronomy-credits.js';
 export { createForest, placeForest } from './src/createForest.js';
 // A-TREEKIT — modeled conifer kit loader + per-instance tint seam (pure helpers included: receipts + tests)
-export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS } from './src/createTreeKit.js';
+/* A-FLORA adds the second tree family (broadleaf + dead) and the four ground-cover families, split
+   per family on purpose so a room can plant dead snags sparsely instead of uniformly.
+   KEEP COMMENTS OUT OF THE BRACES. They used to sit at the end of each line INSIDE this list, and
+   `generate-capability-index.mjs` parsed the comment text as capability names — the committed index
+   shipped two entries literally called "// A-FLORA: the ground layer" and "// A-FLORA: the second
+   tree family\n  GROUNDCOVER_BUSH_VARIANTS", the second of which SWALLOWED a real export so it had
+   no entry at all. Caught by A-FLORA's refutation, 2026-08-22; guarded now in
+   capability-index-guard.test.mjs so a name that is obviously not an identifier fails loudly. */
+export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS,
+  BROADLEAF_KIT_VARIANTS, DEAD_KIT_VARIANTS,
+  GROUNDCOVER_BUSH_VARIANTS, GROUNDCOVER_FERN_VARIANTS,
+  GROUNDCOVER_TUFT_VARIANTS, GROUNDCOVER_ROCK_VARIANTS } from './src/createTreeKit.js';
 export { createFlowField } from './src/createFlowField.js';
 export { createBallistics } from './src/createBallistics.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';

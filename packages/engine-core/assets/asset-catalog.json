@@ -92,6 +92,42 @@
     "meshes": null
   },
   {
+    "path": "packages/engine-core/assets/models/broadleaf_kit.glb",
+    "home": "engine-core-library",
+    "label": "broadleaf_kit.glb",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 80708,
+    "sha256": "88e61ffd34368417de3f0ac981908709221b1eeb71e967e95554329ee1051007",
+    "tris": 804,
+    "meshes": 6
+  },
+  {
+    "path": "packages/engine-core/assets/models/broadleaf_kit.usdz",
+    "home": "engine-core-library",
+    "label": "broadleaf_kit.usdz",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 43701,
+    "sha256": "0359df96ed0143e140e487bcd69dbae6be38df456c25e228fc63d00157897816",
+    "tris": null,
+    "meshes": null
+  },
+  {
     "path": "packages/engine-core/assets/models/building-g.glb",
     "home": "engine-core-library",
     "label": "building-g.glb",
@@ -161,6 +197,42 @@
     },
     "sizeBytes": 11002,
     "sha256": "191bec3889aaaca5018380038fecc129ebb5c2182879a099b7b538b3fa050b5d",
+    "tris": null,
+    "meshes": null
+  },
+  {
+    "path": "packages/engine-core/assets/models/groundcover_kit.glb",
+    "home": "engine-core-library",
+    "label": "groundcover_kit.glb",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 49424,
+    "sha256": "a61b1f7073424ae6ac2e309e0a975617fffd006bc182cda62acbef9987088068",
+    "tris": 368,
+    "meshes": 8
+  },
+  {
+    "path": "packages/engine-core/assets/models/groundcover_kit.usdz",
+    "home": "engine-core-library",
+    "label": "groundcover_kit.usdz",
+    "classification": "LIBRARY",
+    "licence": {
+      "type": "UNKNOWN",
+      "source": null,
+      "note": "no CREDITS/LICENSES entry found and no first-party generator identified — verify and record before shipping"
+    },
+    "provenance": {
+      "kind": "unknown"
+    },
+    "sizeBytes": 27529,
+    "sha256": "175ae85aefe8923063d932e38c3e46a28e5ee3daf97f8b48bef9abd43275aa71",
     "tris": null,
     "meshes": null
   },

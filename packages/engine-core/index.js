@@ -316,13 +316,20 @@ export { createForest, placeForest } from './src/createForest.js';
 // ARC A-TREEKIT — the MODELED forest: the Blender conifer kit (4 variants, one generator, albedo×AO in
 // COLOR_0) instanced over any placer's placements, with seeded per-instance hue/value tints — the bounded
 // proof's colour-variety gap, closed as an engine seam. Pure helpers exported for node tests + receipts.
-export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS } from './src/createTreeKit.js';
+/* A-FLORA's second tree family + the four ground-cover families, split per family so a room can
+   plant dead snags sparsely. COMMENTS STAY OUT OF THE BRACES — inside, the capability-index parser
+   reads them as capability names and one of them swallowed a real export (refutation, 2026-08-22). */
+export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TREE_KIT_VARIANTS,
+  BROADLEAF_KIT_VARIANTS, DEAD_KIT_VARIANTS,
+  GROUNDCOVER_BUSH_VARIANTS, GROUNDCOVER_FERN_VARIANTS,
+  GROUNDCOVER_TUFT_VARIANTS, GROUNDCOVER_ROCK_VARIANTS } from './src/createTreeKit.js';
 
 // Beauty B1 GROUND TRUTH — the GPU TEXTURE FORGE: seeded procedural PBR (albedo/ORM/Sobel-normal) baked
 // at boot from periodic-noise family shaders, so a world stops being flat-coloured. Recipes live in
 // forge-recipes.js; a project wires the materials. supported=false on iOS-p0 (bake skipped, flat fallback).
 export { createTextureForge, nyquistFeatureFloor, repeatFor, FORGE_MIN_TEXELS } from './src/createTextureForge.js';
-export { HOARD_SURFACES, forgeHoardMaterials, WEAPON_SKINS, CITY_SURFACES, forgeCityMaterials, CITY_LOOKS } from './src/forge-recipes.js';
+export { HOARD_SURFACES, forgeHoardMaterials, WEAPON_SKINS, CITY_SURFACES, forgeCityMaterials, CITY_LOOKS,
+  TERRAIN_SURFACES, forgeTerrainMaterials } from './src/forge-recipes.js';   // A-FLORA: sand/rock/grass, triplanar
 // Arc A7-1 — world-scale macro de-tiling for a tiled floor (breaks the iso-distance repeat grid a single
 // tile can't, since a tile holds no feature bigger than itself). Opt-in via onBeforeCompile → byte-safe.
 export { applyGroundMacro } from './src/ground-macro.js';
@@ -375,6 +382,12 @@ export { cityProfileFromUrban, URBAN_ERAS } from './src/urban-profile.js';
 // handful of draw calls, skinned by a forge gunmetal material. The wielder (hand bone / FP viewmodel) + the
 // recoil layer + the unified shot event give it FEEL; this builds the ART.
 export { createWeaponKit } from './src/createWeaponKit.js';
+
+// ARC A-GUN — a body CARRIES a weapon: the carry transform (where a held thing hangs off a body and how it
+// turns to face an aim point), the mount-IK sockets that put real hands on it, and a shot fired from the
+// weapon's own muzzle along its own axis with a counted receipt. Distinct from createWeaponKit above, which
+// BUILDS a gun at runtime for hoard2's first-person viewmodel; this one WIELDS a modelled one (sidearm.glb).
+export { createCarriedWeapon, CARRY_GEOMETRY } from './src/carried-weapon.js';
 
 // Lesson M3 — flow-field horde pathing: one grid solve steers a whole crowd around obstacles (a moving
 // target, tree colliders + barriers), each agent paying a single array lookup per step. Pure math (no

@@ -36,8 +36,31 @@
    but the FALLBACK differs by design: the bike degrades INSIDE (box bike), while a forest's
    procedural fallback is the caller's own placer-built group, so `ready` resolving 'failed'
    hands the decision back (moto-lab rebuilds the procedural trees, loudly). Contract:
-     createTreeKit({ url }) -> { ready, mode, variants, counts, buildGroup(list, opts),
-                                 tintReport(), dispose() }
+     createTreeKit({ url, variants, type, sway }) -> { ready, mode, variants, counts,
+                                 buildGroup(list, opts), tintReport(), dispose() }
+
+   ── A-FLORA (2026-08-21): THE SAME SEAM NOW LOADS ANY KIT, NOT JUST THE CONIFERS ────────────────
+   Two more kits came out of the Blender pipeline in the same shape as tree_kit.glb — one
+   instanced, vertex-coloured, one-primitive mesh per named variant:
+     broadleaf_kit.glb   4 broadleaf + 2 dead-snag variants (build_broadleaf_kit.py)
+     groundcover_kit.glb 2 bushes + 2 ferns + 2 tufts + 2 boulders (build_groundcover_kit.py)
+   Nothing about this module was conifer-specific EXCEPT two hard-coded constants: the variant
+   NAME LIST and the `userData.type` stamp. Both are now parameters, so loading a second family is
+   a call-site argument rather than a second loader. `variants` defaults to TREE_KIT_VARIANTS and
+   `type` to 'tree', which is exactly what the two existing call sites (moto-lab, world-lab) pass
+   implicitly — they are byte-identical, unchanged, untouched.
+
+   WHY `type` HAD TO BECOME A PARAMETER, and this is not cosmetic: hashTreeInstances below counts
+   every InstancedMesh whose userData.type === 'tree'. If a ground-cover kit stamped 'tree' too,
+   moto-lab's placement-identity hash (e9de9e9 over 641 instances — the receipt that proves the
+   forest did not move) would silently start including bushes and rocks, and the number that exists
+   to catch a moved tree would change for a reason that has nothing to do with trees. A shared
+   receipt is only trustworthy while the thing it counts stays defined.
+
+   ON TINTING NON-FOLIAGE: makeTreeTints' hue poles are green by default. A boulder wants VALUE
+   variety, not hue variety — pass `{ sat: 0 }`, which drives the model to its own w=0 special case
+   (a pure grey multiplier) and gives rocks lighter/darker without turning any of them olive. That
+   is a parameter that already existed, named here so the next caller finds it.
    ============================================================ */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';   // the in-convention loader (moto.js/landmarks.js)
@@ -45,6 +68,20 @@ import { mulberry32 } from './citygen.js';
 import { attachVertexAO } from './vector-style.js';
 
 export const TREE_KIT_VARIANTS = ['tree_conifer_a', 'tree_conifer_b', 'tree_conifer_c', 'tree_conifer_d'];
+
+/* A-FLORA's two families, as name lists a caller passes to `variants`. Split BROADLEAF from DEAD
+   deliberately even though they ship in ONE glb: a forest wants broadleaves at canopy density and
+   snags as a sparse accent, so the ratio is the CONSUMER's decision, not the file's. A caller that
+   genuinely wants them mixed uniformly passes [...BROADLEAF, ...DEAD]. */
+export const BROADLEAF_KIT_VARIANTS = ['tree_broadleaf_a', 'tree_broadleaf_b', 'tree_broadleaf_c', 'tree_broadleaf_d'];
+export const DEAD_KIT_VARIANTS = ['tree_dead_a', 'tree_dead_b'];
+/* Ground cover, split by family for the same reason — a hillside wants its own tuft:rock ratio,
+   and `assignTreeVariants` distributes NEAR-UNIFORMLY across whatever list it is handed. Handing it
+   all eight would put as many boulders on a lawn as grass tufts. */
+export const GROUNDCOVER_BUSH_VARIANTS = ['gc_bush_a', 'gc_bush_b'];
+export const GROUNDCOVER_FERN_VARIANTS = ['gc_fern_a', 'gc_fern_b'];
+export const GROUNDCOVER_TUFT_VARIANTS = ['gc_tuft_a', 'gc_tuft_b'];
+export const GROUNDCOVER_ROCK_VARIANTS = ['gc_rock_a', 'gc_rock_b'];
 
 /* ---- WHICH VARIANT WHERE — pure, seeded, node-tested. A SEPARATE mulberry32 stream (the placer's
    RNG is never consumed → positions cannot move; Rule-15-style receipt: the A/B position hash).
@@ -107,8 +144,9 @@ export function hashTreeInstances(root) {
   return { hash: sum.toString(16), count };
 }
 
-export function createTreeKit({ url } = {}) {
+export function createTreeKit({ url, variants = TREE_KIT_VARIANTS, type = 'tree', sway = true } = {}) {
   if (!url) throw new Error('createTreeKit: `url` is required — import it from \'@lgr/engine-core/assets/models/tree_kit.glb?url\' (the pedestrians.js rule: a ?url inside the lib would inline the asset into every bundle)');
+  if (!Array.isArray(variants) || variants.length === 0) throw new Error('createTreeKit: `variants` must be a non-empty array of glTF node names — pass one of the exported *_VARIANTS lists, or omit it for the conifer kit');
   let mode = 'loading';
   const kit = [];                         // [{ name, geometry, material }] once loaded — kit-owned
   let pending = null;                     // the latest buildGroup call made before the GLB arrived
@@ -130,7 +168,8 @@ export function createTreeKit({ url } = {}) {
       const inst = new THREE.InstancedMesh(v.geometry, v.material, Math.max(1, perVariant[vi]));
       inst.count = perVariant[vi];
       inst.castShadow = true; inst.receiveShadow = false; inst.frustumCulled = true; inst.raycast = () => {};
-      inst.userData.type = 'tree';        // hashTreeInstances + any 'tree' traversal finds both arms
+      inst.userData.type = type;          // 'tree': hashTreeInstances + any 'tree' traversal finds both
+                                          // arms. A non-foliage kit MUST pass its own (see the header).
       inst.userData.variant = v.name;
       inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, perVariant[vi]) * 3), 3);
       return inst;
@@ -154,18 +193,24 @@ export function createTreeKit({ url } = {}) {
   }
 
   const ready = new GLTFLoader().loadAsync(url).then((gltf) => {
-    for (const name of TREE_KIT_VARIANTS) {
+    for (const name of variants) {
       const node = gltf.scene.getObjectByName(name);
-      /* all four or none — a partial kit means a broken regeneration; degrade whole, loudly
-         (the createCrowdTiers.js:116 convention, the same shape createBikeGlbMesh uses). */
-      if (!node || !node.isMesh) throw new Error(`tree_kit.glb is missing variant '${name}' — re-run tools/blender/build_tree_kit.py and read its RECEIPT lines`);
+      /* ALL of them or none — a partial kit means a broken regeneration; degrade whole, loudly
+         (the createCrowdTiers.js:116 convention, the same shape createBikeGlbMesh uses). The
+         messages name the URL rather than 'tree_kit.glb' now that three kits load through here —
+         an error that names the wrong file sends the reader to the wrong generator. */
+      if (!node || !node.isMesh) throw new Error(`${url} is missing variant '${name}' — re-run its generator under tools/blender/ and read the RECEIPT lines`);
       const material = node.material;
-      if (!material.vertexColors) throw new Error(`tree_kit.glb variant '${name}' arrived without vertex colours — the COLOR_0 (albedo×AO) bake is the kit's whole texture story; re-run the generator`);
+      if (!material.vertexColors) throw new Error(`${url} variant '${name}' arrived without vertex colours — the COLOR_0 (albedo×AO) bake is the kit's whole texture story; re-run the generator`);
       /* the house vegetation material seams, attached to the GLB's own material: beauty-tier aAo
          darkening is a bit-exact no-op here (no aAo attribute — documented safe), and the L94
          SWAY makes kit foliage breathe in any wind-driven room exactly like scatter props (the
-         moto room drives no wind, so it stays byte-still there). */
-      attachVertexAO(material, { sway: true });
+         moto room drives no wind, so it stays byte-still there).
+         A-FLORA: `sway` is a parameter now, defaulting TRUE so the conifer call sites compile the
+         same program they did. It has to be, because this loader now also carries BOULDERS, and a
+         boulder that breathes in the wind is not a boulder. The bug would have been invisible in
+         moto-lab (no wind driven) and obvious in the first room that did — the worst kind. */
+      attachVertexAO(material, { sway });
       kit.push({ name, geometry: node.geometry, material });
     }
     mode = 'kit';
