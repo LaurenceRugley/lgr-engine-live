@@ -339,6 +339,16 @@ export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TR
   GROUNDCOVER_BUSH_VARIANTS, GROUNDCOVER_FERN_VARIANTS,
   GROUNDCOVER_TUFT_VARIANTS, GROUNDCOVER_ROCK_VARIANTS } from './src/createTreeKit.js';
 
+// ARC A-FACADE — the MODELED skyline: the Blender facade kit (5 variants, one generator, corner piers +
+// recessed glazing courses, albedo×AO in COLOR_0) drawn in place of createBoxArena's unit cubes for the
+// building BODIES only. Collider, guarantees and anchors are untouched — a facade replaces the WALL, never
+// the shape. Variant choice is a function of instance HEIGHT, not a seeded roll: see the module header's
+// measured aspect distribution. Pure helpers exported for node tests + receipts.
+/* COMMENTS STAY OUT OF THE BRACES — inside, the capability-index parser reads them as capability
+   names and one of them swallowed a real export (refutation, 2026-08-22). */
+export { createFacadeKit, assignFacadeVariants, facadeFitReport, storeyU,
+  FACADE_KIT_VARIANTS, FACADE_KIT_COURSES, FACADE_BODY_KINDS } from './src/createFacadeKit.js';
+
 // Beauty B1 GROUND TRUTH — the GPU TEXTURE FORGE: seeded procedural PBR (albedo/ORM/Sobel-normal) baked
 // at boot from periodic-noise family shaders, so a world stops being flat-coloured. Recipes live in
 // forge-recipes.js; a project wires the materials. supported=false on iOS-p0 (bake skipped, flat fallback).

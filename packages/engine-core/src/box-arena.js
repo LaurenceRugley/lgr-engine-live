@@ -58,6 +58,8 @@
                           //   sampler). null = the flat `() => groundY` the bag always had.
      ground,              // false = no flat floor plane (the married room's terrain mesh IS the
                           //   ground). Default true — the plane every existing consumer stands on.
+     facade,              // A-FACADE opt-in — a createFacadeKit handle. null (default) = the one
+                          //   InstancedMesh of unit boxes, untouched. See the A-FACADE note below.
    }) -> {
      world,               // { heightAt, surfaceAt, segmentHit, resolveSphere } — the query bag
      collider,            // the raw createColliderWorld handle (depthAt/probe/boxAt for probes)
@@ -138,6 +140,30 @@
    (never both — they are partitioned, not duplicated), which costs exactly one extra draw call and only
    when a consumer asks for it. Their AABBs stay in the same packed buffer, so an emissive sign is still
    something you can web.
+
+   ---- A-FACADE (2026-08-22): THE BODIES BECOME MODELLED BUILDINGS. THE PHYSICS DOES NOT MOVE. --------
+   Everything above buys VOCABULARY out of boxes, and A-DRESS's own measured verdict is that the
+   vocabulary is the resource the traversal spends. What none of it buys is a WALL that is not a flat
+   untextured quad, and every room that shows a city is looking at those walls.
+
+   `facade` takes a `createFacadeKit` handle and re-partitions the SAME box list one more time: boxes
+   whose kind is in `facade.kinds` (the building BODIES — 'tower' and 'setback') come out of the main
+   InstancedMesh and are drawn instead by one InstancedMesh per kit variant, each a modelled facade —
+   corner piers, recessed glazing courses, a cornice — authored at UNIT size so its instance matrix is
+   the very (w, h, d) the unit box was getting. Which variant an instance takes is a function of its own
+   HEIGHT (createFacadeKit's header has the measurement that forces it).
+
+   THREE THINGS DO NOT CHANGE, and they are the whole reason this is safe to do:
+     · `solids`, `boxes` and the collider are untouched — the partition happens AFTER the packed buffer
+       is built and re-bucketed, exactly as the emissive one does. A facade is a rendering fact.
+     · `roofAt`, `topAt`, `stats.swingable` and every anchor read the same floats. The guarantee counts
+       what it counted.
+     · With `facade` null, or its kit still loading, or its GLB failed, not one statement of the new
+       code runs and `mainIdx` is the old list in the old order. The cubes ARE the fallback, which is
+       also the `?buildings=box` control arm — one build, two URLs.
+   THE COST IS DRAW CALLS, and it is stated rather than hidden: one per variant that has instances (the
+   shipped kit is five) in exchange for the whole skyline's walls. Silhouette variety stays with the
+   boxes; a facade replaces the WALL, never the shape.
    ============================================================ */
 import * as THREE from 'three';
 import { createColliderWorld } from './collide.js';
@@ -278,6 +304,11 @@ export function createBoxArena(opts = {}) {
     groundYAt: null,
     heightAt: null,
     ground: true,
+    /* A-FACADE: null keeps the one-mesh-of-cubes path verbatim (see the header). A handle whose
+       `mode` is anything but 'kit' — still loading, or its GLB failed — is treated as null, which
+       is what makes the async load safe: the city renders as cubes immediately and the consumer
+       calls `rebuild({})` when `facade.ready` resolves. */
+    facade: null,
     ...opts,
   };
   if (P.depth == null) P.depth = P.width;
@@ -299,6 +330,10 @@ export function createBoxArena(opts = {}) {
      empty and `mainIdx` is 0..n-1 in order, i.e. the old loop with an indirection that resolves to
      itself. */
   let mainIdx = [], emIdx = [];
+  /* A-FACADE: a THIRD slice of the same index space — bodyIdx[v] is the box indices variant v
+     draws. Empty (and `bodyMeshes` null) whenever no kit is wired or ready, which is what keeps
+     the default path's `mainIdx` the untouched 0..n-1 list. */
+  let bodyIdx = [], bodyMeshes = null;
   let emMesh = null, ownedEmMat = null;
   /* A-DRESS: the per-tower DISTRICT id, keyed the same way `buildBridges` keys its neighbour lookup.
      Filled only on the skyline path; read only by the palette. */
@@ -348,9 +383,46 @@ export function createBoxArena(opts = {}) {
        partitioned — that is the point: which mesh draws a box is a rendering fact, and the collider
        must never learn about rendering facts. */
     const em = (P.silhouette && P.silhouette.emissiveKinds) || null;
+    /* A-FACADE: a kit only takes part once it has actually loaded. Any other `mode` — 'loading',
+       'failed' — reads as absent, so the arena renders cubes and keeps rendering them if the GLB
+       never arrives. An unavailable capability must degrade to the control arm, never to a hole. */
+    const fac = P.facade && P.facade.mode === 'kit' && P.facade.parts.length ? P.facade : null;
     mainIdx = []; emIdx = [];
+    bodyIdx = fac ? fac.parts.map(() => []) : [];
+    const body = [];
     for (let k = 0; k < boxes.length; k++) {
-      if (em && em.indexOf(boxes[k].kind) >= 0) emIdx.push(k); else mainIdx.push(k);
+      const kind = boxes[k].kind || 'tower';
+      if (em && em.indexOf(kind) >= 0) { emIdx.push(k); continue; }
+      /* THE EMISSIVE PARTITION WINS A TIE, and it has to: a consumer that named 'tower' emissive
+         and also wired a facade meant the unlit mesh, and drawing the box twice is the one thing
+         a partition must never do. */
+      if (fac && fac.kinds.indexOf(kind) >= 0) { body.push(k); continue; }
+      mainIdx.push(k);
+    }
+    if (body.length) {
+      /* HEIGHT decides the variant (createFacadeKit's header has the measurement). Assigned in ONE
+         call over the whole list rather than per box, because the assignment is a pure function of
+         the heights and a caller can then re-run the identical arithmetic to audit it. */
+      const hs = new Float64Array(body.length);
+      for (let n = 0; n < body.length; n++) hs[n] = boxes[body[n]].h;
+      const which = fac.assign(hs);
+      /* THE ASSIGNER IS NOT TRUSTED TO AGREE WITH THE PARTS LIST. `facade` is a public seam, and a
+         handle whose `assign` was built from a longer `courses` table than the GLB actually
+         delivered returns an index past the end — which used to be a raw `undefined.push` TypeError
+         at level-build time, i.e. a crash rather than a diagnosis (found by an adversarial pass,
+         2026-08-22). createFacadeKit itself cannot produce that (it throws on a
+         variants/courses mismatch and loads all-or-nothing), so this is about the SEAM, not the
+         shipped kit. Fail loud and name both numbers. */
+      if (which.length !== body.length) {
+        throw new Error(`createBoxArena: facade.assign returned ${which.length} indices for ${body.length} body boxes — one per box is the contract`);
+      }
+      for (let n = 0; n < body.length; n++) {
+        const v = which[n];
+        if (!(v >= 0 && v < bodyIdx.length)) {
+          throw new Error(`createBoxArena: facade.assign returned variant index ${v} but the kit has ${bodyIdx.length} parts — the handle's course table and its loaded variants disagree`);
+        }
+        bodyIdx[v].push(body[n]);
+      }
     }
     collider.rebuild(solids);
   }
@@ -676,6 +748,49 @@ export function createBoxArena(opts = {}) {
 
   /* ---- MESHES. Rebuilt only when the COUNT changes; otherwise the instance matrices are rewritten
      in place, so a live height/spacing slider does not churn GPU buffers every frame. ---- */
+  /* ---- ONE BOX'S TINT. Lifted out of `buildMeshes`'s loop UNCHANGED (A-FACADE, 2026-08-22) for
+     one reason: the facade meshes must wear the SAME colour their box wore, and a second copy of
+     this ladder is exactly the invisible drift rule 6 is about — the two would agree on every
+     input except the boundaries, and the boundaries are where a district's edge lives. One
+     implementation, three callers (main mesh, facade meshes, and the emissive mesh's hue base).
+     Writes into the shared `_col` and returns it (no allocation per instance — the no-hot-alloc
+     invariant). Callers must be inside a `P.skyline` branch: with no skyline there is no ramp and
+     no palette, and touching instanceColor at all would flip Three's USE_INSTANCING_COLOR define. */
+  function tintFor(b, hi, pal) {
+    const t = Math.min(1, (b.top - P.groundY) / hi);
+    const kind = b.kind || 'tower';
+    /* A-DRESS: the kinds join ONE ladder rather than getting a second one. A water tower and a
+       penthouse are PLANT — darker than the wall they sit on, which is what keeps a roof reading
+       as a roof with things on it instead of as a lumpy roof. A mast reads like a spire because it
+       is one. A-FACADE adds no row: a modelled body is still kind 'tower'/'setback', so it lands
+       on the same neutral 1.0 the cube did and the swap cannot move the city's colour. */
+    const shade = kind === 'cornice' ? 1.16 : kind === 'spire' || kind === 'mast' ? 1.26
+      : kind === 'parapet' ? 1.10 : kind === 'roofbox' || kind === 'penthouse' ? 0.84
+      : kind === 'watertower' ? 0.72 : kind === 'bridge' ? 0.78 : 1;
+    if (pal) {
+      const fam = pal[(districtOf.get(b.i * 4096 + b.j) ?? 0) % pal.length];
+      const hu = fam.hue + (fam.hueVary ?? 0.03) * (hash3(b.i, b.j, (P.seed ^ 0xc010) >>> 0) * 2 - 1);
+      const sa = (fam.sat ?? 0.08) + (fam.satVary ?? 0.05) * hash3(b.j, b.i, (P.seed ^ 0xc011) >>> 0);
+      const lo = fam.valMin ?? 0.40, hiV = fam.valMax ?? 0.70;
+      return _col.setHSL(hu, sa, Math.min(0.90, (lo + (hiV - lo) * t) * shade));
+    }
+    /* THE VALUES ARE WHERE THEY ARE BECAUSE THE FIRST TRY WAS UNREADABLE. A ramp from L 0.26 put the
+       low-rise 30% — the district you spawn IN — below the ambient, and the first capture of the
+       city was a black frame. The floor is now near the old flat grey (#7d8496 is L 0.54) and the
+       ramp runs UP from it, so height reads as value without anything reading as unlit. */
+    const hue = 0.55 + 0.11 * hash3(b.i, b.j, (P.seed ^ 0xc010) >>> 0);
+    return _col.setHSL(hue, 0.05 + 0.09 * hash3(b.j, b.i, (P.seed ^ 0xc011) >>> 0), Math.min(0.88, (0.40 + 0.30 * t) * shade));
+  }
+
+  /* A-FACADE: free ONLY the per-instance buffers (InstancedMesh.dispose — the L90 H13 lesson).
+     Geometry and materials belong to the KIT and survive a rebuild; `facade.dispose()` frees them,
+     once, at the consumer's own teardown. */
+  function disposeBodyMeshes() {
+    if (!bodyMeshes) return;
+    for (const m of bodyMeshes) if (m) { group.remove(m); m.dispose(); }
+    bodyMeshes = null;
+  }
+
   function buildMeshes() {
     if (!P.material && !ownedMat) {
       ownedMat = new THREE.MeshStandardMaterial({ color: '#7d8496', roughness: 0.82, metalness: 0.02, flatShading: true });
@@ -687,6 +802,10 @@ export function createBoxArena(opts = {}) {
       towers = new THREE.InstancedMesh(ownedGeo, mat, Math.max(1, mainIdx.length));
       towers.castShadow = true; towers.receiveShadow = true;
       towers.frustumCulled = false;                 // one instanced draw; the arena is the whole scene
+      /* A-FACADE: every InstancedMesh this arena owns is stamped, so an external probe can hash the
+         whole city's rendered AABBs without knowing WHICH mesh drew what — which is exactly the
+         thing the kit changes. A hash that had to know the partition could not compare the arms. */
+      towers.userData.lgrArena = true;
       group.add(towers);
     }
     towers.count = mainIdx.length;
@@ -738,40 +857,52 @@ export function createBoxArena(opts = {}) {
          are two colours of city rather than two bumps in one gradient. The height ramp still runs
          inside the family, so depth still reads. */
       const pal = sky && Array.isArray(sky.palette) && sky.palette.length ? sky.palette : null;
-      for (let n = 0; n < mainIdx.length; n++) {
-        const k = mainIdx[n];
-        const b = boxes[k];
-        const t = Math.min(1, (b.top - P.groundY) / hi);
-        const kind = b.kind || 'tower';
-        if (pal) {
-          const fam = pal[(districtOf.get(b.i * 4096 + b.j) ?? 0) % pal.length];
-          const shadeP = kind === 'cornice' ? 1.16 : kind === 'spire' || kind === 'mast' ? 1.26
-            : kind === 'parapet' ? 1.10 : kind === 'roofbox' || kind === 'penthouse' ? 0.84
-            : kind === 'watertower' ? 0.72 : kind === 'bridge' ? 0.78 : 1;
-          const hu = fam.hue + (fam.hueVary ?? 0.03) * (hash3(b.i, b.j, (P.seed ^ 0xc010) >>> 0) * 2 - 1);
-          const sa = (fam.sat ?? 0.08) + (fam.satVary ?? 0.05) * hash3(b.j, b.i, (P.seed ^ 0xc011) >>> 0);
-          const lo = fam.valMin ?? 0.40, hiV = fam.valMax ?? 0.70;
-          _col.setHSL(hu, sa, Math.min(0.90, (lo + (hiV - lo) * t) * shadeP));
-          towers.setColorAt(n, _col);
-          continue;
-        }
-        /* THE VALUES ARE WHERE THEY ARE BECAUSE THE FIRST TRY WAS UNREADABLE. A ramp from L 0.26 put the
-           low-rise 30% — the district you spawn IN — below the ambient, and the first capture of the
-           city was a black frame. The floor is now near the old flat grey (#7d8496 is L 0.54) and the
-           ramp runs UP from it, so height reads as value without anything reading as unlit. */
-        /* A-DRESS: the four new kinds join this ladder rather than getting a second one. A water tower
-           and a penthouse are PLANT — darker than the wall they sit on, which is what keeps a roof
-           reading as a roof with things on it instead of as a lumpy roof. A mast reads like a spire
-           because it is one. */
-        const shade = kind === 'cornice' ? 1.16 : kind === 'spire' || kind === 'mast' ? 1.26
-          : kind === 'parapet' ? 1.10 : kind === 'roofbox' || kind === 'penthouse' ? 0.84
-          : kind === 'watertower' ? 0.72 : kind === 'bridge' ? 0.78 : 1;
-        const hue = 0.55 + 0.11 * hash3(b.i, b.j, (P.seed ^ 0xc010) >>> 0);
-        _col.setHSL(hue, 0.05 + 0.09 * hash3(b.j, b.i, (P.seed ^ 0xc011) >>> 0), Math.min(0.88, (0.40 + 0.30 * t) * shade));
-        towers.setColorAt(n, _col);
-      }
+      for (let n = 0; n < mainIdx.length; n++) towers.setColorAt(n, tintFor(boxes[mainIdx[n]], hi, pal));
       if (towers.instanceColor) towers.instanceColor.needsUpdate = true;
     }
+
+    /* ---- A-FACADE: THE MODELLED BODIES. One InstancedMesh per kit variant, and each instance gets
+       the SAME (w, h, d) scale the unit box was getting — the variants are authored 1x1 in plan and
+       1.0 tall with their base at the origin, so the only difference from the cube's matrix is that
+       the translation is the box's BASE rather than its centre, and the world AABB comes out
+       identical. That identity is the arc's proof: same seed, same city, hashed, both arms.
+       With `bodyIdx` empty (no kit, still loading, or failed) this whole block is skipped and the
+       previous frame's meshes, if any, are torn down — a kit that goes away goes away cleanly. */
+    if (bodyIdx.length && P.facade) {
+      const hi = Math.max(1e-6, stats().maxTop - P.groundY);
+      const pal = sky && Array.isArray(sky.palette) && sky.palette.length ? sky.palette : null;
+      if (!bodyMeshes || bodyMeshes.length !== bodyIdx.length) { disposeBodyMeshes(); bodyMeshes = new Array(bodyIdx.length).fill(null); }
+      for (let v = 0; v < bodyIdx.length; v++) {
+        const list = bodyIdx[v], part = P.facade.parts[v];
+        let mesh = bodyMeshes[v];
+        /* Rebuilt only when the COUNT or the GEOMETRY changes — the same rule the main mesh follows,
+           so a live spacing/height slider rewrites matrices in place instead of churning GPU buffers. */
+        if (!mesh || mesh.count !== list.length || mesh.geometry !== part.geometry) {
+          if (mesh) { group.remove(mesh); mesh.dispose(); }
+          mesh = new THREE.InstancedMesh(part.geometry, part.material, Math.max(1, list.length));
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          mesh.frustumCulled = false;            // same as the main mesh: the arena IS the scene
+          mesh.name = part.name;
+          mesh.userData.lgrArena = true; mesh.userData.lgrVariant = part.name;
+          bodyMeshes[v] = mesh;
+          group.add(mesh);
+        }
+        mesh.count = list.length;
+        for (let n = 0; n < list.length; n++) {
+          const b = boxes[list[n]];
+          _p.set(b.x, b.y, b.z); _s.set(b.w, b.h, b.d);
+          _m.compose(_p, _q, _s);
+          mesh.setMatrixAt(n, _m);
+          /* THE TINT IS THE BOX'S OWN, through the one ladder (see tintFor). Three multiplies
+             instanceColor over the kit's baked COLOR_0, whose `wall` slot is 0.95 — so a modelled
+             wall lands within 5% of the brightness its cube had, and only the WINDOWS subtract. */
+          if (P.skyline) mesh.setColorAt(n, tintFor(b, hi, pal));
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        mesh.computeBoundingSphere();
+      }
+    } else if (bodyMeshes) disposeBodyMeshes();
 
     /* ---- A-DRESS: THE UNLIT MESH. One extra draw call, and only when a consumer names an emissive
        kind. `MeshBasicMaterial` is the honest choice over an emissive Standard: this is a sign face,
@@ -784,6 +915,7 @@ export function createBoxArena(opts = {}) {
         if (!ownedGeo) ownedGeo = new THREE.BoxGeometry(1, 1, 1);
         emMesh = new THREE.InstancedMesh(ownedGeo, ownedEmMat, Math.max(1, emIdx.length));
         emMesh.frustumCulled = false;
+        emMesh.userData.lgrArena = true;           // A-FACADE: see the stamp on `towers`
         emMesh.castShadow = false; emMesh.receiveShadow = false;   // a light source does not shadow itself
         group.add(emMesh);
       }
@@ -907,6 +1039,24 @@ export function createBoxArena(opts = {}) {
       return topAtPercentile(solids, p);
     },
     get towers() { return towerRecs; },
+    /* ---- A-FACADE: WHAT THE KIT ACTUALLY DREW, off the finished partition rather than off the
+       request. `mode` says whether the swap happened at all (a probe that reported a kit arm while
+       the GLB was still loading would be counting the control arm and calling it the treatment —
+       the unanswered-question-as-a-pass failure this repo keeps catching). `perVariant` is the
+       realized assignment, so "no variant is a wasted draw call" is a number a caller can read. */
+    facadeReport() {
+      const fac = P.facade;
+      if (!fac) return null;
+      const drawn = bodyIdx.reduce((a, l) => a + l.length, 0);
+      return {
+        mode: fac.mode,
+        variants: fac.parts.map((p) => p.name),
+        perVariant: bodyIdx.map((l, v) => ({ name: fac.parts[v] ? fac.parts[v].name : `#${v}`, count: l.length })),
+        drawn,
+        boxes: boxes.length,
+        kinds: [...fac.kinds],
+      };
+    },
     /* ---- `roofAt` vs `topAt`, AND THE DIFFERENCE IS A TRAP WORTH NAMING (A-SKYLINE, 2026-08-10).
        `topAt` is a percentile over EVERY solid, which was the same question as "every tower" right up
        until this file learned to emit cornices and skybridges. It now is not: a silhouetted city's
@@ -948,6 +1098,7 @@ export function createBoxArena(opts = {}) {
     dispose() {
       if (towers) { group.remove(towers); towers.dispose(); }
       if (emMesh) { group.remove(emMesh); emMesh.dispose(); }
+      disposeBodyMeshes();
       if (ground) group.remove(ground);
       if (ownedGeo) ownedGeo.dispose();
       if (ownedGroundGeo) ownedGroundGeo.dispose();

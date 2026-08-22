@@ -41,10 +41,14 @@ import {
   createHeroBody,
   createTextureForge, CITY_SURFACES, createTriplanarForgeMaterial, tilesPerUnit, applyGroundMacro,
   createStreetKit, applyStreetGrid, createStreetPlaces,
+  createFacadeKit, storeyU,
 } from '@lgr/engine-core';
 /* A-CITIZENS: the tier-A skin. The engine deliberately does NOT inline this GLB (pedestrians.js's
    lib-size note) — the consumer that ships people pays for the model. */
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
+/* A-FACADE: the modelled skyline, same rule — the consumer that ships buildings pays for the model.
+   3.9 kB gzipped for the whole five-variant kit. */
+import facadeKitUrl from '@lgr/engine-core/assets/models/facade_kit.glb?url';
 
 const $ = (id) => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
@@ -252,6 +256,13 @@ const LAB_ARENA = {
    here returns the same flat MeshStandardMaterial the city shipped with. Nothing else in the repo
    calls any of this, so `npm run tier-guard`'s byte-identical stylized baselines are untouched. */
 const M_PER_U = 6.0;                        // this world's scale — the swing ledger's own figure
+/* A-FACADE: THE PAINTED STOREY, AS TWO NAMED NUMBERS INSTEAD OF TWO LITERALS. `0.55` was inline in
+   the triplanar `scale` below and `5` lives in forge-facade.frag (`float storeys = 5.0;`). The
+   facade KIT has to bake its modelled courses at the SAME pitch or the two rhythms beat against
+   each other — two representations of one thing — so both now read one constant. Together they
+   give storeyU(...) = 0.48485 u ≈ 2.91 m, which is the figure the note above already claimed. */
+const FACADE_TILES_PER_TILE = 0.55;
+const FACADE_STOREYS_PER_TILE = 5;          // forge-facade.frag's own `storeys` — checked, not assumed
 function cityMaterials() {
   if (LEVEL !== 'city' || Q.get('forge') === '0') return null;
   const forge = createTextureForge({ renderer, size: 1024 });
@@ -273,7 +284,7 @@ function cityMaterials() {
   const road = CITY_SURFACES.asphalt;
   const tower = createTriplanarForgeMaterial({
     side: wall, top: roof,
-    scale: tilesPerUnit({ worldSize: CITY_SURFACES.facade.worldSize, metresPerUnit: M_PER_U, tilesPerTile: 0.55 }),
+    scale: tilesPerUnit({ worldSize: CITY_SURFACES.facade.worldSize, metresPerUnit: M_PER_U, tilesPerTile: FACADE_TILES_PER_TILE }),
     topScale: tilesPerUnit({ worldSize: CITY_SURFACES.asphalt.worldSize, metresPerUnit: M_PER_U, tilesPerTile: 1.2 }),
     sharpness: 6.0,
     /* THE DETAIL OCTAVE (research doc §3 gap 3: "a single 6 m forge tile is soft up close"). The
@@ -334,6 +345,43 @@ else if (LEVEL === 'city') {
   CITY_ARENA.groundMaterial = g;
 }
 
+/* ---- A-FACADE (2026-08-22): THE SKYLINE STOPS BEING CUBES, and it is `?buildings=box` to undo. ----
+   The ABILITY is `createFacadeKit` + `createBoxArena`'s `facade` seam (engine-core); THIS is wiring
+   and the two numbers that belong to this room.
+
+   WHAT ACTUALLY CHANGES: the 892 body boxes ('tower' + 'setback') stop being drawn as unit cubes in
+   the main InstancedMesh and are drawn instead by one InstancedMesh per kit variant — a modelled
+   facade with corner piers, recessed glazing courses and a cornice. NOTHING ELSE MOVES: the packed
+   solids buffer, the collider, `roofAt`, the swingable guarantee and every anchor read the same
+   floats, because the partition happens after the buffer is built. Silhouette variety stays with
+   the boxes — a facade replaces the WALL, never the shape.
+
+   THE STOREY IS THE PAINTED ONE. `storeyU` inverts exactly the arithmetic `cityMaterials()` above
+   sizes the triplanar facade with, so the modelled courses land on the painted storey lines instead
+   of beating against them. One number, read by both — the same discipline as the road pitch.
+
+   THE MATERIAL IS THE CITY'S OWN. Handing the kit `CITY_MATS.tower` means the modelled relief wears
+   the same world-space triplanar texture the cubes wore (cloned once, `vertexColors` on, so the
+   kit's baked albedo×AO multiplies over it). Sampling by POSITION is what makes that safe: the
+   texture cannot stretch on a scaled mesh, which is the whole reason A-AERIAL chose triplanar. With
+   `?forge=0` there is no such material and the kit falls back to its own flat vertex-coloured one,
+   which is the fallback discipline every material in this file was built on.
+
+   `?buildings=box` IS THE CONTROL ARM AND IT IS TODAY'S CITY EXACTLY: no kit is created, so
+   box-arena's `facade` stays null and not one statement of the new path runs. One build, two URLs. */
+const BUILDINGS = Q.get('buildings') === 'box' ? 'box' : 'kit';
+const facadeKit = (LEVEL === 'city' && BUILDINGS === 'kit') ? createFacadeKit({
+  url: facadeKitUrl,
+  storey: storeyU({
+    metresPerUnit: M_PER_U,
+    worldSize: CITY_SURFACES.facade.worldSize,
+    tilesPerTile: FACADE_TILES_PER_TILE,
+    storeysPerTile: FACADE_STOREYS_PER_TILE,
+  }),
+  material: CITY_MATS ? CITY_MATS.tower : null,
+}) : null;
+if (facadeKit) CITY_ARENA.facade = facadeKit;
+
 const ARENA0 = LEVEL === 'city' ? CITY_ARENA : LAB_ARENA;
 /* THE PERCENTILE THE ROPE IS DERIVED AT IS THE LEVEL'S OWN. The lab's 0.35 is A-CLIMB's; the city's is
    `1 - frac`, i.e. exactly the break the generator built its distribution around. Two rooms, one
@@ -343,6 +391,29 @@ const _buildT0 = performance.now();
 const arena = createBoxArena(ARENA0);
 const LEVEL_BUILD_MS = performance.now() - _buildT0;
 scene.add(arena.group);
+
+/* A-FACADE: THE CITY IS BUILT BEFORE THE GLB ARRIVES, deliberately. The level is standing (as
+   cubes) the moment this line runs, so `__labReady`, the 27-check probe's timing and every existing
+   measurement are untouched by a network fetch; when the kit resolves, ONE `rebuild({})` re-runs the
+   partition and swaps the meshes in place. If it never resolves — a failed fetch, a stale build
+   product — the city stays cubes and says so in the console, which is the control arm, not a hole.
+   `__facade` is the probe handle: `mode` is what actually happened, never what was requested. */
+let facadeFit = null;
+if (facadeKit) {
+  facadeKit.ready.then((mode) => {
+    if (mode !== 'kit') return;
+    arena.rebuild({});
+    const hs = arena.boxes.filter((b) => facadeKit.kinds.indexOf(b.kind || 'tower') >= 0).map((b) => b.h);
+    facadeFit = facadeKit.fit(hs);
+  });
+}
+window.__facade = {
+  get mode() { return facadeKit ? facadeKit.mode : 'box'; },
+  get variants() { return facadeKit ? facadeKit.variants : []; },
+  get assign() { return arena.facadeReport(); },
+  get fit() { return facadeFit; },
+  arm: BUILDINGS,
+};
 
 /* ---- A-DRESS: THE STREET FURNITURE. The ABILITY is `createStreetKit` (engine-core); this is wiring
    and the numbers that belong to THIS room.

@@ -100,6 +100,9 @@ export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TR
   BROADLEAF_KIT_VARIANTS, DEAD_KIT_VARIANTS,
   GROUNDCOVER_BUSH_VARIANTS, GROUNDCOVER_FERN_VARIANTS,
   GROUNDCOVER_TUFT_VARIANTS, GROUNDCOVER_ROCK_VARIANTS } from './src/createTreeKit.js';
+// A-FACADE — modeled facade kit loader + the height→variant assignment (pure helpers: receipts + tests)
+export { createFacadeKit, assignFacadeVariants, facadeFitReport, storeyU,
+  FACADE_KIT_VARIANTS, FACADE_KIT_COURSES, FACADE_BODY_KINDS } from './src/createFacadeKit.js';
 export { createFlowField } from './src/createFlowField.js';
 export { createBallistics } from './src/createBallistics.js';
 /* A-GUN — a body CARRIES a thing: the carry transform, the mount-IK sockets that put real hands on
