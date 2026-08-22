@@ -279,10 +279,25 @@ export { createHillaireSky, GROUND_MM, ATMOS_MM } from './src/hillaire-sky.js'; 
 // Reusable interior toolkit (L48/L51) — contact shadows / fake-AO, a cinematic vignette, + a seated free-look.
 export { makeContactShadow, makeVignette, createSeatedLook } from './src/interior.js';
 
-// Flat-vector style: shared toggle/tint/weather singletons (bound by reference) + the helpers.
+/* Flat-vector style: shared toggle/tint/weather singletons (bound by reference) + the helpers.
+
+   A-SANDBOX (2026-08-22) — `swayTime` / `swayWind` JOIN THE BARREL, and this is a wiring-drift
+   repair rather than a new ability. `attachVertexAO(mat, { sway: true })` has spliced the L94 breeze
+   into every foliage material in the engine since L94 — scatter props, the tree kits, the
+   ground-cover kits — and its amplitude rides these two shared uniform objects. But the ONLY code
+   that ever wrote them was `createCityWorld` (its own frame tick), and they were not on this barrel.
+   So any room that does not boot the procedural city — world-lab, moto-lab, swing-lab — compiled the
+   sway branch into its shaders and then left `swayWind.value` at 0 forever: dead code on the GPU,
+   and foliage that has never once moved. Worse, it made `createTreeKit`'s documented `sway: false`
+   trap (a BOULDER must not breathe) structurally unobservable in exactly the rooms that load a
+   ground-cover kit. Exporting the two drive handles is what lets a room drive the wind it already
+   pays for — and what turns that trap from an assumption into a measurement.
+   C++ anchor: these are two `extern` globals the shader reads by reference; the header simply never
+   declared them, so only the one translation unit that defined them could assign to them. */
 export {
   vectorOn, vectorTint, vectorShadow, weatherSnow, weatherCloud, weatherCloudOff,
   weatherSeason, fogCharm, vectorize, vectorizeTower, attachVectorUniforms, spliceVectorVertex,
+  swayTime, swayWind,
   VEC_VERT_PARS, VEC_VERT_MAIN, VEC_FRAG_PARS,
 } from './src/vector-style.js';
 

@@ -146,6 +146,12 @@ export { makeContactShadow, makeVignette, createSeatedLook } from './src/interio
 export {
   vectorOn, vectorTint, vectorShadow, weatherSnow, weatherCloud, weatherCloudOff,
   weatherSeason, fogCharm, vectorize, vectorizeTower, attachVectorUniforms, spliceVectorVertex,
+  /* A-SANDBOX: the L94 foliage-sway drive handles. They belong wherever `attachVertexAO`'s sway
+     splice ships — which is everywhere — because without them a consumer compiles the sway branch
+     and can never set its amplitude. Registered in the CURATED core as well as the main barrel, per
+     the A-GUN precedent (b7bcb58): a no-build /live/ consumer needs the same reach a workspace
+     project has, and the reverse-direction drift is the one barrel-coverage.test.mjs exists to catch. */
+  swayTime, swayWind,
   VEC_VERT_PARS, VEC_VERT_MAIN, VEC_FRAG_PARS,
 } from './src/vector-style.js';
 export {

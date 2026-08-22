@@ -57,7 +57,18 @@ import {
   generateTerrain, buildTerrainMesh, rebuildTerrainChunks, createTerrainSampler, BIOMES,
   carveCityPads, dirtyMeshesFor,
   generateRegions, shapeRegionTerrain, regionAt,
-  generateScatter, buildScatterGroup, createTreeKit,
+  generateScatter, buildScatterGroup, createTreeKit, hashTreeInstances, mulberry32,
+  /* ARC A-SANDBOX — A-FLORA'S KITS FINALLY HAVE A CONSUMER. Every name on the next three lines was
+     built, receipt-gated and shipped on 2026-08-21 with ZERO consumers anywhere in the repo: the
+     second tree family, the sparse dead-snag accent, and the four ground-cover families. They are
+     split per family ON PURPOSE (see createTreeKit.js's header) because the broadleaf:snag and
+     tuft:rock ratios are the ROOM's decision, not the .glb's — handing one list of all eight
+     ground-cover variants to `assignTreeVariants` would put as many boulders on a lawn as grass.
+     `swayWind`/`swayTime` are the L94 breeze's drive handles — see the barrel's own note. */
+  BROADLEAF_KIT_VARIANTS, DEAD_KIT_VARIANTS,
+  GROUNDCOVER_BUSH_VARIANTS, GROUNDCOVER_FERN_VARIANTS,
+  GROUNDCOVER_TUFT_VARIANTS, GROUNDCOVER_ROCK_VARIANTS,
+  swayTime, swayWind,
   detectLakes,
   createBoxArena, percentileOf,
   createCharacterController, createGrappleModel, GRAPPLE_PROFILE,
@@ -72,6 +83,8 @@ import {
      engine-core and this room had simply never asked for them (the wiring-drift failure CLAUDE.md
      names by name). Nothing below is new capability; §1b/§2c are wiring and configuration. */
   createHillaireSky, createVolumetricClouds, CLOUD_TIERS, createWaterSurface, lowSunWashK,
+  /* A-SANDBOX: L18's weather rig — in engine-core since Lesson 18, asked for by this room never. */
+  createWeatherRig,
   /* ARC A-GUN — the walker CARRIES something. The ability is engine-core's (carried-weapon.js:
      the carry transform, the mount-IK sockets, the shot); this room supplies the aim point, the
      world query, the body and the key. */
@@ -80,6 +93,13 @@ import {
 import sidearmUrl from '@lgr/engine-core/assets/models/sidearm.glb?url';   // A-GUN — build_sidearm.py
 import survivorUrl from '@lgr/engine-core/assets/models/survivor.glb?url';
 import treeKitUrl from '@lgr/engine-core/assets/models/tree_kit.glb?url';   // A-TREEKIT's conifer kit — the woods
+/* A-SANDBOX: A-FLORA's two kits. Both were generated, committed and then imported by NOTHING —
+   `broadleaf_kit.glb` carries the 4 broadleaves AND the 2 dead snags in ONE file (which is why two
+   `createTreeKit` calls below share this single url), `groundcover_kit.glb` the 8 ground-cover
+   variants. The `?url` import lives HERE and not in the engine for the pedestrians.js reason: a
+   `?url` inside the lib base64-inlines the asset into every bundle that imports the barrel. */
+import broadleafKitUrl from '@lgr/engine-core/assets/models/broadleaf_kit.glb?url';
+import groundcoverKitUrl from '@lgr/engine-core/assets/models/groundcover_kit.glb?url';
 /* A-DRIVE: the roster's bodies. Six GLBs from ONE generator (tools/blender/build_vehicles.py) —
    the three road vehicles had been shipped and imported by NOTHING since 2026-08-06; these are
    their first consumers. The `?url` import lives HERE and not in the engine because a ?url inside
@@ -199,7 +219,15 @@ const _skyEye = new THREE.Vector3(0, 6.360 + 0.0002, 0);
    half-attempted. Until then the daylight arc is the supported range and the default sits inside it. */
 const sun = core.sunRig;
 sun.goTo(qNum('t', 0.62), true);              // snap — no easing on boot, so frame 1 is already right
-if (Q.get('daycycle') === '1') { sun.setAuto(true); sun.setPace(qNum('pace', 90)); }
+/* ARC A-SANDBOX: the cycle gets DIALS, and the auto-off default is kept exactly as argued above.
+   `?daycycle=1` still opts in and `?pace=` still sets the seconds-per-day; what is new is that both
+   are reachable from the dock, and that pausing puts the clock back under `?t=` control — so the
+   probe, the two-boot receipts and every capture can still pin time to a fixed scalar. A running
+   clock that could not be stopped would break determinism for the whole room; a running clock with
+   a pause button and an absolute scrub does not. */
+const DAY = { auto: Q.get('daycycle') === '1', pace: qNum('pace', 90) };
+sun.setPace(DAY.pace);
+sun.setAuto(DAY.auto);
 /* the KEY LIGHT'S OFFSET, derived from the sun instead of hard-coded. The magnitude is held at ~20 u
    because the shadow camera above is a ±30 u box with far 80 — a light placed further out than that
    drops the world out of its own shadow frustum. The y floor keeps the key above the ground even at
@@ -208,6 +236,39 @@ if (Q.get('daycycle') === '1') { sun.setAuto(true); sun.setPace(qNum('pace', 90)
 const SUN_OFF = { x: 9, y: 16, z: 7 };
 const _fogC = new THREE.Color();
 let _lastSunT = -1;                           // forces the first sky-view march (see §8b's dirty check)
+
+/* ---------------------------------------------------------------------------------------------
+   1b-bis. THE WEATHER (ARC A-SANDBOX). `createWeatherRig` is L18 and has existed in engine-core
+   the whole time; this room had never asked it for anything — the same wiring drift as the flora
+   and the wind. It is a SIBLING of the SunRig by design: it knows nothing about any world, owns
+   its own two instanced particle pools, and exposes EASED scalars a room composes on top of its
+   own lighting rather than a rewrite of it.
+
+   TWO THINGS HAD TO BE CONFIGURED, and neither is a capability — both are this room's SCALE.
+     · The rig is authored at CITY scale: a rain streak is a 0.015 × 0.5 u quad and the recycle
+       band runs y 0.25 → 11. This world's hero is 0.30 u tall, so an unscaled streak would be
+       1.6× the player's height and the rain would fall from 36 hero-heights up. Scaling the whole
+       GROUP is the correct lever rather than new constants: a uniform scale takes the streak
+       length, the column, the fall distance AND the fall speed down together, which is exactly
+       what "the same weather in a smaller world" means.
+     · The column is centred on the group's origin, so at world scale it would rain in one small
+       patch near (0,0). The group FOLLOWS the body each frame (§8b-ter) — the standard trick for
+       a local precipitation volume, and the reason `extent` is set wide rather than the group
+       being huge.
+   `easeScale` 0.35 makes weather GATHER over several seconds instead of snapping on in ~1 s —
+   hoard2's own setting, and the module's stated reason for the parameter. */
+const WEATHER_KINDS_UI = ['clear', 'rain', 'snow', 'fog'];
+const WEATHER_SCALE = 0.2;
+const weather = createWeatherRig({ extent: 40, easeScale: 0.35 });
+weather.group.scale.setScalar(WEATHER_SCALE);
+scene.add(weather.group);
+{
+  const w0 = String(Q.get('weather') || 'clear').toLowerCase();
+  weather.setKind(WEATHER_KINDS_UI.includes(w0) ? w0 : 'clear');
+}
+/* the fog's CLEAR-WEATHER numbers, kept so the weather modifier is a departure FROM them rather
+   than a new pair of magic constants — and so turning weather off restores the room exactly. */
+const FOG_CLEAR = { near: 50, far: 300 };
 
 /* ---------------------------------------------------------------------------------------------
    1c. THE VOLUMETRIC CLOUDS — a real raymarched deck, not sprites.
@@ -477,6 +538,12 @@ let REG = null, SHAPED = null;                   // the region field + its shapi
    lint gate structurally cannot catch this class and a human read is the only thing that will. */
 let scatterGroup = null, treeGroup = null, lakeGroup = null;
 let LAKES = [], TREE_N = 0;
+/* A-SANDBOX: the six kit groups this room now also plants, and the counted receipt of what went
+   into them. `floraGroups` exists so the rebuild teardown has ONE list to walk — the failure mode
+   it prevents is a group that is removed from the scene on rebuild but never disposed (or, worse,
+   disposed but left in the scene), which is how a "rebuild" leaks a forest per slider drag. */
+let floraGroups = [];
+let FLORA_N = { conifer: 0, broadleaf: 0, snag: 0, bush: 0, fern: 0, tuft: 0, rock: 0, procTree: 0, procTuft: 0, procRock: 0 };
 
 /* ONE WATER FACTORY for the sea and every lake (A-SKYWORLD keeps this room's own reuse anchor and
    only changes WHAT is being reused): the sea is not a different substance from a lake, it is the
@@ -510,8 +577,99 @@ let seaWater = null, lakeWaters = [];
 /* the KIT is created ONCE (moto-lab's own rule): the GLB loads a single time and every rebuild
    re-instances the cached geometry. `?trees=proc` keeps the procedural cones as the control arm, and
    a load FAILURE rebuilds the room with them, loudly — degrade whole, the house convention. */
-const treeKit = Q.get('trees') === 'proc' ? null : createTreeKit({ url: treeKitUrl });
-if (treeKit) treeKit.ready.then((mode) => { if (mode !== 'kit') buildWorld(); });
+/* A-SANDBOX: `?flora=proc` turns off THE WHOLE KIT ARM, conifers included, and that is a defect
+   this arc's own check caught rather than a design. The first cut gated only the five NEW kits, so
+   `?flora=proc` left 520 conifers standing while the dock button read "kit flora: off" — a control
+   that states the opposite of what the world is doing, which is the exact failure class this arc
+   exists to remove. `?trees=proc` survives as the older, NARROWER alias (conifers only), because it
+   predates this room's flora and A-MARRIAGE-era links use it. Two params, one of which is a strict
+   subset of the other, both stated. */
+const FLORA_ON = Q.get('flora') !== 'proc';
+const treeKit = (!FLORA_ON || Q.get('trees') === 'proc') ? null : createTreeKit({ url: treeKitUrl });
+
+/* ---------------------------------------------------------------------------------------------
+   2c-bis. THE REST OF THE FLORA (ARC A-SANDBOX, 2026-08-22).
+   ------------------------------------------------------------
+   A-FLORA built a broadleaf family, a dead-snag accent and four ground-cover families, proved each
+   one's generator with receipts, and then wired them into NOTHING. This block is the consumer.
+
+   FOUR DIALS, all of them URL params first and sliders second (this room's standing rule — a
+   tuning you like has to be a LINK or it is not shareable):
+     ?flora=proc   every kit off; the procedural cones/rocks/tufts are the A/B control arm
+     ?gc=<0..1.5>  ground-cover density multiplier (1 = plant every candidate the placer offered)
+     ?snags=<0..0.3> the fraction of tree candidates that become DEAD SNAGS instead of live canopy
+     ?wind=<0..0.2>  the L94 sway amplitude — see the wind note in §8b
+
+   WHY SIX `createTreeKit` CALLS AND NOT TWO. The loader takes ONE variant list and stamps ONE
+   `userData.type`, and both of those are per-FAMILY decisions here:
+     · broadleaf and dead share `broadleaf_kit.glb` but must be planted at wildly different
+       densities, so they cannot be one near-uniform variant list;
+     · the four ground-cover families share `groundcover_kit.glb` and are keyed to DIFFERENT biomes
+       (ferns in forest, grass in grassland, scrub elsewhere), which is a per-family placement, not
+       a per-instance one.
+   The GLB itself is fetched once per url by the browser's own HTTP cache; what is duplicated is a
+   parse, at boot, of a 49–81 kB file. That is the price of the split the kit's own header asks for.
+
+   ⚠️ THE BOULDER TRAP, and it is not hypothetical — createTreeKit.js's header names it explicitly:
+   a ground-cover ROCK must be created with `type: 'rock'` AND `sway: false`.
+     · `type` because `hashTreeInstances` counts every InstancedMesh whose userData.type === 'tree';
+       a boulder stamped 'tree' silently joins moto-lab's placement-identity receipt.
+     · `sway` because `attachVertexAO(mat, { sway: true })` splices the L94 breeze into the vertex
+       stage, and a boulder that sways in the wind is not a boulder.
+   Until this arc that second half was UNOBSERVABLE here (`swayWind.value` stayed 0 in every room
+   outside createCityWorld), so it is verified below rather than trusted: each kit's material
+   reports `customProgramCacheKey()` as 'lgr-ao-sway' or 'lgr-ao', and `window.__flora` publishes it.
+   --------------------------------------------------------------------------------------------- */
+const FLORA = {
+  gc: Math.max(0, Math.min(1.5, qNum('gc', 1.0))),
+  snags: Math.max(0, Math.min(0.3, qNum('snags', 0.06))),
+  /* 0.045 sits just above createCityWorld's own calm base (0.035 + 0.05·overcast). This room is a
+     third the city's scale — the hero is 0.30 u, not 1.8 — so the same amplitude reads as a
+     stronger breeze on smaller foliage; it is a look, chosen by eye, and it is a slider. */
+  wind: Math.max(0, Math.min(0.2, qNum('wind', 0.045))),
+};
+const mkKit = (url, variants, opts) => (FLORA_ON ? createTreeKit({ url, variants, ...opts }) : null);
+const broadleafKit = mkKit(broadleafKitUrl, BROADLEAF_KIT_VARIANTS, {});
+const deadKit = mkKit(broadleafKitUrl, DEAD_KIT_VARIANTS, {});
+/* ground cover stamps `type: 'tuft'` (not 'tree') so the scatter vocabulary stays honest, and the
+   ROCK family takes the two-part trap treatment the header demands. */
+const gcBushKit = mkKit(groundcoverKitUrl, GROUNDCOVER_BUSH_VARIANTS, { type: 'tuft' });
+const gcFernKit = mkKit(groundcoverKitUrl, GROUNDCOVER_FERN_VARIANTS, { type: 'tuft' });
+const gcTuftKit = mkKit(groundcoverKitUrl, GROUNDCOVER_TUFT_VARIANTS, { type: 'tuft' });
+const gcRockKit = mkKit(groundcoverKitUrl, GROUNDCOVER_ROCK_VARIANTS, { type: 'rock', sway: false });
+/* the table the builder walks, so adding a seventh family is a row and not a branch. `bucket` is
+   the key `partitionFlora` files placements under; `tintOpts` is per-family because `makeTreeTints`
+   defaults to GREEN hue poles — right for foliage, wrong for a boulder (the header's own note:
+   `sat: 0` drives the model to its pure-value special case, so rocks get lighter/darker rather
+   than olive) and wrong for a dead snag (bark, not leaf). */
+const FLORA_KITS = [
+  { bucket: 'conifer', kit: treeKit, tintOpts: {} },
+  { bucket: 'broadleaf', kit: broadleafKit, tintOpts: { warmHue: 0.13, coolHue: 0.33, sat: 0.42 } },
+  { bucket: 'snag', kit: deadKit, tintOpts: { warmHue: 0.08, coolHue: 0.10, sat: 0.22, value: [0.70, 1.05] } },
+  { bucket: 'bush', kit: gcBushKit, tintOpts: { warmHue: 0.11, coolHue: 0.36, sat: 0.34 } },
+  { bucket: 'fern', kit: gcFernKit, tintOpts: { coolHue: 0.40, sat: 0.44 } },
+  { bucket: 'tuft', kit: gcTuftKit, tintOpts: { warmHue: 0.14, coolHue: 0.31, sat: 0.30 } },
+  { bucket: 'rock', kit: gcRockKit, tintOpts: { sat: 0, value: [0.78, 1.20] } },
+];
+/* ONE readiness promise over all seven kits, and it rebuilds only on FAILURE — which is exactly
+   what the single conifer line it replaces did, widened to the whole set. On SUCCESS no rebuild is
+   needed at all: `createTreeKit.buildGroup` called before its GLB lands stashes the plan as
+   `pending` and populates the very same group object in place when the file arrives, so the first
+   build is already the final one. On failure the family's placements must go BACK to the
+   procedural arm (`partitionFlora` reads `kit.mode` to decide), and that decision is baked into
+   the group that has already been built — hence the rebuild. Six separate `ready.then` handlers
+   would have rebuilt the world up to six times at one boot.
+   `Promise.all` is safe here even though a kit can fail: createTreeKit RESOLVES with 'failed'
+   rather than rejecting, so the set always settles and nothing is left un-counted. */
+window.__floraReady = Promise.all(FLORA_KITS.filter((f) => f.kit).map((f) => f.kit.ready))
+  .then((modes) => {
+    const bad = FLORA_KITS.filter((f) => f.kit).map((f, i) => [f.bucket, modes[i]]).filter(([, m]) => m !== 'kit');
+    if (bad.length) {
+      console.warn('[flora] kit(s) failed to load — those families fall back to the procedural arm:', bad.map(([b]) => b).join(', '));
+      buildWorld();
+    }
+    return FLORA_KITS.filter((f) => f.kit).length - bad.length;
+  });
 /* the LIVE closures the arena reads — they always point at the CURRENT carve/sampler, so an
    arena.rebuild after a dial change re-lays towers on the new pads with no re-wiring. */
 const groundYAt = (x, z, i, j) => CARVE.padYOf(i, j);
@@ -520,7 +678,12 @@ const heightAt = (x, z) => HEIGHT(x, z);
 function buildWorld() {
   const t0 = performance.now();
   if (terrainGroup) { scene.remove(terrainGroup); terrainGroup.userData.dispose(); }
-  for (const g of [scatterGroup, treeGroup, lakeGroup]) if (g) { scene.remove(g); g.userData.dispose(); }
+  /* A-SANDBOX: `treeGroup` is no longer named here — it is one of `floraGroups` now (the conifer
+     one), and listing it in both places would call its `dispose` TWICE per rebuild. Harmless for a
+     Three.js InstancedMesh today, but it is the shape of a double-free and the list exists so
+     there is exactly one owner of each group. */
+  for (const g of [scatterGroup, lakeGroup, ...floraGroups]) if (g) { scene.remove(g); g.userData.dispose(); }
+  floraGroups = [];
   scatterGroup = treeGroup = lakeGroup = null;
   const WORLD_MAP = { worldSize: WP.worldSize, baseY: 0 };
   /* generate → REGIONS → SHAPE → WILD mesh → carve → dirty-chunk refresh. The ORDER is the
@@ -647,14 +810,125 @@ function buildDressing(WORLD_MAP) {
     sc.placements[type] = sc.placements[type].filter((p) =>
       !LAKES.some((lk) => Math.hypot(p.x - lk.cx, p.z - lk.cz) < lk.radius + 0.4));
   }
-  const useKit = treeKit && treeKit.mode !== 'failed';
-  scatterGroup = buildScatterGroup(useKit ? { ...sc.placements, tree: [] } : sc.placements);
+  /* A-SANDBOX: the placer's three lists are now SORTED into seven families before anything is
+     built. `partitionFlora` is pure and seeded, so the same URL grows the same wood. */
+  const plan = partitionFlora(sc.placements);
+  /* whatever a live kit claimed leaves the procedural group; whatever it did NOT claim (a failed
+     kit, or `?flora=proc`) stays in it. `plan.proc` IS that remainder — computed, not assumed. */
+  scatterGroup = buildScatterGroup(plan.proc);
   scene.add(scatterGroup);
-  TREE_N = sc.placements.tree.length;
-  if (useKit) {
-    treeGroup = treeKit.buildGroup(sc.placements.tree, { seed: WP.seed });
-    scene.add(treeGroup);
+  /* TREE_N COUNTS WHAT IS STANDING, not what the kit arm claimed — and that distinction is a defect
+     this arc's own check found. The first cut summed only the three kit buckets, so `?flora=proc`
+     (every kit off, 520 procedural cones on screen) reported "0 trees" in the HUD and in the probe
+     handle. A readout that goes to zero while the world is full of trees is worse than no readout:
+     it would have made the control arm look like a broken build. */
+  TREE_N = plan.buckets.conifer.length + plan.buckets.broadleaf.length + plan.buckets.snag.length
+    + plan.proc.tree.length;
+  for (const f of FLORA_KITS) {
+    const list = plan.buckets[f.bucket];
+    if (!f.kit || f.kit.mode === 'failed' || !list.length) continue;
+    /* EVERY family gets its OWN seed stream (`seed ^ bucketSalt`) and not the shared world seed.
+       With one seed every kit would draw the SAME variant sequence and the SAME tint sequence, so
+       the fern under a broadleaf would be the same relative shade as the broadleaf, forever — a
+       correlation you would see as banding long before you worked out why. */
+    const g = f.kit.buildGroup(list, { seed: (WP.seed ^ BUCKET_SALT[f.bucket]) >>> 0, tint: f.tintOpts });
+    g.userData.floraBucket = f.bucket;              // so the receipts can find a family by name
+    scene.add(g);
+    floraGroups.push(g);
+    if (f.bucket === 'conifer') treeGroup = g;      // the pre-existing handle stays valid
   }
+  for (const k of Object.keys(plan.buckets)) FLORA_N[k] = plan.buckets[k].length;
+  /* the procedural remainder is counted TOO, and reported separately rather than folded in — the
+     two arms look identical in a total and completely different on screen. */
+  FLORA_N.procTree = plan.proc.tree.length;
+  FLORA_N.procTuft = plan.proc.tuft.length;
+  FLORA_N.procRock = plan.proc.rock.length;
+}
+
+/* ---- WHICH FAMILY GROWS WHERE — pure, seeded, and the whole of this arc's placement policy. -----
+   The rule set is deliberately small and biome-keyed, because the biome buffer is the thing that
+   already knows what the ground is; inventing a second classifier here would be a second source of
+   truth about the same texel (the `seabedY` lesson, one module over).
+     dead snags  a flat `snags` fraction of TREE candidates, drawn FIRST so the fraction means what
+                 it says (drawing them last would make it a fraction of what happened to be left).
+                 Sparse by construction — this is why A-FLORA split the list from the broadleaves.
+     canopy      grassland → broadleaf (a lone tree in open grass reads as deciduous)
+                 hills     → conifer   (uplands)
+                 forest    → MIXED 50/50, because a real wood is mixed and an all-one-species
+                             forest is the single loudest tell that a scatter is procedural.
+                 anything else (beach/rock/desert) → conifer, the hardy default.
+     ground cover keyed to the REGION, not the biome, and that is a CORRECTION this arc's own check
+                 forced. Keying it to the biome the way the canopy is keyed produced TWO ferns in the
+                 whole world, because `SCATTER_TABLE` gives the `forest` biome a tree rule and a rock
+                 rule and NO tuft rule — so "forest → fern" was very nearly dead code, and the two
+                 ferns that did appear came from stray forest texels inside another district. Adding
+                 a tuft rule to the engine's table would have fixed it and silently re-scattered
+                 every other consumer of `generateScatter` (moto-lab pins a 641-instance placement
+                 hash; the city has byte-identical tier baselines), so the table is left alone and
+                 the ROOM decides with the field the room owns: `regionAt`.
+                   woods district  → fern 70% / bush 30%   (undergrowth under a canopy)
+                   desert district → bush                  (dry scrub, the desert's own table)
+                   everywhere else → grass tuft 80% / bush 20%
+                 The minority share in two of the three is the same anti-monotony argument the mixed
+                 forest above rests on: one species per district is the loudest procedural tell there
+                 is, and it costs one already-drawn RNG roll to avoid.
+                 ROCK placements go to the boulder kit whole — the placer already only offers them
+                 on the biomes where rock belongs (beach/forest/hills/rock/desert per SCATTER_TABLE).
+   THE RNG IS DRAWN UNCONDITIONALLY, one roll per candidate per decision, BEFORE any branch tests
+   it. That is what keeps the stream's position independent of the biome under a given placement,
+   so moving the `snags` dial cannot shuffle which variant an unrelated tree three hills away got.
+   C++ anchor: a stable_partition over a fixed input sequence with a deterministic PRNG — the
+   ordering property is the point, not the randomness. */
+const BUCKET_SALT = { conifer: 0x11, broadleaf: 0x27, snag: 0x3d, bush: 0x52, fern: 0x6b, tuft: 0x74, rock: 0x8e };
+function partitionFlora(placements) {
+  const size = WP.size, cell = WP.worldSize / (size - 1), half = WP.worldSize / 2;
+  /* the biome under a placement, read from the SAME buffer + mapping `generateScatter` used to put
+     it there — so this cannot disagree with the table that chose the prop in the first place. */
+  const biomeAt = (x, z) => {
+    const i = Math.max(0, Math.min(size - 1, Math.round((x + half) / cell)));
+    const j = Math.max(0, Math.min(size - 1, Math.round((z + half) / cell)));
+    return BIOME_KEYS[T.biome[j * size + i]];
+  };
+  const rng = mulberry32((WP.seed ^ 0xf10a5a) >>> 0);
+  const buckets = { conifer: [], broadleaf: [], snag: [], bush: [], fern: [], tuft: [], rock: [] };
+  const live = (kit) => !!kit && kit.mode !== 'failed';
+  /* the procedural remainder starts EMPTY and is filled only by what no live kit took. */
+  const proc = { tree: [], rock: [], tuft: [] };
+  const canopyKit = { conifer: treeKit, broadleaf: broadleafKit };
+
+  for (const p of placements.tree) {
+    const rSnag = rng(), rMix = rng();               // both drawn before either is read (see above)
+    const b = biomeAt(p.x, p.z);
+    if (rSnag < FLORA.snags && live(deadKit)) { buckets.snag.push(p); continue; }
+    let want;
+    if (b === 'grassland') want = 'broadleaf';
+    else if (b === 'forest') want = rMix < 0.5 ? 'broadleaf' : 'conifer';
+    else want = 'conifer';
+    if (live(canopyKit[want])) buckets[want].push(p);
+    else if (live(canopyKit[want === 'conifer' ? 'broadleaf' : 'conifer'])) buckets[want === 'conifer' ? 'broadleaf' : 'conifer'].push(p);
+    else proc.tree.push(p);                          // no canopy kit at all → the procedural cones
+  }
+  for (const p of placements.tuft) {
+    /* the GROUND-COVER DIAL is a rejection roll, so `gc=0` is bare ground, `gc=1` plants every
+       candidate the placer offered, and anything above 1 is simply also "all of them" (the value
+       is clamped at construction — a dial that silently does nothing past a point should say so,
+       and the slider's max IS that point). */
+    const rKeep = rng(), rMix = rng();               // both drawn before either is read
+    if (rKeep > FLORA.gc) continue;
+    /* the DISTRICT, from the same `regionAt` the mask, the lake filter, the HUD and the probe all
+       share — one "which district is this" answer in the room, not a second opinion. */
+    const reg = REG ? regionAt(REG, p.x, p.z) : null;
+    const want = reg === 'woods' ? (rMix < 0.7 ? 'fern' : 'bush')
+      : reg === 'desert' ? 'bush'
+        : (rMix < 0.8 ? 'tuft' : 'bush');
+    const kit = { bush: gcBushKit, fern: gcFernKit, tuft: gcTuftKit }[want];
+    if (live(kit)) buckets[want].push(p); else proc.tuft.push(p);
+  }
+  for (const p of placements.rock) {
+    if (rng() > FLORA.gc) continue;
+    if (live(gcRockKit)) buckets.rock.push(p); else proc.rock.push(p);
+  }
+  return { buckets, proc };
 }
 buildWorld();
 
@@ -974,6 +1248,16 @@ const ROSTER = [
     body: () => createVehicleGlbMesh({
       url: planeUrl, scale: AIR_MESH_SCALE, fallback: { w: 0.6, h: 0.4, l: 1.15 },
       spin: [{ node: 'veh_plane_prop', axis: 'z', rate: 48 }],
+      /* A-SANDBOX — THE NOSE POINTED THE WRONG WAY IN THE CLIMB, and the trajectory is why nobody
+         caught it: ArrowUp really does gain +16.8 u and `state.pitch` really does read +0.4, so
+         every NUMBER said correct while the aeroplane visibly climbed nose-flat-to-down. It took
+         looking at a frame. `createBirdModel` composes YXZ(pitch, yaw, bank) and this body's nose
+         is +Z, and those two together mean a positive pitch rotates the nose DOWN (the mesh
+         module's header does the arithmetic). Corrected HERE, on this one roster row, rather than
+         in pilot.js's shared euler — that line also serves models whose art may be authored the
+         other way, and it is already internally inconsistent about the sign. Visual only: the
+         physics quaternion, the chase camera and the probe receipts are untouched. */
+      pitchSign: -1,
     }),
     cam: { dist: 7.0, height: 2.4, aheadUp: 1.0 },
     collide: false, mount: { fly: 9 }, air: true,
@@ -1227,7 +1511,28 @@ function updateHud(dt) {
     set('v-seam', `${SHAPED.gradeMax.toFixed(4)} ≤ ${WP.maxGrade.toFixed(2)}`, SHAPED.gradeMax <= WP.maxGrade + 1e-9 ? 'on' : 'bad');
     set('v-water', `${LAKES.length} lakes · ${SHAPED.bowls.length} basins · ${SHAPED.islandTexels} islet texels`,
       LAKES.length ? 'on' : 'off');
-    set('v-flora', `${TREE_N} trees · sand ${SHAPED.painted}`, TREE_N ? 'on' : 'off');
+    /* A-SANDBOX: the flora row reports the SPLIT, not just a total — the whole claim of this arc is
+       that a wood is now several species and a sparse accent, and a single "N trees" cannot tell a
+       mixed forest from 700 identical cones. Ground cover gets its own row for the same reason. */
+    set('v-flora', FLORA_ON
+      ? `${TREE_N} — ${FLORA_N.conifer}con ${FLORA_N.broadleaf}bl ${FLORA_N.snag}snag`
+      : `${TREE_N} procedural (?flora=proc)`, TREE_N ? 'on' : 'off');
+    const gcN = FLORA_N.bush + FLORA_N.fern + FLORA_N.tuft + FLORA_N.rock;
+    const procN = FLORA_N.procTuft + FLORA_N.procRock;
+    set('v-groundcover', FLORA_ON
+      ? `${gcN} — ${FLORA_N.bush}bush ${FLORA_N.fern}fern ${FLORA_N.tuft}tuft ${FLORA_N.rock}rock`
+      : `${procN} procedural`, (gcN + procN) ? 'on' : 'off');
+    set('v-wind', FLORA.wind > 0 ? `${FLORA.wind.toFixed(3)} — foliage sways` : 'still (?wind=0)', FLORA.wind > 0 ? 'on' : 'off');
+    /* the clock's own readout: t, the named phase, and whether it is MOVING. "paused" is stated
+       rather than implied because a still sun is this room's determinism guarantee, not an oversight. */
+    set('v-day', `t ${sun.t.toFixed(3)} · ${phaseName(sun.t)} · ${DAY.auto ? `${DAY.pace.toFixed(0)}s/day` : 'paused'}`, DAY.auto ? 'on' : 'off');
+    /* the weather row reports the EASED scalars, not the requested kind — the kind flips instantly
+       and the world takes several seconds to agree, so a row showing only the kind would call it
+       raining before a single drop fell. */
+    set('v-weather', weather.kind === 'clear' && weather.overcast < 1e-3
+      ? 'clear'
+      : `${weather.kind} · ${(weather.intensity * 100).toFixed(0)}% · ${weather.rainDropCount} drops`,
+    weather.overcast > 1e-3 ? 'on' : 'off');
   }
   const ri = renderer.info.render;
   set('v-draws', `${ri.calls} · ${(ri.triangles / 1000).toFixed(0)}k · ${stats.fps.toFixed(0)} fps · build ${LEVEL_BUILD_MS.toFixed(0)} ms`);
@@ -1259,6 +1564,31 @@ function syncDock() {
     const el = $('p-' + id); if (!el) continue;
     el.value = String(SWING[key]);
     $('n-' + id).textContent = Number(SWING[key]).toFixed(2);
+  }
+  /* A-SANDBOX: the flora dials, so a `?gc=0.3&wind=0` link OPENS with its sliders already in that
+     position. The failure this prevents is the one every URL-param-plus-slider pair has: the world
+     obeys the link and the dock shows the default, so the first drag of any slider snaps the world
+     back to a state the visitor never asked for. */
+  for (const [id, key, dec] of [['gc', 'gc', 2], ['snags', 'snags', 2], ['wind', 'wind', 3]]) {
+    const el = $('p-' + id); if (!el) continue;
+    el.value = String(FLORA[key]);
+    $('n-' + id).textContent = Number(FLORA[key]).toFixed(dec);
+    el.disabled = !FLORA_ON && key !== 'wind';   // procedural arm: cover/snags have nothing to sort
+  }
+  const fb = $('b-flora');
+  if (fb) { fb.textContent = FLORA_ON ? 'kit flora: on' : 'kit flora: off'; fb.setAttribute('aria-pressed', String(FLORA_ON)); }
+  /* A-SANDBOX: the sky bay. `time of day` reads the LIVE sun rather than a stored request, so while
+     the cycle runs the slider tracks it — the dial and the world cannot disagree about what time it
+     is, which is the whole failure mode a "set-only" control has. */
+  const pt = $('p-t');
+  if (pt) { pt.value = String(sun.t.toFixed(3)); $('n-t').textContent = sun.t.toFixed(3); }
+  const pp = $('p-pace');
+  if (pp) { pp.value = String(DAY.pace); $('n-pace').textContent = String(Math.round(DAY.pace)); }
+  const db = $('b-daycycle');
+  if (db) { db.textContent = DAY.auto ? 'cycle: running' : 'cycle: paused'; db.setAttribute('aria-pressed', String(DAY.auto)); }
+  for (const k of WEATHER_KINDS_UI) {
+    const b = $('b-weather-' + k);
+    if (b) b.setAttribute('aria-pressed', String(weather.kind === k));
   }
 }
 function wireDock() {
@@ -1328,24 +1658,130 @@ function wireDock() {
     }
   }
   $('b-walk').addEventListener('click', () => pick('walk'));
+  /* ---- A-SANDBOX: THE FLORA DIALS. `gc` and `snags` change WHAT IS PLANTED, so they re-run the
+     build — but unlike every world dial above they do NOT respawn, because they do not move the
+     ground: the heightfield, the pads and the towers come out of a deterministic rebuild
+     byte-identical, so teleporting the player would be a side effect with no cause. (That identity
+     is exactly what keeps the pinned terrain checksum valid while these sliders exist.)
+     `wind` writes a shader uniform and needs no rebuild at all — the next frame is already windier. */
+  for (const [id, key, dec, rebuild] of [['gc', 'gc', 2, true], ['snags', 'snags', 2, true], ['wind', 'wind', 3, false]]) {
+    const el = $('p-' + id); if (!el) continue;
+    el.addEventListener('input', () => {
+      FLORA[key] = Number(el.value);
+      $('n-' + id).textContent = Number(el.value).toFixed(dec);
+      if (!rebuild) return;
+      buildWorld();
+      const gcN = FLORA_N.bush + FLORA_N.fern + FLORA_N.tuft + FLORA_N.rock;
+      flash(`${TREE_N} trees (${FLORA_N.snag} snags) · ${gcN} ground cover`);
+    });
+  }
+  /* ---- A-SANDBOX: THE SKY BAY. All live — the sun rig and the weather rig are both per-frame
+     scalar machines, so nothing here rebuilds anything. ---- */
+  const ptEl = $('p-t');
+  if (ptEl) {
+    ptEl.addEventListener('input', () => {
+      /* SCRUBBING PAUSES THE CLOCK, and that is the determinism contract rather than a convenience:
+         if dragging the time slider left the cycle running, the value you just chose would start
+         drifting out from under you and no capture taken afterwards could be reproduced from the
+         URL. Grab the handle, own the time. */
+      if (DAY.auto) { DAY.auto = false; sun.setAuto(false); }
+      sun.goTo(Number(ptEl.value), true);
+      syncDock();
+    });
+  }
+  const ppEl = $('p-pace');
+  if (ppEl) {
+    ppEl.addEventListener('input', () => {
+      DAY.pace = Number(ppEl.value); sun.setPace(DAY.pace);
+      /* the rig CLAMPS pace to its own bounds, so read the accepted value back rather than echoing
+         the request — a dial that displays a number the engine refused is a dial that lies. */
+      DAY.pace = sun.pace; syncDock();
+      flash(`one world day = ${DAY.pace.toFixed(0)} s`);
+    });
+  }
+  $('b-daycycle').addEventListener('click', () => {
+    DAY.auto = !DAY.auto; sun.setAuto(DAY.auto); syncDock();
+    flash(DAY.auto ? `day running · ${DAY.pace.toFixed(0)} s per day` : `day paused at t=${sun.t.toFixed(3)}`);
+  });
+  /* REAL-TIME IS THE SLOWEST THE ENGINE ALLOWS, AND IT IS NOT 1:1 — said out loud rather than
+     quietly approximated. A true real-time day is 86400 s; sun-rig.js clamps `setPace` to
+     PACE_MAX = 900 s, a bound it shares with lgr-live-sky's setTimeSpeed so the two apps' time
+     controls stay one family. 900 s = a 15-minute day, i.e. 96× real time. Raising that ceiling is
+     an engine change to a SHARED clamp with a second consumer, so it is reported, not taken. */
+  $('b-realtime').addEventListener('click', () => {
+    DAY.pace = 900; sun.setPace(900); DAY.pace = sun.pace;
+    DAY.auto = true; sun.setAuto(true); syncDock();
+    flash('slowest the engine allows: 900 s/day (96× real time — see the pace note)');
+  });
+  $('b-noon').addEventListener('click', () => {
+    if (DAY.auto) { DAY.auto = false; sun.setAuto(false); }
+    sun.goTo(0.5, true); syncDock(); flash('noon · t=0.500');
+  });
+  /* the weather chips are BUILT FROM THE RIG'S OWN VOCABULARY, the roster-bay pattern one bay down:
+     a kind added to WEATHER_KINDS in the engine appears here without touching this file. */
+  const wbay = $('weather-bay');
+  if (wbay) {
+    for (const k of WEATHER_KINDS_UI) {
+      const b = document.createElement('button');
+      b.id = 'b-weather-' + k;
+      b.textContent = k;
+      b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', () => {
+        weather.setKind(k); syncDock();
+        flash(k === 'clear' ? 'weather clearing' : `weather: ${k} — it eases in over a few seconds`);
+      });
+      wbay.appendChild(b);
+    }
+  }
+  /* the kit/procedural A/B is a RELOAD, honestly, because the kits are constructed once at module
+     scope (moto-lab's "the GLB loads a single time" rule). Rebuilding them live would mean a second
+     construction path that the URL arm does not use — two ways to reach one state is how the two
+     start disagreeing. So the button goes where the link goes. */
+  $('b-flora').addEventListener('click', () => {
+    const p = currentParams();
+    if (FLORA_ON) p.set('flora', 'proc'); else p.delete('flora');
+    location.search = p.toString();
+  });
   $('b-copy').addEventListener('click', () => {
-    const p = new URLSearchParams();
-    p.set('seed', WP.seed); p.set('grade', WP.maxGrade); p.set('street', WP.streetW);
-    p.set('cols', AR.cols); p.set('spacing', AR.spacing); p.set('woods', WP.woods);
-    /* THE PHYSICS GOES IN THE URL TOO, which is the whole point of the copy button: a swing that felt
-       right is a rope length and a gravity, and a link that carries the world but not the body is a
-       link to a different experiment. Written from the LIVE profile, so what you copy is what is
-       actually in force — not what the sliders were built with. */
-    for (const [param, key] of PHYS) p.set(param, SWING[key]);
-    if (MODE !== 'walk') p.set('mode', MODE);
-    if (WP.preset !== 'valley') p.set('preset', WP.preset);
-    if (!WP.regions) p.set('regions', 'off');
-    const url = location.origin + location.pathname + '?' + p.toString();
+    const url = location.origin + location.pathname + '?' + currentParams().toString();
     if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
     flash('url copied');
   });
   const dock = $('dock');
   $('dock-toggle').addEventListener('click', (e) => { e.stopPropagation(); dock.classList.toggle('min'); $('dock-toggle').textContent = dock.classList.contains('min') ? '+' : '–'; });
+}
+
+/* ---- THE ROOM'S STATE AS A LINK, in ONE place (A-SANDBOX). This was inline in the copy-url
+   handler; the flora A/B button needs the identical set, and two builders for one URL is how a
+   param quietly stops being shareable from one of them (which is the exact gap the `spacing`
+   comment above records A-LAUNCH paying for). Written from the LIVE objects, so what you copy is
+   what is in force — not what the sliders were built with. ---- */
+function currentParams() {
+  const p = new URLSearchParams();
+  p.set('seed', WP.seed); p.set('grade', WP.maxGrade); p.set('street', WP.streetW);
+  p.set('cols', AR.cols); p.set('spacing', AR.spacing); p.set('woods', WP.woods);
+  /* THE PHYSICS GOES IN THE URL TOO, which is the whole point of the copy button: a swing that felt
+     right is a rope length and a gravity, and a link that carries the world but not the body is a
+     link to a different experiment. */
+  for (const [param, key] of PHYS) p.set(param, SWING[key]);
+  /* A-SANDBOX: and so does the flora. Three dials that change what the world LOOKS like, written
+     unconditionally rather than only-when-non-default, because the whole point of the link is that
+     the recipient sees what the sender saw — a default that changes in a later arc would silently
+     re-render every link ever copied. `flora=proc` is the one written conditionally: it is a MODE,
+     not a value, and its absence is the state. */
+  p.set('gc', FLORA.gc); p.set('snags', FLORA.snags); p.set('wind', FLORA.wind);
+  if (!FLORA_ON) p.set('flora', 'proc');
+  /* A-SANDBOX: the SKY. `t` is written from the LIVE sun, so a link copied while the cycle was
+     running reopens at the moment it was copied rather than at the moment it was started — which
+     is what makes "I found a beautiful dusk, here it is" a working sentence. `daycycle` is written
+     only when running, on the same MODE-not-value rule as `flora=proc`. */
+  p.set('t', sun.t.toFixed(3));
+  if (DAY.auto) { p.set('daycycle', '1'); p.set('pace', DAY.pace); }
+  if (weather.kind !== 'clear') p.set('weather', weather.kind);
+  if (MODE !== 'walk') p.set('mode', MODE);
+  if (WP.preset !== 'valley') p.set('preset', WP.preset);
+  if (!WP.regions) p.set('regions', 'off');
+  return p;
 }
 wireDock(); syncDock(); syncChips();
 
@@ -1387,6 +1823,24 @@ function frame() {
      and Vector3s by reference (§1b) and docs/engine-invariants.md §7 forbids per-frame allocation,
      so there is not one `new` in this block. ---- */
   sun.update(dt);
+
+  /* ---- 8b-bis. THE WIND (ARC A-SANDBOX). Two assignments, and they close a five-lesson gap.
+     `attachVertexAO(mat, { sway: true })` has been splicing the L94 breeze into every foliage
+     material in this engine since L94 — the scatter props, the conifer kit, and now five more kits
+     — and its amplitude reads the shared `swayWind` uniform object BY REFERENCE. The only code that
+     ever WROTE that object was createCityWorld's own tick, and the two handles were not on the
+     package barrel at all, so every room that does not boot the procedural city (this one,
+     moto-lab, swing-lab) compiled the sway branch into its shaders and then left the amplitude at
+     zero forever. Dead instructions on the GPU, and foliage that had never once moved.
+     Cost: two scalar writes per frame into objects three.js already holds. There is no per-frame
+     allocation here and no new uniform — docs/engine-invariants.md §7 stays satisfied.
+     C++ anchor: `swayWind` is a `struct { float value; }` the shader holds a pointer to; this is
+     the one line that was missing an assignment to it.
+     `?wind=0` is a bit-exact no-sway A/B arm — vector-style.js's own note: amplitude 0 leaves
+     `transformed` untouched to the bit, so the control arm is the pre-arc frame, not an approximation. */
+  swayTime.value = stats.t;
+  swayWind.value = FLORA.wind;
+
   /* the key light's direction IS the sun's, at a fixed 20 u standoff (§1b's shadow-frustum budget).
      `sunDir` is already the MOON's direction after dusk — SunRig flips it — so the night key is
      moonlight from the right place rather than a sun buried under the world. */
@@ -1413,6 +1867,38 @@ function frame() {
   scene.fog.color.copy(_fogC);
   renderer.setClearColor(_fogC, 1);
   fill.intensity = 0.85 + 0.55 * lowSunWashK(sun.sunArc.y);
+
+  /* ---- 8b-ter. THE WEATHER TICK (ARC A-SANDBOX). The rig owns its particles; the ROOM owns what
+     weather does to its own light, which is the "compose, don't fork" contract in weather-rig.js's
+     header. Three composed terms, each a departure from the clear-weather value rather than a
+     replacement for it, so `clear` restores this room exactly (overcast eases to 0 → every line
+     below collapses to the number it had before this arc — that is the byte-identical arm, and it
+     is why FOG_CLEAR exists as a named pair instead of two literals inlined here):
+       · the KEY dims — an overcast sky is a diffuser, so the sun loses its edge
+       · the FILL lifts — that light did not vanish, it arrived from everywhere instead
+       · the FOG closes in — the single strongest cue that the air has water in it
+     `fog` is the rig's own separate scalar (the 'fog' KIND), added on top of the generic overcast
+     haze so choosing fog reads as more than "rain without the rain". */
+  weather.update(dt, stats.t);
+  /* THE COLUMN FOLLOWS THE CAMERA. The rig's particles live in a box around its group origin; left
+     at the world origin it would rain on one patch of the city and nowhere else.
+     THE CAMERA AND NOT `_camPos`, deliberately: `_camPos` is written only inside the WALK branch
+     (§8's `character.cameraPose`), so a rider would have dragged the weather column along behind
+     wherever they last stood on foot — dry air in every vehicle, which is precisely the kind of
+     mode-dependent hole this arc keeps finding. `rig.camera.position` is true in every mode.
+     It is one frame stale here (the rig is posed later in the frame) and that is deliberate too:
+     re-ordering the tick to chase a frame would put the weather ahead of the sun it composes with.
+     `.set` on an existing Vector3 — no allocation (engine-invariants §7). */
+  const _wc = rig.camera.position;
+  weather.group.position.set(_wc.x, HEIGHT(_wc.x, _wc.z), _wc.z);
+  const wOver = weather.overcast;
+  if (wOver > 1e-4) {
+    key.intensity *= 1 - 0.55 * wOver;
+    fill.intensity += 0.35 * wOver;
+    const wFog = Math.min(1, wOver * 0.55 + weather.fog * 0.45);
+    scene.fog.near = FOG_CLEAR.near * (1 - 0.82 * wFog);
+    scene.fog.far = FOG_CLEAR.far * (1 - 0.72 * wFog);
+  } else { scene.fog.near = FOG_CLEAR.near; scene.fog.far = FOG_CLEAR.far; }
 
   /* THE SKY-VIEW LUT IS RE-MARCHED ONLY WHEN THE SUN ACTUALLY MOVED. It is a 200x100 raymarch and
      the city pays it every frame because the city's sun is always creeping; THIS room defaults to a
@@ -1710,6 +2196,114 @@ window.__input = {
   get locked() { return lockAim.locked; },
   get keys() { return [...held]; },
 };
+/* ---- A-SANDBOX: THE FLORA RECEIPTS. Everything here is READ OFF THE SCENE — the instanced meshes
+   that are actually being drawn and the materials that are actually compiled — rather than off the
+   config that asked for them. That distinction is the whole reason A-FLORA could not prove its own
+   tint claim: nothing had ever instanced the kits, so `makeTreeTints`' report was a number about an
+   array, not about anything on screen.
+     kits[]    one row per drawn InstancedMesh: family, variant, instance count, the `userData.type`
+               stamp, and `customProgramCacheKey()` — which is 'lgr-ao-sway' or 'lgr-ao' and is
+               therefore the DIRECT observation of the boulder trap, not an assumption about it.
+     tint()    per-family: distinct colours actually written into the instanceColor buffer, and the
+               realized w/v spans. Sampled from the buffer the GPU got (createTreeKit cuts it there).
+     colorsOf() the first N instanceColor triples straight off the live attribute — so a checker can
+               confirm neighbouring instances differ instead of trusting a "distinct" count.
+   ---- */
+/* the SunRig's t is a bare scalar; naming its phases keeps the HUD readable without a second clock.
+   Boundaries are SunRig's own documented anchors (0 night · 0.25 dawn · 0.5 noon · 0.75 dusk). */
+const phaseName = (t) => (t < 0.22 || t >= 0.80 ? 'night' : t < 0.32 ? 'dawn' : t < 0.44 ? 'morning'
+  : t < 0.58 ? 'noon' : t < 0.70 ? 'afternoon' : t < 0.78 ? 'dusk' : 'twilight');
+
+/* ---- A-SANDBOX: the SKY + WEATHER receipts. Both read the RIGS, which are the things the frame
+   actually renders from — not the dock's idea of what was requested. `weather.probe` reports the
+   eased scalars AND the live particle counts, because "did the rig construct" and "is anything
+   falling" are different questions and only the second one is the ability working. ---- */
+window.__sky = {
+  get t() { return sun.t; },
+  get phase() { return phaseName(sun.t); },
+  get auto() { return DAY.auto; },
+  get pace() { return sun.pace; },
+  goTo: (t) => { DAY.auto = false; sun.setAuto(false); sun.goTo(t, true); syncDock(); return sun.t; },
+  setAuto: (v) => { DAY.auto = !!v; sun.setAuto(DAY.auto); syncDock(); return DAY.auto; },
+  setPace: (s) => { sun.setPace(s); DAY.pace = sun.pace; syncDock(); return sun.pace; },
+  /* the sun's own outputs, so a check can prove the light actually MOVED with t rather than
+     assuming the scalar reached the shader. */
+  get light() { return { intensity: key.intensity, elevation: sun.sunArc.y, dir: { x: sun.sunDir.x, y: sun.sunDir.y, z: sun.sunDir.z } }; },
+};
+window.__weather = {
+  get kind() { return weather.kind; },
+  setKind: (k) => { weather.setKind(k); syncDock(); return weather.kind; },
+  get scalars() { return { intensity: weather.intensity, overcast: weather.overcast, fog: weather.fog, snow: weather.snow, cloud: weather.cloud }; },
+  get drops() { return weather.rainDropCount; },
+  get fogPlanes() { return { near: scene.fog.near, far: scene.fog.far }; },
+  get lights() { return { key: key.intensity, fill: fill.intensity }; },
+  /* how many particles are ACTUALLY on screen, counted off the instance matrices rather than the
+     pool size — an InstancedMesh with 600 slots and 0 visible is the exact failure a "constructed
+     it" check would pass. The rig parks a hidden particle at y = −50 with scale 0. */
+  live() {
+    const out = { rain: 0, snow: 0 };
+    const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+    weather.group.traverse((o) => {
+      if (!o.isInstancedMesh) return;
+      const key2 = o.geometry.parameters && o.geometry.parameters.height > 0.2 ? 'rain' : 'snow';
+      for (let i = 0; i < o.count; i++) {
+        o.getMatrixAt(i, m); m.decompose(p, q, s);
+        if (s.x > 1e-4 && p.y > -40) out[key2]++;
+      }
+    });
+    return { ...out, pools: weather.poolCounts, groupScale: weather.group.scale.x, at: { x: weather.group.position.x, z: weather.group.position.z } };
+  },
+};
+
+window.__flora = {
+  get on() { return FLORA_ON; },
+  get dials() { return { gc: FLORA.gc, snags: FLORA.snags, wind: FLORA.wind }; },
+  get counts() { return { ...FLORA_N, trees: TREE_N }; },
+  get wind() { return { time: swayTime.value, amp: swayWind.value }; },
+  /* every flora InstancedMesh in the scene, found by traversal — a family that failed to attach
+     simply is not here, which is what makes a count of these rows a real answer. */
+  kits() {
+    const rows = [];
+    for (const f of FLORA_KITS) {
+      const g = f.bucket === 'conifer' ? treeGroup : floraGroups.find((x) => x.userData.floraBucket === f.bucket);
+      if (!g) continue;
+      g.traverse((o) => {
+        if (!o.isInstancedMesh) return;
+        rows.push({
+          family: f.bucket,
+          variant: o.userData.variant,
+          count: o.count,
+          type: o.userData.type,
+          program: o.material.customProgramCacheKey ? o.material.customProgramCacheKey() : null,
+          hasColor: !!o.instanceColor,
+        });
+      });
+    }
+    return rows;
+  },
+  tint(bucket) {
+    const f = FLORA_KITS.find((x) => x.bucket === bucket);
+    return f && f.kit ? f.kit.tintReport() : null;
+  },
+  /* the raw per-instance colours off the LIVE buffer for one family's first mesh */
+  colorsOf(bucket, n = 8) {
+    const rows = [];
+    const g = bucket === 'conifer' ? treeGroup : floraGroups.find((x) => x.userData.floraBucket === bucket);
+    if (!g) return rows;
+    g.traverse((o) => {
+      if (!o.isInstancedMesh || !o.instanceColor || rows.length >= n) return;
+      const a = o.instanceColor.array;
+      for (let k = 0; k < o.count && rows.length < n; k++) {
+        rows.push([+a[k * 3].toFixed(4), +a[k * 3 + 1].toFixed(4), +a[k * 3 + 2].toFixed(4)]);
+      }
+    });
+    return rows;
+  },
+  /* the ORDER-INDEPENDENT placement receipt over the whole scene's 'tree'-stamped instances — the
+     determinism check. Two boots of one URL must return the identical hash + count. */
+  hash: () => hashTreeInstances(scene),
+};
+
 window.__world = {
   get mode() { return MODE; },
   carve: () => ({ ...CARVE.stats }),
@@ -1808,6 +2402,33 @@ window.__setMode = (m) => { pick(m); return MODE; };
 /* the body loaders' readiness, so a probe can WAIT for the GLB instead of racing it (a capture
    taken mid-fetch shows a fallback box and would be filed as an art failure). Only built craft
    have a promise — an unentered one has loaded nothing, which is the point of lazy building. */
+/* ---- A-SANDBOX: THE ATTITUDE RECEIPT. The plane's pitch defect was invisible to every number this
+   room already published — `state.pitch` read +0.4 and the altitude really did climb, which is
+   exactly what made it survive a measurement pass. What was missing was the nose direction OF THE
+   THING ON SCREEN, so that is what this returns: the third column of the body group's world matrix,
+   i.e. its local +Z (the nose, per createVehicleMesh's contract) after every transform has been
+   applied. `physicsPitch` is the movement model's own euler for the same frame, so the two can be
+   compared — and the pre-fix value of `nose.y` is exactly this one negated, which is what makes a
+   single measurement prove both arms. ---- */
+window.__attitude = () => {
+  if (!ACTIVE || !ACTIVE.body || !ACTIVE.body.group) return null;
+  const g = ACTIVE.body.group;
+  g.updateMatrixWorld(true);
+  const e = g.matrixWorld.elements;
+  const L = Math.hypot(e[8], e[9], e[10]) || 1;
+  const _pe2 = new THREE.Euler().setFromQuaternion(ACTIVE.state.quat, 'YXZ');
+  return {
+    key: MODE,
+    nose: { x: e[8] / L, y: e[9] / L, z: e[10] / L },
+    physicsPitch: _pe2.x,
+    statePitch: ACTIVE.state.pitch,
+    /* the BODY GROUP's own world position, not `state` — a capture harness needs to point a camera
+       at the thing that is drawn, and finding it by traversal is how the first attempt at this
+       receipt ended up reading the scene root's identity matrix and reporting a level nose. */
+    x: g.position.x, y: g.position.y, z: g.position.z,
+    yaw: ACTIVE.state.yaw,
+  };
+};
 window.__vehReady = (k) => {
   const v = BY_KEY.get(k);
   return v && v._inst && v._inst.body.ready ? v._inst.body.ready : Promise.resolve('procedural');

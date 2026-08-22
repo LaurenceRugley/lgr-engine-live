@@ -215,6 +215,7 @@ export { makeContactShadow, makeVignette, createSeatedLook } from './src/interio
 export {
   vectorOn, vectorTint, vectorShadow, weatherSnow, weatherCloud, weatherCloudOff,
   weatherSeason, fogCharm, vectorize, vectorizeTower, attachVectorUniforms, spliceVectorVertex,
+  swayTime, swayWind,   // A-SANDBOX — the L94 sway drive handles; see index-core-lib.js's note
   VEC_VERT_PARS, VEC_VERT_MAIN, VEC_FRAG_PARS,
 } from './src/vector-style.js';
 export {

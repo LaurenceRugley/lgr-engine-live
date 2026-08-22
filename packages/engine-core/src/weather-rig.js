@@ -38,7 +38,23 @@ export function createWeatherRig({ extent = 7, easeScale = 1 } = {}) {
   const RAIN_N = 600;
   const rain = new THREE.InstancedMesh(
     new THREE.PlaneGeometry(0.015, 0.5),
-    new THREE.MeshBasicMaterial({ color: '#a9bdd6', transparent: true, opacity: 0.0, depthWrite: false, fog: false }),
+    /* A-SANDBOX (2026-08-22) — DoubleSide, and it is a real defect being closed rather than a
+       preference. These particles are un-billboarded PlaneGeometry: `update` zeroes their rotation
+       every frame, so every quad's normal is the WORLD +Z forever. With the three.js default
+       `side: FrontSide`, a camera looking along +Z sees only their back faces and they are CULLED —
+       so the rain was completely invisible from one whole hemisphere of headings while the HUD
+       cheerfully reported 593 live instances. MEASURED, not reasoned: a two-frame pixel diff over a
+       580×520 crop at a fixed camera, wind and clouds off, gave 0 moved pixels looking along +Z and
+       241 (dMax 69) looking along +X, from the identical world.
+       This is HALF the cure. The other half is billboarding — at exactly edge-on a quad still has
+       zero projected area — and that needs the CAMERA inside `update(dt, elapsed)`, i.e. a
+       signature change across three consumers (createCityWorld, metropolis, world-lab). Recorded as
+       an OPEN rather than half-done; DoubleSide turns "invisible from half of all headings" into
+       "foreshortened near edge-on", which is a strictly smaller bug and a one-token change.
+       SAFE FOR THE BYTE-IDENTICAL CITY BASELINES: in `clear` weather every particle is parked at
+       y = −50 with scale 0, so no back face exists to newly appear — and `npm run tier-guard` was
+       run twice after this change to confirm it rather than argue it. */
+    new THREE.MeshBasicMaterial({ color: '#a9bdd6', transparent: true, opacity: 0.0, depthWrite: false, fog: false, side: THREE.DoubleSide }),
     RAIN_N,
   );
   rain.frustumCulled = false; rain.raycast = () => {};
@@ -49,7 +65,7 @@ export function createWeatherRig({ extent = 7, easeScale = 1 } = {}) {
   const SNOW_N = 700;
   const snow = new THREE.InstancedMesh(
     new THREE.PlaneGeometry(0.07, 0.07),
-    new THREE.MeshBasicMaterial({ color: '#f3f7ff', transparent: true, opacity: 0.0, depthWrite: false, fog: false }),
+    new THREE.MeshBasicMaterial({ color: '#f3f7ff', transparent: true, opacity: 0.0, depthWrite: false, fog: false, side: THREE.DoubleSide }),   // A-SANDBOX — same culling defect as the rain above
     SNOW_N,
   );
   snow.frustumCulled = false; snow.raycast = () => {};

@@ -113,7 +113,19 @@
     <div class="row"><span class="k">coverage dial</span><span class="v" id="v-cover">—</span></div>
     <div class="row"><span class="k">seam grade</span><span class="v" id="v-seam">—</span></div>
     <div class="row"><span class="k">water</span><span class="v" id="v-water">—</span></div>
-    <div class="row"><span class="k">flora</span><span class="v" id="v-flora">—</span></div>
+    <!-- A-SANDBOX: three rows where there was one. The canopy split and the ground-cover split are
+         the arc's whole visible claim, and a single total cannot show either. -->
+    <div class="row"><span class="k">canopy</span><span class="v" id="v-flora">—</span></div>
+    <!-- `v-groundcover`, NOT `v-cover`: this room already had a `v-cover` (the DISTRICT coverage
+         dial, eight rows up). The first cut of this row reused that id, so `getElementById` returned
+         the district row and the flora counts silently overwrote the coverage readout while this
+         row stayed at "—". Two rows, one id, and both numbers wrong — caught by LOOKING at the
+         capture, which is the only instrument that could have caught it: every probe assertion
+         reads `window.__flora`, not the DOM. -->
+    <div class="row"><span class="k">ground cover</span><span class="v" id="v-groundcover">—</span></div>
+    <div class="row"><span class="k">wind</span><span class="v" id="v-wind">—</span></div>
+    <div class="row"><span class="k">time of day</span><span class="v" id="v-day">—</span></div>
+    <div class="row"><span class="k">weather</span><span class="v" id="v-weather">—</span></div>
     <hr />
     <div class="row"><span class="k">draws · fps</span><span class="v" id="v-draws">—</span></div>
   </div>
@@ -142,6 +154,35 @@
            ranges bracket this room's shipped numbers rather than the profile's: rope 4.10 is the
            house rope the skyline is GENERATED from, so the useful question is "what happens either
            side of it", not "what does metropolis's 3.2 feel like here". ---- -->
+      <!-- ---- A-SANDBOX: THE FLORA BAY. A-FLORA shipped a broadleaf family, a dead-snag accent and
+           four ground-cover families and gave them no control anywhere, which is the same failure
+           the sidearm hit one bay down: an ability nobody can find is not shipped. `ground cover`
+           and `snags` rebuild the dressing; `wind` is a shader uniform and takes effect on the next
+           frame. All four are URL params too, and `copy url` writes them. ---- -->
+      <!-- ---- A-SANDBOX: THE SKY BAY. The day/night cycle has been wired since A-SKYWORLD and was
+           reachable ONLY by typing `?daycycle=1` into the address bar — the sidearm's failure
+           exactly. `run` starts the clock, `time` scrubs it to an absolute t, `pace` sets how many
+           real seconds one whole world day takes. Pausing hands the clock back to `time`, which is
+           what keeps every capture and probe phase able to pin a fixed frame. ---- -->
+      <div class="grp">DAY / NIGHT (live)</div>
+      <label>time of day<input id="p-t" type="range" min="0" max="0.999" step="0.001" /><span class="n" id="n-t">0.620</span></label>
+      <label>sec / day<input id="p-pace" type="range" min="1.5" max="900" step="1.5" /><span class="n" id="n-pace">90</span></label>
+      <div class="btns">
+        <button id="b-daycycle">cycle: paused</button>
+        <button id="b-realtime">real-time</button>
+        <button id="b-noon">noon</button>
+      </div>
+      <!-- ---- A-SANDBOX: THE WEATHER BAY. createWeatherRig is Lesson 18; this room had never asked
+           it for anything. One chip per KIND, built from the rig's own vocabulary. ---- -->
+      <div class="grp">WEATHER (live)</div>
+      <div class="btns" id="weather-bay"></div>
+      <div class="grp">FLORA (cover + snags rebuild · wind is live)</div>
+      <label>ground cover<input id="p-gc" type="range" min="0" max="1" step="0.05" /><span class="n" id="n-gc">1.00</span></label>
+      <label>dead snags<input id="p-snags" type="range" min="0" max="0.30" step="0.01" /><span class="n" id="n-snags">0.06</span></label>
+      <label>wind<input id="p-wind" type="range" min="0" max="0.20" step="0.005" /><span class="n" id="n-wind">0.045</span></label>
+      <div class="btns">
+        <button id="b-flora">kit flora: on</button>
+      </div>
       <div class="grp">PHYSICS (live — no rebuild)</div>
       <label>rope length<input id="p-rope" type="range" min="1.5" max="9" step="0.05" /><span class="n" id="n-rope">4.10</span></label>
       <label>gravity<input id="p-gravity" type="range" min="1" max="16" step="0.1" /><span class="n" id="n-gravity">5.40</span></label>

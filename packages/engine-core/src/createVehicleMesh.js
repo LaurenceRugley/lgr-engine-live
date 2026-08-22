@@ -39,8 +39,25 @@
    (which A-DRIVE did: build_vehicles.py's three road tables were authored nose-at-−Z and were
    flipped at the source rather than corrected here, so the runtime needs no per-model constant).
 
+   THE PITCH SIGN IS THE NOSE CONVENTION'S SECOND HALF, and it was missing (A-SANDBOX 2026-08-22).
+   The note above settles which way the nose POINTS at yaw 0. It says nothing about which way a
+   positive PITCH turns it, and with a +Z nose the two are in conflict for any model driven by a
+   `YXZ(pitch, yaw, bank)` euler: rotating (0,0,1) by +θ about X gives y' = −sin θ, i.e. the nose
+   goes DOWN for a positive pitch. Every fixed-wing model in pilot.js also spends positive pitch on
+   CLIMB (`state.y += sin(effPitch)·speed·dt`), so the trajectory and the attitude disagree by
+   construction: the craft gains height with its nose flat-to-down.
+   It stayed hidden for a long time because the engine's other bird is a gull, and gulls are
+   THREE.Sprite billboards (pilot.js:617) — a Sprite always faces the camera and never reads the
+   quaternion at all, so the defect is structurally invisible on one. It appears the first time a
+   MESH body is flown by a bird model, which is world-lab's aeroplane.
+   `pitchSign: -1` is the per-model correction. It is deliberately NOT a fix inside pilot.js's
+   shared euler: that same line serves models whose art may be authored to the opposite convention,
+   and pilot.js is ALREADY inconsistent about it internally (line 1133 negates, lines 371/695/872/
+   2147 do not) — a conflict worth surfacing rather than silently resolving for every consumer at
+   once. Default `1` → the identical quaternion path, byte-for-byte, for every existing caller.
+
    CONTRACT
-     createVehicleGlbMesh({ url, tint, scale, yOff, yawOffset, spin, fallback })
+     createVehicleGlbMesh({ url, tint, scale, yOff, yawOffset, pitchSign, spin, fallback })
        -> { group, ready, mode, nodes, update(state, dt), setVisible(v), dispose() }
    ============================================================ */
 import * as THREE from 'three';
@@ -78,6 +95,10 @@ export function createBoxVehicleMesh({ w = 0.34, h = 0.34, l = 0.74, color = '#8
 
 export function createVehicleGlbMesh({
   url, tint = null, scale = 1, yOff = 0, yawOffset = 0,
+  /* +1 (default) = use the movement model's quaternion exactly as built — byte-identical.
+     −1 = negate the PITCH component only, for a +Z-nose model flown by a model whose positive
+     pitch means climb. See the nose/pitch note in the header. */
+  pitchSign = 1,
   /* SPIN — the articulation table. Each row names a glTF node and how it turns:
        { node, axis: 'x'|'y'|'z', rate, perDist }
      `rate`    rad/s of CONSTANT rotation — a rotor or a propeller, which turns because the engine
@@ -136,6 +157,9 @@ export function createVehicleGlbMesh({
   /* scratch reused every frame — the no-hot-alloc invariant (docs/engine-invariants.md) */
   const _q = new THREE.Quaternion();
   const _yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawOffset);
+  /* hoisted for the pitchSign path — docs/engine-invariants.md §7 forbids per-frame allocation, and
+     this runs inside update(). Reused every frame, never reallocated. */
+  const _pe = new THREE.Euler();
 
   return {
     group,
@@ -147,7 +171,19 @@ export function createVehicleGlbMesh({
        the shared vocabulary of every model in pilot.js, so a wheel row works against any of them. */
     update(state, dt) {
       group.position.set(state.x, state.y + yOff, state.z);
-      if (yawOffset) group.quaternion.copy(_q.copy(state.quat).multiply(_yaw));
+      /* THE PITCH CORRECTION IS READ BACK OUT OF THE QUATERNION THE PHYSICS BUILT, not recomposed
+         from `state.pitch`. That matters: a fixed-wing model bakes its STALL pitch (`effPitch`,
+         pilot.js:674) into the quaternion and never stores it on state, so rebuilding from
+         `state.pitch` would leave the nose lying about the one moment the attitude matters most.
+         Decompose in the same 'YXZ' order the models compose in, negate X, recompose — exact.
+         VISUAL ONLY: `state.quat` is untouched, so the physics, the chase camera and every probe
+         receipt read exactly what they read before. */
+      if (pitchSign < 0) {
+        _pe.setFromQuaternion(state.quat, 'YXZ');
+        _pe.x = -_pe.x;
+        _q.setFromEuler(_pe);
+        group.quaternion.copy(yawOffset ? _q.multiply(_yaw) : _q);
+      } else if (yawOffset) group.quaternion.copy(_q.copy(state.quat).multiply(_yaw));
       else group.quaternion.copy(state.quat);
       if (!spun.length) return;
       const d = Math.abs(state.speed || 0) * dt;   // distance travelled this frame — a wheel's own clock
