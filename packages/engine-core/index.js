@@ -350,6 +350,12 @@ export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TR
    names and one of them swallowed a real export (refutation, 2026-08-22). */
 export { createFacadeKit, assignFacadeVariants, facadeFitReport, storeyU,
   FACADE_KIT_VARIANTS, FACADE_KIT_COURSES, FACADE_BODY_KINDS } from './src/createFacadeKit.js';
+// Arc A-LITWINDOWS — the night city stops being silhouettes. Lights a hash-chosen fraction of the
+// facade kit's EXISTING glazing courses (no second window system, no new geometry), telling glass
+// from wall by the AO-invariant b/r ratio of the raw COLOR_0 slot code, driven by the same
+// `sunRig.windowGlow` the street lamps read so the two cannot disagree about the time of day.
+// Opt-in via `createFacadeKit({ litWindows })`; with it null the daylight frame is untouched.
+export { createLitWindows, litCountFor, lwHash, lwKey } from './src/lit-windows.js';
 
 // Beauty B1 GROUND TRUTH — the GPU TEXTURE FORGE: seeded procedural PBR (albedo/ORM/Sobel-normal) baked
 // at boot from periodic-noise family shaders, so a world stops being flat-coloured. Recipes live in

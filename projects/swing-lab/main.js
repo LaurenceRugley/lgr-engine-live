@@ -41,7 +41,7 @@ import {
   createHeroBody,
   createTextureForge, CITY_SURFACES, createTriplanarForgeMaterial, tilesPerUnit, applyGroundMacro,
   createStreetKit, applyStreetGrid, createStreetPlaces,
-  createFacadeKit, storeyU,
+  createFacadeKit, storeyU, createLitWindows,
 } from '@lgr/engine-core';
 /* A-CITIZENS: the tier-A skin. The engine deliberately does NOT inline this GLB (pedestrians.js's
    lib-size note) — the consumer that ships people pays for the model. */
@@ -374,6 +374,28 @@ else if (LEVEL === 'city') {
    `?buildings=box` IS THE CONTROL ARM AND IT IS TODAY'S CITY EXACTLY: no kit is created, so
    box-arena's `facade` stays null and not one statement of the new path runs. One build, two URLs. */
 const BUILDINGS = Q.get('buildings') === 'box' ? 'box' : 'kit';
+
+/* ---- A-LITWINDOWS (2026-08-22): AND AT NIGHT THE BUILDINGS ARE INHABITED. `?windows=0` to undo. --
+   The ABILITY is `createLitWindows` (engine-core); THIS is wiring and the numbers that belong to
+   this room. A-NIGHTFALL lit the STREETS and left the towers as silhouettes; this lights a fraction
+   of the glazing courses A-FACADE already models, so the skyline reads as a city with people in it.
+
+   IT IS THE SAME SIGNAL THE LAMPS TAKE. `sunRig.windowGlow` — 0.00 at noon, 1.00 at midnight —
+   drives both, so a frame can never show lit windows over dark lamps or the reverse. Inventing a
+   second night scalar would be exactly the two-representations drift rule 6 forbids, and it is the
+   drift this room already avoided once when the streetlight constant became the sun.
+
+   ZERO COST AT NOON, and it is structural rather than careful: every emissive term is multiplied by
+   `windowGlow`, which the noon keyframe pins at exactly 0.00, so the daylight frame gets `+= 0.0`.
+
+   THE NUMBERS ARE THIS ROOM'S. `litFrac` 0.55 is citygen's own default `nightLit` for its
+   Manhattan profile — a working office building at night, not a blackout and not a switchboard.
+   The ground floor runs hotter (0.85) because a real street's retail does. `cols` 4 puts a pane
+   roughly every 3.5 m across this city's 1.26..2.37 u footprints at 6 m/u, which is an office bay. */
+const litWindows = (LEVEL === 'city' && BUILDINGS === 'kit' && Q.get('windows') !== '0')
+  ? createLitWindows({ litFrac: qNum('litfrac', 0.55), strength: qNum('winstrength', 0.62) })
+  : null;
+
 const facadeKit = (LEVEL === 'city' && BUILDINGS === 'kit') ? createFacadeKit({
   url: facadeKitUrl,
   storey: storeyU({
@@ -383,6 +405,7 @@ const facadeKit = (LEVEL === 'city' && BUILDINGS === 'kit') ? createFacadeKit({
     storeysPerTile: FACADE_STOREYS_PER_TILE,
   }),
   material: CITY_MATS ? CITY_MATS.tower : null,
+  litWindows,
 }) : null;
 if (facadeKit) CITY_ARENA.facade = facadeKit;
 
@@ -418,6 +441,38 @@ window.__facade = {
   get fit() { return facadeFit; },
   arm: BUILDINGS,
 };
+
+/* A-LITWINDOWS: THE RECEIPT. "How many windows are lit" is TWO questions — how many exist, and how
+   many light — and a night capture cannot tell them apart: a frame with no lit windows and a frame
+   with no windows built look identical. This repo has already shipped that exact confusion once (the
+   first swing-lab night capture had zero streetlamps in it and the screenshot could not say whether
+   they were missing or dark), so the counts come from arithmetic, not from a picture.
+   THE COUNT IS EXACT, not sampled: `litCountFor` re-runs the SAME integer LCG the fragment shader
+   runs, over the same cells, keyed on the same instance translations box-arena writes into the
+   matrices — so this is the shader's own answer computed on the CPU, not a model of it.
+   `glow` is read LIVE off the shared uniform, so a probe scrubbing the sun sees what the GPU will
+   actually be handed rather than what the rig was asked for. */
+window.__litwin = litWindows ? {
+  arm: 'on',
+  get glow() { return litWindows.glow; },
+  get sunGlow() { return sun.windowGlow; },
+  get materials() { return litWindows.materials; },
+  params: litWindows.params,
+  get counts() {
+    if (!facadeKit || facadeKit.mode !== 'kit') return null;
+    /* The SAME partition box-arena made: body kinds only, variant by height, and each instance's
+       world (x, z) — which is literally the translation column of the matrix the shader reads. */
+    const body = arena.boxes.filter((b) => facadeKit.kinds.indexOf(b.kind || 'tower') >= 0);
+    const which = facadeKit.assign(body.map((b) => b.h));
+    const perVariant = facadeKit.courses.map((c) => ({ courses: c, instances: [] }));
+    for (let i = 0; i < body.length; i++) perVariant[which[i]].instances.push({ x: body[i].x, z: body[i].z });
+    return {
+      buildings: body.length,
+      perVariant: perVariant.map((v, k) => ({ variant: facadeKit.variants[k] ?? `#${k}`, courses: v.courses, instances: v.instances.length })),
+      ...litWindows.litCountFor(perVariant),
+    };
+  },
+} : { arm: 'off', glow: 0, counts: null };
 
 /* ---- A-DRESS: THE STREET FURNITURE. The ABILITY is `createStreetKit` (engine-core); this is wiring
    and the numbers that belong to THIS room.
@@ -1180,6 +1235,10 @@ function frame() {
      streetlight that only samples the time once can never come on. */
   sun.update(dt);
   if (streetKit) streetKit.update(sun.windowGlow);
+  /* A-LITWINDOWS: the windows read the SAME scalar the lamps just read, on the same line of the same
+     frame — which is the whole reason there is no second night signal to keep in sync. One shared
+     uniform write for all five variant materials; no allocation (the no-hot-alloc invariant). */
+  if (litWindows) litWindows.update(sun.windowGlow);
 
   /* THE CROSSHAIR IS RESOLVED BEFORE THE STEP, so a web attaches to what the player is looking at
      THIS frame rather than last frame's view. It is cast from `rig.camera`, whose matrix was set by
@@ -1255,6 +1314,28 @@ function frame() {
   key.target.updateMatrixWorld();
 
   rig.setEye(character.cameraPose(_camPos, _camDir), _camDir);
+  /* A-LITWINDOWS: the capture seam world-lab and moto-lab already publish (`__camOverride`, absolute
+     form only) — a harness may pin the eye for judge shots. A dev seam, never a player camera.
+     IT IS HERE BECAUSE ITS ABSENCE WAS SILENTLY FAKING MEASUREMENTS. `tools/night-legibility.mjs`
+     sets `window.__camOverride` for each of its poses and had no way to learn that this room ignored
+     it, so its two swing-lab poses — a street-level eye and an aerial one — returned IDENTICAL
+     statistics (75.6% near-black, meanLum 6.3, p50 4 for both) off whatever pose the free-running
+     chase camera happened to be in. That is the same class of defect A-NIGHTFALL fixed in that tool
+     one arc ago (it scrubbed a clock nothing was listening to) reappearing one seam along: an
+     instrument that cannot tell "the room refused" from "the room agreed" reports a refusal as a
+     pass. The tool now READS THE POSE BACK and reports SKIPPED when it did not take.
+     THE SCRATCH PAIR IS A PLAIN {x,y,z}, NOT A Vector3 (line ~1216, so `cameraPose` can fill it
+     without this room importing vector maths it does not otherwise need) — so the normalise is
+     written out rather than called. Writing `.set(...)` here threw `set is not a function` 60 times
+     a second on the first run, which is the cheap version of this lesson. */
+  const _ov = window.__camOverride;
+  if (_ov) {
+    _camPos.x = _ov.x; _camPos.y = _ov.y; _camPos.z = _ov.z;
+    const dx = _ov.tx - _ov.x, dy = _ov.ty - _ov.y, dz = _ov.tz - _ov.z;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    _camDir.x = dx / dl; _camDir.y = dy / dl; _camDir.z = dz / dl;
+    rig.setEye(_camPos, _camDir);
+  }
   /* THE SPEED CUE. The curve and its easing are the controller's (character.js `fov`); this is the
      one line that opts in. Without it a chase camera renders 3 u/s and 7 u/s identically, because the
      body barely moves in frame either way — which is most of why a working swing can feel slow. */

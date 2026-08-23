@@ -130,6 +130,13 @@ export function facadeFitReport(heights, { courses = FACADE_KIT_COURSES, storey 
 export function createFacadeKit({
   url, variants = FACADE_KIT_VARIANTS, courses = FACADE_KIT_COURSES,
   storey = 1, kinds = FACADE_BODY_KINDS, material = null,
+  /* A-LITWINDOWS (2026-08-22): an optional `createLitWindows` handle. null (the default) = not one
+     statement of the night path runs and the kit is exactly what A-FACADE shipped. Given one, each
+     variant's material is patched with THAT VARIANT'S course count, because the row index that puts
+     one lit-window hash per glazing band is `floor(localY * courses)` and facade_c8 has eight bands
+     where facade_c2 has two. The kit is the only thing that knows which material belongs to which
+     rung, which is why the wiring lives here and the ABILITY lives in lit-windows.js. */
+  litWindows = null,
 } = {}) {
   if (!url) throw new Error('createFacadeKit: `url` is required — import it from \'@lgr/engine-core/assets/models/facade_kit.glb?url\' (the pedestrians.js rule: a ?url inside the lib would inline the asset into every bundle)');
   if (!Array.isArray(variants) || !variants.length) throw new Error('createFacadeKit: `variants` must be a non-empty array of glTF node names');
@@ -143,7 +150,13 @@ export function createFacadeKit({
      originals would otherwise have no owner and never be disposed (found by an adversarial pass,
      2026-08-22). They are GLB-created, so they are ours to free. */
   const srcMats = [];
-  let ownedMat = null;              // the shared material, when the caller supplied one to clone
+  /* A-LITWINDOWS: was ONE shared clone; now one clone PER VARIANT, because `litWindows` needs a
+     per-variant uniform (the course count) and a uniform is a property of a material. Five
+     materials instead of one costs ZERO extra draw calls — box-arena already draws one
+     InstancedMesh per variant — and they share ONE compiled program, because every patch on them
+     carries the same `customProgramCacheKey`. This is citygen's existing arrangement (a
+     vectorizeTower material per building, all keyed 'lgr-vec-tower'), not a new one. */
+  const ownedMats = [];             // the per-variant clones, when the caller supplied a material
 
   const ready = new GLTFLoader().loadAsync(url).then((gltf) => {
     for (const name of variants) {
@@ -171,10 +184,18 @@ export function createFacadeKit({
        the kit's baked albedo x AO multiplies over it. With none, each variant keeps its own GLB
        material, which is the flat vertex-coloured look and needs no renderer to exist. */
     if (material) {
-      ownedMat = material.clone();
-      ownedMat.vertexColors = true;
-      for (const p of parts) p.material = ownedMat;
+      for (const p of parts) {
+        const m = material.clone();
+        m.vertexColors = true;
+        ownedMats.push(m);
+        p.material = m;
+      }
     }
+    /* THE NIGHT PATCH GOES ON LAST, so it chains over whatever the material already carried rather
+       than being overwritten by it. `parts[k]` is `variants[k]` is `courses[k]` — the three lists
+       are index-locked by the constructor's own length check, so the rung handed to each material
+       is that material's own. */
+    if (litWindows) parts.forEach((p, k) => litWindows.apply(p.material, { courses: courses[k] }));
     mode = 'kit';
     return mode;
   }).catch((e) => {
@@ -186,7 +207,8 @@ export function createFacadeKit({
        consumer reading `variants` cannot be told a different story from the one `mode` tells. */
     for (const p of parts) p.geometry.dispose();
     for (const m of srcMats) m.dispose();
-    parts.length = 0; srcMats.length = 0;
+    for (const m of ownedMats) m.dispose();     // A-LITWINDOWS: the per-variant clones are ours too
+    parts.length = 0; srcMats.length = 0; ownedMats.length = 0;
     mode = 'failed';
     return mode;
   });
@@ -210,8 +232,8 @@ export function createFacadeKit({
          second call is a no-op rather than a double-free. */
       for (const p of parts) p.geometry.dispose();
       for (const m of srcMats) if (m !== material) m.dispose();
-      if (ownedMat) { ownedMat.dispose(); ownedMat = null; }
-      parts.length = 0; srcMats.length = 0;
+      for (const m of ownedMats) m.dispose();
+      parts.length = 0; srcMats.length = 0; ownedMats.length = 0;
     },
   };
 }

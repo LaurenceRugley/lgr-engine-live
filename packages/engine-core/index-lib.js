@@ -144,6 +144,8 @@ export { createTreeKit, assignTreeVariants, makeTreeTints, hashTreeInstances, TR
 // A-FACADE — modeled facade kit loader + the height→variant assignment (pure helpers: receipts + tests)
 export { createFacadeKit, assignFacadeVariants, facadeFitReport, storeyU,
   FACADE_KIT_VARIANTS, FACADE_KIT_COURSES, FACADE_BODY_KINDS } from './src/createFacadeKit.js';
+// A-LITWINDOWS — night glow on the facade kit's existing glazing (opt-in; imports only three)
+export { createLitWindows, litCountFor, lwHash, lwKey } from './src/lit-windows.js';
 export { createFlowField } from './src/createFlowField.js';
 export { createBallistics } from './src/createBallistics.js';
 export { createFirstPersonWalker } from './src/createFirstPersonWalker.js';
