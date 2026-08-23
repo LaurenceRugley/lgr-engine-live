@@ -37,9 +37,9 @@
    ------------------------------------------------------------------------------------------------ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lwHash, lwKey, litCountFor, createLitWindows } from './lit-windows.js';
+import { lwHash, lwKey, litCountFor, createLitWindows, LW_M, LW_A, LW_C, LW_WRAP } from './lit-windows.js';
 
-const M = 8191;
+const M = LW_M;   // READ from the module, never re-typed — see the exactness test's own note
 
 test('lwHash is bit-identical under float64 and a float32 simulation (the countability guarantee)', () => {
   let n = 0;
@@ -64,12 +64,17 @@ test('lwHash is bit-identical under float64 and a float32 simulation (the counta
 test('every LCG intermediate stays below 2^24 — the structural reason exactness holds', () => {
   /* The widest step is h * 179 + v with h and v both at their ceiling. Checked as arithmetic rather
      than sampled, because this is the property the float32 argument rests on. */
-  const worst = (M - 1) * 179 + (M - 1);
+  /* READ FROM THE MODULE. This used to re-type `8191` and `179` as literals, so the assertion was a
+     tautology over two constants that never touched lit-windows.js — the refutation raised LW_A to
+     4096 and this test PASSED, which is precisely the edit its comment claims to catch. */
+  const worst = (LW_M - 1) * LW_A + (LW_M - 1);
   assert.ok(worst < 2 ** 24, `LCG can exceed float32's exact-integer range: ${worst}`);
+  assert.ok(LW_C < LW_M, `the increment must stay inside the modulus: ${LW_C} vs ${LW_M}`);
+  assert.equal(LW_WRAP % LW_M, 0, 'the wrap must be a whole multiple of the modulus, or the key skews');
   /* And the key builder's own widest value, for a world coordinate well past any arena this repo
      ships (2047 u is ~12 km at 6 m/u). */
-  assert.ok(Math.abs(Math.floor(-2047 * 16) + 32764) < 2 ** 24);
-  assert.equal(lwKey(0), 32764 % M);
+  assert.ok(Math.abs(Math.floor(-2047 * 16) + LW_WRAP) < 2 ** 24);
+  assert.equal(lwKey(0), LW_WRAP % LW_M);
   /* Two buildings 2.4 u apart (this city's tightest gap) MUST land on different keys, or they wear
      the same window pattern and the city reads as copy-paste. */
   assert.notEqual(lwKey(10.0), lwKey(12.4));

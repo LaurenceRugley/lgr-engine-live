@@ -94,10 +94,15 @@ import * as THREE from 'three';
    the widest intermediate is 8190 * 179 + 8190 = 1,474,200 — two orders of magnitude below
    float32's 16,777,216 exact-integer ceiling. That headroom is the whole reason the GPU and the
    CPU can be asserted to agree rather than hoped to. */
-const LW_M = 8191;      // 2^13 - 1, prime
-const LW_A = 179;       // the LCG multiplier
-const LW_C = 71;        // the increment on the final round
-const LW_WRAP = 32764;  // 4 * LW_M — lifts a signed world key positive before the modulus
+/* EXPORTED so the test can read the REAL numbers instead of re-typing them. The exactness test used
+   to declare its own `const M = 8191` and its own literal `179`, which made its assertion a tautology
+   over two literals that never touched this module — A-LITWINDOWS's refutation proved it dead by
+   raising LW_A to 4096 (exactly the edit that test's comment says it guards against) and watching it
+   PASS. A guard that cannot see the thing it guards is decoration. */
+export const LW_M = 8191;      // 2^13 - 1, prime
+export const LW_A = 179;       // the LCG multiplier
+export const LW_C = 71;        // the increment on the final round
+export const LW_WRAP = 32764;  // 4 * LW_M — lifts a signed world key positive before the modulus
 
 /* The CPU twin of `lwHash` in the fragment shader below. Inputs must already be integers in
    [0, LW_M). `fr` is `Math.fround` when simulating float32 and the identity otherwise — running it
